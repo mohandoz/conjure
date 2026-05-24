@@ -36,7 +36,7 @@ Examples of unacceptable behavior:
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders at <mohannad.a@protonmail.com>.
+reported to the community leaders at <33397039+mohandoz@users.noreply.github.com>.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

@@ -2,7 +2,7 @@
 
 ## Reporting
 
-For security issues with Conjure itself, email <mohannad.a@protonmail.com>.
+For security issues with Conjure itself, email <33397039+mohandoz@users.noreply.github.com>.
 Do NOT file a public GitHub issue.
 
 ## Supply-chain trust

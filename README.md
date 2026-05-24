@@ -284,6 +284,6 @@ See [`planning/ROADMAP.md`](planning/ROADMAP.md).
 **Conjure** — *Code grows on Conjure the way a vine grows on a garden frame:
 structured but free.*
 
-Made with ⚙ by [Mohannad Ahmad](mailto:mohannad.a@protonmail.com)
+Made with ⚙ by [mohandoz](https://github.com/mohandoz)
 
 </div>
