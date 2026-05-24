@@ -263,7 +263,9 @@ See [`planning/ROADMAP.md`](planning/ROADMAP.md).
 
 ## 🌟 Star history
 
-[![Star History Chart](https://api.star-history.com/svg?repos=mohandoz/conjure&type=Date)](https://star-history.com/#mohandoz/conjure&Date)
+[View live star history chart →](https://star-history.com/#mohandoz/conjure&Date)
+
+<sub>Inline chart will appear here after the repo crosses ~10 stars (star-history.com rate-limits anonymous renders for fresh repos).</sub>
 
 ## 🙏 Built on
 
