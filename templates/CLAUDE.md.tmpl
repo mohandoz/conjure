@@ -1,0 +1,58 @@
+# <PROJECT_NAME> — Claude Working Notes
+
+<ONE_LINE_DESCRIPTION>. Stack: <stack>. Entry point: <path>.
+
+## NON-NEGOTIABLE RULES
+
+- NEVER commit files matching: <patterns — e.g. `*.env`, `*.pem`, `**/secrets/**`>.
+- WHEN editing <protected/path>, ASK before changing.
+- WHEN adding a dependency, FIRST check if <shared-package> already provides it.
+- NEVER bypass <hook|test|lint> with --no-verify or --force.
+- <project-specific rule>.
+
+## Build, test, run
+
+| Goal | Command |
+| --- | --- |
+| Build | `<cmd>` |
+| Run tests | `<cmd>` |
+| Run locally | `<cmd>` |
+| Format | `<cmd>` |
+| Lint | `<cmd>` |
+| Deploy (dry-run) | `<cmd>` |
+
+## Architecture (one-paragraph)
+
+<stack> <project-type>. <Layering rule in one sentence — e.g. "Controllers
+depend only on api/services interfaces; never call repos directly.">
+
+## Routing (load only what's needed)
+
+For detail on a topic, read the matching skill body. Do NOT bulk-load.
+
+- For codebase navigation / "what depends on X" → skills/code-graph.
+- For framework docs lookup → skills/docs-lookup.
+- For architecture and package layout → skills/architecture.
+- For domain entities → skills/domain-model.
+- For REST endpoints → skills/api-routes.
+- For data access (repos/DAOs) → skills/data-access.
+- For messaging (Kafka/JMS/queues) → skills/messaging.
+- For schema migrations → skills/database-schema.
+- For build/test/deploy details → skills/build-deploy.
+- For testing conventions → skills/testing.
+- For debugging workflows → skills/debugging.
+- For deep dive on <hot-subsystem> → skills/<subsystem>.
+
+## Conventions
+
+- <Layering rule with concrete example>.
+- <Naming rule>.
+- <Error-handling pattern — what to throw, what to catch>.
+- <Test pattern — fixture location, golden file convention>.
+- <Ad-hoc script language preference — Python? Bash? Node?>.
+- <Anything Claude got wrong twice that's now a rule>.
+
+## Repo hygiene
+
+Files Claude must NOT commit: <patterns — workbench, secrets, fixtures, generated>.
+Untracked files at repo root are personal workbench unless explicitly added.
