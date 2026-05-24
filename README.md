@@ -6,11 +6,12 @@
 
 *A lattice that supports growth without dictating shape.*
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](VERSION)
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](.github/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/mohandoz/conjure?color=yellow)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/mohandoz/conjure?sort=semver&color=blue)](https://github.com/mohandoz/conjure/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/mohandoz/conjure/ci.yml?branch=main&label=CI)](https://github.com/mohandoz/conjure/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-112%20passing-brightgreen.svg)](tests/run.sh)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-%E2%89%A52.1.117-purple.svg)](https://code.claude.com/)
+[![Stars](https://img.shields.io/github/stars/mohandoz/conjure?style=social)](https://github.com/mohandoz/conjure/stargazers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 [Quickstart](#-quickstart) •
@@ -262,9 +263,7 @@ See [`planning/ROADMAP.md`](planning/ROADMAP.md).
 
 ## 🌟 Star history
 
-<!-- Once on GitHub:
 [![Star History Chart](https://api.star-history.com/svg?repos=mohandoz/conjure&type=Date)](https://star-history.com/#mohandoz/conjure&Date)
--->
 
 ## 🙏 Built on
 
