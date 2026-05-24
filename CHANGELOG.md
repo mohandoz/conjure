@@ -5,6 +5,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Logo at `.github/assets/logo.svg` — binding-circle sigil with four
+  inscriptions (CLAUDE.md / Skills / Subagents / Hooks) and a chained
+  central `C`. Embedded in README hero.
+- Brand voice: *"Bind the daemon. Ship the code."* — occult/harness
+  metaphor for the four-layer binding model.
+
 ## [0.2.1] — 2026-05-24
 
 ### Added

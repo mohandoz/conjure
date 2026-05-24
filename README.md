@@ -1,10 +1,12 @@
 <div align="center">
 
-# 🪴 Conjure
+<img src=".github/assets/logo.svg" alt="Conjure" width="180"/>
 
-### The production-grade Claude Code harness kit
+# Conjure
 
-*A lattice that supports growth without dictating shape.*
+### Bind the daemon. Ship the code.
+
+*The production-grade harness kit for Claude Code — the sigil that keeps your AI inside the circle.*
 
 [![License: MIT](https://img.shields.io/github/license/mohandoz/conjure?color=yellow)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/mohandoz/conjure?sort=semver&color=blue)](https://github.com/mohandoz/conjure/releases)
@@ -47,7 +49,7 @@ foot-guns, cross-platform Node.js hooks.
 
 ## ✨ Why Conjure?
 
-- 🪴 **Four-layer harness** — CLAUDE.md (advisory) + Skills (lazy) + Subagents (isolated) + Hooks (deterministic). Each layer does what it's best at.
+- 🕯️ **Four-layer binding circle** — CLAUDE.md (advisory) + Skills (lazy) + Subagents (isolated) + Hooks (deterministic). Four sigils, one bound daemon.
 - 🧠 **Knowledge-graph aware** — first-class graphify integration. Persistent codebase knowledge that survives sessions.
 - 🛡 **Safe migrations** — backup-before-mutate from Cursor, Aider, Continue, GitHub Copilot, Windsurf, and existing `.claude/` configs.
 - 🎯 **9 stack profiles** — Java-Spring, Python-FastAPI, TS-Next, Rust-Axum, Go-Gin, Node-Nest, Monorepo, Polyglot, Data Science.
@@ -68,7 +70,7 @@ curl -sSL https://raw.githubusercontent.com/mohandoz/conjure/main/install.sh | b
 cd /path/to/your/repo
 conjure init existing --profile=python-fastapi .
 
-# 3. Open Claude Code, paste PROMPT.md, watch the magic
+# 3. Open Claude Code, paste PROMPT.md, watch the daemon obey
 ```
 
 That's it. Run `conjure audit` anytime to verify health.
