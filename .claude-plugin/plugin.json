@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "conjure",
+  "version": "0.2.0",
+  "description": "Production-grade Claude Code harness kit. Lazy-loaded skills, isolated subagents, deterministic hooks, knowledge-graph integration, multi-stack profiles, compliance overlays, safe migration from other AI tools.",
+  "author": "Mohannad Ahmad",
+  "license": "MIT",
+  "repository": "https://github.com/<org>/conjure",
+  "homepage": "https://github.com/<org>/conjure#readme",
+  "keywords": [
+    "claude-code",
+    "harness",
+    "skills",
+    "hooks",
+    "subagents",
+    "knowledge-graph",
+    "graphify",
+    "lazy-loading",
+    "scaffold",
+    "migration"
+  ],
+  "engines": {
+    "claude-code": ">=2.1.117"
+  },
+  "commands": {
+    "conjure": "cli/conjure"
+  },
+  "skills": [
+    "templates/skills/code-graph",
+    "templates/skills/docs-lookup",
+    "templates/skills/web-research",
+    "templates/skills/ast-search",
+    "templates/skills/repo-pack",
+    "templates/skills/sql-explorer"
+  ],
+  "agents": [
+    "templates/agents/code-explorer.md",
+    "templates/agents/test-writer.md",
+    "templates/agents/migration-writer.md",
+    "templates/agents/security-auditor.md",
+    "templates/agents/doc-writer.md",
+    "templates/agents/diff-reviewer.md"
+  ],
+  "mcpServers": {
+    "_note": "Conjure suggests but does not bundle MCP servers. See reference/MCP-SERVERS.md."
+  },
+  "minimumClaudeCodeVersion": "2.1.117"
+}

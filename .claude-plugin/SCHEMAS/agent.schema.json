@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://conjure.dev/schemas/agent.schema.json",
+  "title": "Conjure Subagent YAML Frontmatter",
+  "type": "object",
+  "required": ["name", "description"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,40}$" },
+    "description": { "type": "string", "minLength": 30, "maxLength": 400 },
+    "tools": { "type": "string", "description": "Comma-separated tool allowlist." },
+    "model": { "type": "string", "enum": ["sonnet", "opus", "haiku"] },
+    "memory": { "type": "string", "enum": ["user", "project", "local", "none"] }
+  }
+}

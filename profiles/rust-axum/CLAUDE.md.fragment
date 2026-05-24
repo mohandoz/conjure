@@ -1,0 +1,22 @@
+
+<!-- profile:rust-axum -->
+## Stack profile: Rust + Axum + cargo
+
+- Edition: 2024. MSRV pinned in `Cargo.toml rust-version`.
+- WHEN adding deps, use exact versions in `Cargo.toml` (`=1.2.3`) for libs; minor pin for bins.
+- NEVER use `unwrap()` in production paths — use `?` + `anyhow::Result` or typed errors.
+- WHEN spawning tasks, prefer `tokio::spawn` + structured `JoinSet` over fire-and-forget.
+- NEVER use `block_on` inside an async function.
+- WHEN writing handlers, return `Result<Json<T>, AppError>` — central error converter to HTTP.
+- WHEN unsafe code is required, comment WHY + invariants; isolate in `unsafe { ... }` block.
+
+### Build/test/run
+| Goal | Command |
+| --- | --- |
+| Build | `cargo build --release` |
+| Run | `cargo run` |
+| Tests | `cargo nextest run` |
+| Format | `cargo fmt --all` |
+| Lint | `cargo clippy --all-targets -- -D warnings` |
+| Deps check | `cargo deny check` |
+| Vuln scan | `cargo audit` |

@@ -1,0 +1,10 @@
+
+<!-- compliance:gdpr -->
+## Compliance: GDPR
+
+- WHEN collecting personal data, document lawful basis (Art. 6) in `docs/compliance/data-processing.md`.
+- WHEN building a data-export or delete feature, ensure data-subject rights (Arts. 15-22) flow end-to-end.
+- NEVER transfer personal data outside the EEA without SCCs or adequacy decision.
+- Retention: every personal-data store must have a documented retention period + automatic deletion job.
+- Breach notification: DPO informed within 72h; user-facing notification if high risk.
+- Consent: granular, withdrawable, logged.

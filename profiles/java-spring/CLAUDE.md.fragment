@@ -1,0 +1,22 @@
+
+<!-- profile:java-spring -->
+## Stack profile: Java 17 + Spring Boot + Gradle
+
+- WHEN adding a dependency, prefer `implementation` over `compile`; `testImplementation` for tests.
+- WHEN writing JPA entities, extend the shared base (e.g. `JpaVersioned`) — never roll your own audit columns.
+- NEVER use `Optional<X>` for entity fields; use nullable + `@Nullable`.
+- WHEN writing tests, use `@SpringBootTest` only when necessary — prefer `@DataJpaTest`, `@WebMvcTest`, plain JUnit.
+- WHEN adding a `@RestController`, return DTOs not entities; central exception handler converts `api.domain.exception.*` to HTTP.
+- WHEN editing migrations, run `./gradlew updateTestingRollback` before commit.
+- WHEN writing ad-hoc data loaders, prefer Python (psycopg2 + execute_values) over Spring Batch unless ingestion is recurring.
+
+### Build/test/run
+| Goal | Command |
+| --- | --- |
+| Build | `./gradlew build` |
+| Build (no tests) | `./gradlew build -x test` |
+| Unit | `./gradlew unitTestOnly` |
+| Integration | `./gradlew integrationTest` |
+| Run local | `./gradlew bootRun` |
+| Lint | `./gradlew checkstyleMain` |
+| Migrate | `./gradlew update` |

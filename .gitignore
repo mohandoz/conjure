@@ -1,0 +1,19 @@
+# Conjure repo .gitignore
+
+# Test artifacts
+tests/output/
+tests/tmp/
+tests/fixtures/*/.claude.backup-*/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Build / dist
+dist/
+build/
+
+# Logs
+*.log

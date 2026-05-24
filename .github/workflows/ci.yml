@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends jq shellcheck
+
+      - name: Lint shell scripts
+        run: |
+          find cli scripts migrations profiles compliance templates/hooks tests -name '*.sh' \
+            -exec shellcheck -S warning -e SC2086,SC2046 {} +
+
+      - name: Validate JSON
+        run: |
+          find templates .claude-plugin -name '*.json' \
+            -exec jq empty {} \;
+
+      - name: Run kit test suite
+        run: bash tests/run.sh
+
+      - name: Audit script smoke
+        run: bash scripts/audit-setup.sh . || true
+
+  audit-on-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scaffold fixture
+        run: |
+          mkdir -p /tmp/fixture && cd /tmp/fixture
+          git init -q
+          bash $GITHUB_WORKSPACE/scripts/init-project.sh new /tmp/fixture
+      - name: Audit fixture
+        run: |
+          bash $GITHUB_WORKSPACE/scripts/audit-setup.sh /tmp/fixture
+          # Allow warnings (expected on fresh fixture); fail only on FAIL
+          rc=$?
+          [ "$rc" -le 1 ]

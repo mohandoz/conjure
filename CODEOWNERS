@@ -1,0 +1,25 @@
+# Conjure CODEOWNERS — review routing.
+# Format: pattern <space> owner1 owner2 ...
+# Replace placeholders with real handles.
+
+# Default — kit maintainers
+*                              @maintainers
+
+# Core philosophy / sizing — extra scrutiny
+reference/BEST-PRACTICES.md    @maintainers @core-team
+reference/SIZING.md            @maintainers @core-team
+PROMPT.md                      @maintainers @core-team
+
+# Migration logic — high blast-radius
+migrations/                    @maintainers @core-team
+
+# CLI behavior — user-facing
+cli/                           @maintainers
+
+# Security-sensitive
+SECURITY.md                    @maintainers @security-team
+templates/hooks/               @maintainers @security-team
+templates/skills/security-review/  @maintainers @security-team
+
+# Plugin manifest — affects distribution
+.claude-plugin/                @maintainers

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "conjure",
+  "displayName": "Conjure — Claude Code Harness Kit",
+  "shortDescription": "Production-grade init kit. Lazy-loaded skills, hooks, subagents, knowledge graph, stack profiles, safe migration.",
+  "longDescription": "Conjure is a four-layer harness for Claude Code projects: CLAUDE.md (advisory) + Skills (lazy progressive disclosure) + Subagents (isolated context) + Hooks (deterministic enforcement). Integrates graphify for persistent knowledge graphs, context7 for live framework docs, ast-grep for structural search, repomix for full-codebase context, Postgres MCP for schema introspection. Ships with 8 stack profiles (Java-Spring, Python-FastAPI, TS-Next, Rust-Axum, Go-Gin, Node-Nest, Monorepo, Polyglot, Data Science), 4 compliance overlays (HIPAA, SOC 2, GDPR, PCI), and safe migration paths from Cursor, Aider, Continue, GitHub Copilot, Windsurf, and existing hand-rolled .claude/ configs. Built on 2026 best practices: ≤100-line CLAUDE.md, trigger-action rule format, compaction-aware ordering, compound-engineering loop.",
+  "version": "0.2.0",
+  "categories": ["scaffolding", "workflow", "developer-tools", "documentation"],
+  "tags": ["scaffold", "harness", "skills", "hooks", "subagents", "knowledge-graph", "migration", "stack-profile", "compliance"],
+  "icon": "conjure-logo.svg",
+  "screenshots": [],
+  "homepage": "https://github.com/<org>/conjure",
+  "repository": "https://github.com/<org>/conjure",
+  "issues": "https://github.com/<org>/conjure/issues",
+  "license": "MIT",
+  "author": {
+    "name": "Mohannad Ahmad",
+    "email": "mohannad.a@protonmail.com"
+  },
+  "compatibility": {
+    "claudeCodeMin": "2.1.117",
+    "platforms": ["darwin", "linux", "wsl"]
+  },
+  "install": {
+    "type": "git",
+    "url": "https://github.com/<org>/conjure.git",
+    "branch": "main"
+  }
+}

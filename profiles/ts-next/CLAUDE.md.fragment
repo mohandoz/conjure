@@ -1,0 +1,23 @@
+
+<!-- profile:ts-next -->
+## Stack profile: TypeScript + Next.js 15 + pnpm
+
+- Package manager: pnpm. Workspace defined in `pnpm-workspace.yaml`.
+- WHEN adding deps, use `pnpm add` (not npm/yarn). For monorepo, use `--filter`.
+- NEVER use `any` — use `unknown` + narrow, or define a real type.
+- WHEN handling user input, validate with zod at the boundary.
+- NEVER fetch in a Server Component without `cache:` directive evaluated.
+- WHEN writing a Client Component, mark `"use client"` at TOP of file.
+- WHEN adding env var, document in `.env.example` AND in `env.ts` schema.
+- NEVER mix Server Actions with client-side state updates without `revalidatePath`.
+
+### Build/test/run
+| Goal | Command |
+| --- | --- |
+| Install | `pnpm install --frozen-lockfile` |
+| Dev | `pnpm dev` |
+| Build | `pnpm build` |
+| Tests | `pnpm test` (vitest) |
+| Lint | `pnpm lint` (eslint) |
+| Format | `pnpm format` (prettier) |
+| Type-check | `pnpm tsc --noEmit` |

@@ -1,0 +1,23 @@
+
+<!-- profile:python-fastapi -->
+## Stack profile: Python 3.11+ + FastAPI + uv
+
+- Package manager: `uv` (NOT pip / poetry). All deps via `uv add`.
+- Python version pinned in `.python-version` + `pyproject.toml requires-python`.
+- WHEN adding a route, use Pydantic models for request/response — never raw dicts.
+- WHEN writing async code, NEVER block (no `time.sleep`, no sync DB calls inside async handlers).
+- WHEN writing tests, prefer `pytest-asyncio` + `httpx.AsyncClient` over `TestClient`.
+- WHEN doing DB work, use `asyncpg` directly OR SQLAlchemy 2.0 async — not 1.x patterns.
+- NEVER use `eval`, `exec`, `pickle.loads` on untrusted input.
+- WHEN writing ad-hoc scripts, use `uv run` to avoid env-pollution.
+
+### Build/test/run
+| Goal | Command |
+| --- | --- |
+| Install | `uv sync` |
+| Run | `uv run uvicorn app.main:app --reload` |
+| Tests | `uv run pytest` |
+| Lint | `uv run ruff check .` |
+| Format | `uv run ruff format .` |
+| Type-check | `uv run mypy .` |
+| Migration | `uv run alembic upgrade head` |

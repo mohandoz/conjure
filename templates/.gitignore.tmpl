@@ -1,0 +1,19 @@
+# Patterns to add to .gitignore in Conjure-managed projects.
+# Append these to your project's .gitignore.
+
+# Conjure-managed runtime state (per-project, not portable)
+.claude/COMPOUND-CANDIDATES.md
+.claude/MIGRATION-REPORT*.md
+.claude/.session-context
+
+# Conjure backups (delete after confirming changes)
+.claude.backup-*/
+
+# graphify output (large; rebuild via `conjure refresh-graph`)
+graphify-out/
+
+# repomix output
+repomix-output.*
+
+# Local-only Claude permissions overrides
+.claude/settings.local.json

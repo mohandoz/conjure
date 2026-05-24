@@ -1,0 +1,11 @@
+
+<!-- compliance:pci -->
+## Compliance: PCI DSS v4.0
+
+- NEVER store full PAN unencrypted; tokenize or vault.
+- NEVER log full PAN — mask to first 6 + last 4 max.
+- WHEN expanding scope (new component touching cardholder data), document in scope map.
+- WHEN designing networks, isolate CDE (cardholder data environment) via segmentation.
+- Quarterly ASV scan + annual penetration test scheduled.
+- WHEN handling sensitive auth data (CVV, PIN, magnetic stripe), never store post-authorization.
+- Encryption keys rotated annually; managed via approved KMS.

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://conjure.dev/schemas/skill.schema.json",
+  "title": "Conjure Skill YAML Frontmatter",
+  "description": "Validates the YAML frontmatter block at the top of .claude/skills/<name>/SKILL.md",
+  "type": "object",
+  "required": ["name", "description"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,40}$",
+      "description": "Kebab-case; 2-40 chars; must match the parent directory name."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 30,
+      "maxLength": 400,
+      "description": "One sentence; names concrete trigger user phrases. Bad if shorter than 30 chars."
+    },
+    "allowed-tools": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Optional tool allowlist for this skill's invocations."
+    },
+    "model": {
+      "type": "string",
+      "enum": ["sonnet", "opus", "haiku"],
+      "description": "Optional model override for this skill."
+    },
+    "memory": {
+      "type": "string",
+      "enum": ["user", "project", "local", "none"],
+      "description": "Scope of memory inheritance when skill body is loaded."
+    }
+  }
+}

@@ -1,0 +1,13 @@
+
+<!-- compliance:hipaa -->
+## Compliance: HIPAA (PHI handling)
+
+- NEVER log PHI. Approved logger redacts: name, MRN, SSN, DOB, address, phone, email, account number.
+- WHEN handling PHI, encrypt at rest (AES-256+) and in transit (TLS 1.3+).
+- WHEN exposing an API endpoint that returns PHI, AuthN + AuthZ + audit log MANDATORY.
+- WHEN writing to a new datastore, verify BAA coverage with the vendor — list approved stores in `docs/compliance/HIPAA-CONTROLS.md`.
+- NEVER include real PHI in test fixtures — use Faker / synthetic generators.
+- WHEN deleting PHI, document basis (right-to-delete, retention expiry) in audit log.
+- Audit log retention: minimum 6 years.
+
+See `docs/compliance/HIPAA-CONTROLS.md` for the full control catalog.

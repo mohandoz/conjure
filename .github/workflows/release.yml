@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify VERSION matches tag
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          ver=$(cat VERSION)
+          if [ "$tag" != "$ver" ]; then
+            echo "Tag ($tag) does not match VERSION ($ver)"; exit 1
+          fi
+
+      - name: Extract CHANGELOG entry
+        id: cl
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          awk -v ver="$tag" '
+            $0 ~ "^## \\[" ver "\\]" { capture=1; next }
+            capture && /^## \[/      { exit }
+            capture                  { print }
+          ' CHANGELOG.md > release-notes.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          draft: false
+          prerelease: false

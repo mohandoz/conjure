@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# conjure — unified CLI for the Conjure Claude Code harness kit.
+#
+# Subcommands:
+#   init [new|existing|migrate] [--profile=<stack>] [--dry-run] [target]
+#       Scaffold .claude/ for a project.
+#   migrate [from-claude|from-cursor|from-aider|from-continue|from-copilot]
+#       Migrate an existing AI-assistant config to Conjure format.
+#   audit [target]
+#       Health-check the .claude/ setup.
+#   update [--check|--apply] [target]
+#       Update a project's .claude/ to current kit version (with diff preview).
+#   refresh-graph [target] [--full|--update]
+#       Rebuild/update graphify knowledge graph.
+#   install-mcp
+#       Install recommended MCP servers.
+#   version
+#       Print Conjure version.
+#   help [<subcommand>]
+#       Show help.
+
+set -uo pipefail
+
+CONJURE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+CONJURE_VERSION="$(cat "$CONJURE_HOME/VERSION" 2>/dev/null || echo unknown)"
+
+usage() {
+  cat <<EOF
+conjure $CONJURE_VERSION — Claude Code harness kit
+Home: $CONJURE_HOME
+
+Usage:
+  conjure init [new|existing|migrate] [--profile=<stack>] [--dry-run] [target]
+  conjure migrate <source> [target]            (sources: from-claude, from-cursor,
+                                                from-aider, from-continue, from-copilot)
+  conjure audit [target]
+  conjure update [--check|--apply] [target]
+  conjure refresh-graph [target] [--full|--update]
+  conjure install-mcp
+  conjure version
+  conjure help [<subcommand>]
+
+Profiles available: $(ls "$CONJURE_HOME/profiles" 2>/dev/null | tr '\n' ' ')
+
+Run 'conjure help <subcommand>' for details.
+EOF
+}
+
+cmd_version() { echo "conjure $CONJURE_VERSION"; }
+
+cmd_init() {
+  local mode="existing" profile="" dryrun=0 target="$(pwd)"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      new|existing|migrate) mode="$1" ;;
+      --profile=*)          profile="${1#--profile=}" ;;
+      --dry-run)            dryrun=1 ;;
+      --help|-h)            grep -A3 '^  conjure init' <<<"$(usage)"; return 0 ;;
+      *)                    target="$1" ;;
+    esac
+    shift
+  done
+
+  echo "▸ conjure init: mode=$mode profile=${profile:-none} target=$target dry_run=$dryrun"
+
+  # Pre-flight checks
+  cmd_preflight || return 1
+
+  if [ "$mode" = "migrate" ]; then
+    cmd_migrate from-claude "$target" "$dryrun"
+    return $?
+  fi
+
+  bash "$CONJURE_HOME/scripts/init-project.sh" "$mode" "$target"
+
+  # Apply stack profile overlay if specified
+  if [ -n "$profile" ] && [ -d "$CONJURE_HOME/profiles/$profile" ]; then
+    echo "▸ Applying profile: $profile"
+    bash "$CONJURE_HOME/profiles/$profile/apply.sh" "$target" "$dryrun"
+  fi
+
+  # Stamp version
+  echo "$CONJURE_VERSION" > "$target/.claude/.conjure-version"
+  echo "▸ Pinned conjure version: $CONJURE_VERSION"
+}
+
+cmd_migrate() {
+  local source="${1:-}" target="${2:-$(pwd)}" dryrun="${3:-0}"
+  [ -z "$source" ] && { echo "Usage: conjure migrate <source> [target]"; return 1; }
+
+  local script="$CONJURE_HOME/migrations/$source/migrate.sh"
+  if [ ! -f "$script" ]; then
+    echo "✗ No migration script for source: $source"
+    echo "  Available: $(ls "$CONJURE_HOME/migrations" 2>/dev/null | tr '\n' ' ')"
+    return 1
+  fi
+
+  # Backup target's existing .claude/ before any mutation
+  if [ -d "$target/.claude" ]; then
+    local ts; ts="$(date +%Y%m%d-%H%M%S)"
+    local backup="$target/.claude.backup-$ts"
+    echo "▸ Backing up existing .claude/ → $backup"
+    [ "$dryrun" = 0 ] && cp -R "$target/.claude" "$backup"
+  fi
+
+  CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" bash "$script" "$target"
+}
+
+cmd_audit() {
+  local target="${1:-$(pwd)}"
+  bash "$CONJURE_HOME/scripts/audit-setup.sh" "$target"
+}
+
+cmd_update() {
+  local action="--check" target="$(pwd)"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --check|--apply) action="$1" ;;
+      *)               target="$1" ;;
+    esac
+    shift
+  done
+
+  local pinned="unknown"
+  [ -f "$target/.claude/.conjure-version" ] && pinned="$(cat "$target/.claude/.conjure-version")"
+
+  echo "Project pinned to:  $pinned"
+  echo "Current Conjure:    $CONJURE_VERSION"
+
+  if [ "$pinned" = "$CONJURE_VERSION" ]; then
+    echo "✓ Up to date"
+    return 0
+  fi
+
+  # Show diff against current templates
+  echo
+  echo "▸ Computing diff against current templates..."
+  local diff_count=0
+  for f in $(find "$CONJURE_HOME/templates/skills" -name SKILL.md); do
+    local rel="${f#$CONJURE_HOME/templates/}"
+    local proj="$target/.claude/${rel%/SKILL.md}/SKILL.md"
+    if [ -f "$proj" ] && ! diff -q "$f" "$proj" >/dev/null 2>&1; then
+      echo "  ~ ${rel%/SKILL.md}/SKILL.md (changed upstream)"
+      diff_count=$((diff_count+1))
+    fi
+  done
+
+  if [ "$action" = "--check" ]; then
+    echo
+    echo "$diff_count file(s) differ. Run 'conjure update --apply' to interactively merge."
+    echo "Backup-before-mutate is automatic."
+    return 0
+  fi
+
+  # --apply: interactive merge (placeholder; production version uses diff tool)
+  echo "▸ Interactive update not yet implemented in v$CONJURE_VERSION."
+  echo "  For now: review CHANGELOG.md, hand-merge changes, then:"
+  echo "  echo '$CONJURE_VERSION' > $target/.claude/.conjure-version"
+}
+
+cmd_refresh_graph() {
+  bash "$CONJURE_HOME/scripts/refresh-graph.sh" "$@"
+}
+
+cmd_install_mcp() {
+  bash "$CONJURE_HOME/scripts/install-mcp-stack.sh"
+}
+
+cmd_preflight() {
+  local missing=()
+  command -v git >/dev/null 2>&1 || missing+=(git)
+  command -v jq  >/dev/null 2>&1 || missing+=(jq)
+  command -v rg  >/dev/null 2>&1 || missing+=(ripgrep)
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo "⚠ Pre-flight: missing recommended tools: ${missing[*]}"
+    echo "  Install via: brew install ${missing[*]}"
+    echo "  Continuing anyway..."
+  fi
+
+  # Optional power tools
+  for tool in graphify ast-grep gitleaks repomix; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "  (optional) $tool not installed — see reference/TOOLS-CATALOG.md"
+    fi
+  done
+
+  return 0
+}
+
+cmd_help() {
+  if [ -n "${1:-}" ]; then
+    sed -n "/^cmd_$1()/,/^}/p" "$0" | head -20
+  else
+    usage
+  fi
+}
+
+# Dispatch
+case "${1:-help}" in
+  init)            shift; cmd_init "$@"            ;;
+  migrate)         shift; cmd_migrate "$@"         ;;
+  audit)           shift; cmd_audit "$@"           ;;
+  update)          shift; cmd_update "$@"          ;;
+  refresh-graph)   shift; cmd_refresh_graph "$@"   ;;
+  install-mcp)     shift; cmd_install_mcp "$@"     ;;
+  version|-v|--version) cmd_version                ;;
+  help|-h|--help)  shift; cmd_help "$@"            ;;
+  *)               echo "Unknown command: $1"; usage; exit 1 ;;
+esac

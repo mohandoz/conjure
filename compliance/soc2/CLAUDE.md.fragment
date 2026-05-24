@@ -1,0 +1,10 @@
+
+<!-- compliance:soc2 -->
+## Compliance: SOC 2 Type II
+
+- WHEN making a change that affects access control, document in `docs/adr/` and reference the SOC 2 control.
+- WHEN deploying to prod, change must be: PR-reviewed (≥1 approver) + CI green + post-deploy verification.
+- NEVER share credentials in plaintext (Slack, email, tickets). Use secrets manager.
+- WHEN adding a new vendor processing customer data, vendor security review required.
+- Audit logs: append-only, retained ≥1 year.
+- Incident: trigger runbook within 1 hour of detection.

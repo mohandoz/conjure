@@ -1,0 +1,20 @@
+
+<!-- profile:data-science -->
+## Stack profile: Data science (Python + notebooks + dbt)
+
+- Notebooks live in `notebooks/`. ALWAYS clear outputs before commit (`nbstripout`).
+- WHEN doing exploratory work, prefer `.py` (jupytext-paired) over `.ipynb` for diffability.
+- WHEN writing production code, extract from notebook to `src/` module — never import from notebooks in prod.
+- WHEN handling secrets/keys, use env vars; never hardcode in cells.
+- dbt models in `dbt/models/`; tests in `dbt/tests/`. Run `dbt build` before merge.
+- WHEN bulk-loading CSV → DB, use psycopg2 `execute_values` not pandas `to_sql` (10-100× faster).
+- Random seeds: ALWAYS set `np.random.seed(...)` for reproducibility.
+
+### Build/test/run
+| Goal | Command |
+| --- | --- |
+| Install | `uv sync` |
+| Notebook | `uv run jupyter lab` |
+| Tests | `uv run pytest && uv run nbqa pytest notebooks/` |
+| Lint NBs | `uv run nbqa ruff notebooks/` |
+| dbt | `dbt build --profiles-dir profiles/` |
