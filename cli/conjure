@@ -21,7 +21,7 @@
 
 set -uo pipefail
 
-CONJURE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+CONJURE_HOME="${CONJURE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
 CONJURE_VERSION="$(cat "$CONJURE_HOME/VERSION" 2>/dev/null || echo unknown)"
 
 usage() {
