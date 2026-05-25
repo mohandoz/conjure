@@ -76,6 +76,10 @@ expect_prompt
 send "PS1='$ '\r"
 expect_prompt
 
+# Change into the seeded fixture directory
+send "cd $env(DEMO_DIR)\r"
+expect_prompt
+
 # D-02: Command 1 — init dry-run
 send -h "conjure init --dry-run --profile=ts-next .\r"
 expect_prompt
@@ -91,7 +95,7 @@ expect eof
 EXPECT_SCRIPT
 
 # Export env vars so the expect script can read them
-export CAST_FILE
+export CAST_FILE DEMO_DIR
 
 printf '[record-demo] Starting asciinema recording via expect...\n'
 expect "$DEMO_DIR/demo.exp"

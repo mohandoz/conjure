@@ -31,7 +31,7 @@ jobs:
         run: bash tests/run.sh
 
       - name: Assert demo GIF committed
-        run: test -s .github/assets/demo.gif
+        run: test -s .github/assets/demo.gif || { echo "demo.gif is missing or empty — run bash scripts/record-demo.sh to regenerate"; exit 1; }
 
       - name: Audit script smoke
         run: bash scripts/audit-setup.sh . || true

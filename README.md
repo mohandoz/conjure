@@ -63,6 +63,7 @@ foot-guns, cross-platform Node.js hooks.
 ## 🚀 Quickstart
 
 <div align="center">
+
 <img src=".github/assets/demo.gif" alt="conjure init --dry-run --profile=ts-next . then conjure audit" width="700"/>
 
 *`conjure init --dry-run --profile=ts-next .` — zero mutations, fully auditable.*
