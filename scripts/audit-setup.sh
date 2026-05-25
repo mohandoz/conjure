@@ -93,13 +93,13 @@ if [ -f .claude/settings.json ]; then
     warn "jq not installed — can't validate settings.json"
   fi
 
-  # Hook scripts executable
+  # Hook scripts present (.mjs — invoked via node, not as executables)
   if [ -d .claude/hooks ]; then
     while IFS= read -r hook; do
-      if [ -x "$hook" ]; then ok "Hook executable: $(basename "$hook")"
-      else err "Hook NOT executable: $(basename "$hook") — run chmod +x"
+      if [ -f "$hook" ]; then ok "Hook present: $(basename "$hook")"
+      else err "Hook MISSING: $(basename "$hook") — re-run conjure init"
       fi
-    done < <(find .claude/hooks -maxdepth 1 -name '*.sh')
+    done < <(find .claude/hooks -maxdepth 1 -name '*.mjs')
   fi
 else
   warn ".claude/settings.json missing — no hooks active"

@@ -157,6 +157,30 @@ else
   pass "scripts/preflight.sh: shellcheck present — optional-missing test skipped"
 fi
 
+# Template lint — catch SAFE-03 regressions (bash hooks back in settings template)
+echo
+echo "▸ Template lint"
+
+if grep -q 'bash .claude/hooks/' templates/settings.json.tmpl 2>/dev/null; then
+  fail "settings.json.tmpl: bash hook commands present (SAFE-03 regression)"
+else pass "settings.json.tmpl: no bash hook commands"
+fi
+
+if grep -q 'node .claude/hooks/' templates/settings.json.tmpl 2>/dev/null; then
+  pass "settings.json.tmpl: node hook commands present"
+else fail "settings.json.tmpl: node hook commands MISSING"
+fi
+
+if grep -q 'hooks-nodejs' scripts/init-project.sh 2>/dev/null; then
+  pass "init-project.sh: sources hooks-nodejs (.mjs)"
+else fail "init-project.sh: does not source hooks-nodejs (SAFE-03 regression)"
+fi
+
+if grep -v '^#' scripts/init-project.sh 2>/dev/null | grep -q 'chmod.*hooks'; then
+  fail "init-project.sh: chmod found in hook block (should not chmod .mjs files)"
+else pass "init-project.sh: no chmod on hook files"
+fi
+
 # Migration scripts exist for every documented source
 echo
 echo "▸ Migration coverage"
