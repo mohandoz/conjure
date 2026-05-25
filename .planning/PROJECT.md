@@ -105,7 +105,13 @@ and verify a correct, safe harness.
 
 **Phase 09 complete:** `cmd_update --apply` 3-way merge — `lib/merge.sh` (merge_file_3way, write_merge_sidecar, merge_user_files), snapshot write on init, conflict sidecars, MERGE-05 audit detection, 216 tests green — TECH-01 validated (2026-05-25)
 
-**Next milestone:** v0.4.0 — Distribution + Ecosystem (Phase 11 next: skill-publishing)
+**Phase 10 complete:** Marketplace publish — `conjure publish` + `publish-plugin.sh` + MKTPL CI steps — DIST-01 validated (2026-05-25)
+
+**Phase 11 complete:** Skill publishing — `conjure publish-skill` + `publish-skill.sh` — SKILL-01 through SKILL-04 validated (2026-05-25)
+
+**Phase 12 complete:** Org overlay — `scripts/init-overlay.sh` + `scripts/refresh-overlay.sh` + CLI wiring (`conjure init --overlay`, `conjure refresh-overlay`) + audit drift check — OVLY-01 through OVLY-05 validated, 261 tests green (2026-05-26)
+
+**Next milestone:** v0.4.0 — Distribution + Ecosystem (Phase 13 next: homebrew-tap)
 
 ## Key Decisions
 
@@ -136,4 +142,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-25 — Phase 10 complete, DIST-01 validated*
+*Last updated: 2026-05-26 — Phase 12 complete, OVLY-01 through OVLY-05 validated*
