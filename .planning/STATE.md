@@ -8,7 +8,7 @@ last_activity: 2026-05-24
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 2
+  total_plans: 8
   completed_plans: 2
   percent: 14
 ---
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-05-24)
 
 Phase: 2
 Plan: Not started
-Status: Ready to plan
+Status: Planned — 6 plans ready
 Last activity: 2026-05-24
 
 Progress: [██████████] 100%

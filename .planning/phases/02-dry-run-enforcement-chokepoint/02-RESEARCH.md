@@ -601,7 +601,7 @@ mutate_write "$pkg/CLAUDE.md" "$MONOREPO_CONTENT"
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `mutate_summary` be in `lib/mutate.sh` or inline at each call site?**
    - What we know: D-05 requires the summary line at the end of each script.
