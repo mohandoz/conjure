@@ -98,6 +98,7 @@ merge_user_files() {
   if [ -f "$current" ] && [ -f "$base" ]; then
     merge_file_3way "$current" "$base" "$tmpl_file" "$rel" "$pinned_ver" "$conjure_ver"
     _rc=$?
+    # No tempfile to clean here — CLAUDE.md is a single-file check.
     if [ "$_rc" -eq 2 ]; then return 2; fi
   fi
 
