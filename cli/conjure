@@ -233,7 +233,8 @@ cmd_update() {
   if [ "${CONJURE_MERGE_CONFLICT_COUNT:-0}" -gt 0 ]; then
     echo
     echo "✗ Conflicts in the following files:"
-    for sf in $CONJURE_MERGE_CONFLICT_FILES; do
+    printf '%s\n' "$CONJURE_MERGE_CONFLICT_FILES" | while IFS= read -r sf; do
+      [ -z "$sf" ] && continue
       echo "    $sf"
     done
     echo "  Resolve conflicts, delete the .conjure-conflict-* sidecars, then run:"
