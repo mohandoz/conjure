@@ -514,7 +514,7 @@ for fx in "$CONJURE_HOME/tests/fixtures"/[^_]*/; do  # [^_] skips _broken/
   prof=$(basename "$fx")
   sandbox_setup "$fx"
   trap 'rm -rf "$SANDBOX_DIR"' EXIT
-  AUDIT_OUT="$(bash "$CONJURE_HOME/scripts/audit-setup.sh" "$SANDBOX_DIR" 2>&1 || true)"
+  AUDIT_OUT="$(bash "$CONJURE_HOME/scripts/audit-setup.sh" "$SANDBOX_DIR" 2>&1)"
   AUDIT_RC=$?
   if [ "$AUDIT_RC" -eq 0 ]; then
     pass "fixture audit green: $prof"
@@ -528,7 +528,7 @@ done
 echo "▸ Broken fixture (must fail audit with specific finding)"
 sandbox_setup "$CONJURE_HOME/tests/fixtures/_broken"
 trap 'rm -rf "$SANDBOX_DIR"' EXIT
-BROKEN_OUT="$(bash "$CONJURE_HOME/scripts/audit-setup.sh" "$SANDBOX_DIR" 2>&1 || true)"
+BROKEN_OUT="$(bash "$CONJURE_HOME/scripts/audit-setup.sh" "$SANDBOX_DIR" 2>&1)"
 BROKEN_RC=$?
 if [ "$BROKEN_RC" -ne 0 ]; then
   pass "_broken: audit exits non-zero (rc=$BROKEN_RC)"
@@ -666,22 +666,25 @@ ASVS categories: Not applicable (offline file manipulation, no auth surface).
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should regen-fixtures.sh verify audit-green before committing each fixture?**
    - What we know: nothing stops a broken profile template from producing a non-green fixture
    - What's unclear: should regen fail loudly if any fixture audit exits non-zero?
    - Recommendation: Yes — add `bash "$CONJURE_HOME/scripts/audit-setup.sh" "$dest"` check after copy, exit with error if non-zero. This makes regen self-validating.
+   - RESOLVED: Yes — Plan 03-01 Task 2 step 8 runs audit on each fixture before the section completes.
 
 2. **Should committed fixtures include docs/ templates?**
    - What we know: `init-project.sh` creates `docs/ARCHITECTURE.md`, `docs/RUNBOOK.md`, `docs/adr/`, `.env.example`. `audit-setup.sh` checks for these and emits WARN if missing.
    - What's unclear: Are the generated `docs/` files noise in the fixture diffs?
    - Recommendation: Include them (they're output of `conjure init` and audit checks for them). Excluding them would require audit-setup.sh changes out of scope for this phase.
+   - RESOLVED: Yes — include a single-profile `--profile <p>` flag in regen-fixtures.sh for iterative development.
 
 3. **EXPECT file format: should green fixtures have one too?**
    - What we know: CONTEXT D-09 says "green fixtures CAN have an EXPECT file too, asserting `0 errors` or similar." Phase 4's EXPECT comparison loop is the consumer.
    - What's unclear: Phase 3 should establish the format even if Phase 4 fully uses it.
    - Recommendation: Leave green fixtures without EXPECT files for now. Phase 4 can add them when the golden-file loop is built. Only `_broken/EXPECT` is required for Phase 3.
+   - RESOLVED: No — green fixtures will NOT have EXPECT files in Phase 3; Phase 4 will add them as part of the golden-file loop.
 
 ---
 
