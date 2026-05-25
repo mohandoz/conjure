@@ -39,10 +39,10 @@ created: 2026-05-25
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
 | 3-01-01 | 01 | 1 | TEST-02 | — | N/A | integration | `bash tests/run.sh` | ❌ W0 | ⬜ pending |
-| 3-02-01 | 02 | 1 | TEST-01 | — | N/A | smoke | `bash tests/run.sh` | ❌ W0 | ⬜ pending |
-| 3-02-02 | 02 | 1 | TEST-01 | — | N/A | smoke | `bash tests/run.sh` | ❌ W0 | ⬜ pending |
-| 3-03-01 | 03 | 2 | TEST-04 | — | N/A | integration | `bash tests/run.sh` | ❌ W0 | ⬜ pending |
-| 3-03-02 | 03 | wave 3 | TEST-01, TEST-02, TEST-04 | — | N/A | integration | `bash tests/run.sh` | ❌ W0 | ⬜ pending |
+| 3-02-01 | 02 | 2 | TEST-01 | — | N/A | smoke | `bash tests/run.sh` | ❌ W0 | ⬜ pending |
+| 3-02-02 | 02 | 2 | TEST-01 | — | N/A | smoke | `bash tests/run.sh` | ❌ W0 | ⬜ pending |
+| 3-03-01 | 03 | 3 | TEST-04 | — | N/A | integration | `bash tests/run.sh` | ❌ W0 | ⬜ pending |
+| 3-03-02 | 03 | 3 | TEST-01, TEST-02, TEST-04 | — | N/A | integration | `bash tests/run.sh` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
