@@ -762,6 +762,7 @@ echo "▸ Marketplace publish tests (MKTPL-01 through MKTPL-04)"
 # copy the script + lib into the sandbox and invoke the sandbox copy.  This keeps
 # all writes inside the temp dir and leaves the real .claude-plugin/ untouched.
 MKTPL_DIR="$(mktemp -d)"
+trap 'rm -rf "$MKTPL_DIR"' EXIT
 git -C "$MKTPL_DIR" init -q
 git -C "$MKTPL_DIR" config user.email "test@conjure"
 git -C "$MKTPL_DIR" config user.name "conjure-test"
@@ -886,6 +887,7 @@ rm -rf "$SUBMIT_DIR"
 
 # CLEANUP main MKTPL sandbox
 rm -rf "$MKTPL_DIR"
+trap - EXIT
 
 echo
 echo "▸ SKILL publish-skill tests (SKILL-01 through SKILL-04)"
@@ -894,6 +896,7 @@ echo "▸ SKILL publish-skill tests (SKILL-01 through SKILL-04)"
 # publish-skill.sh derives CONJURE_HOME from its own script path, so copy
 # the script + lib into the sandbox. All writes stay inside the temp dir.
 SKILL_DIR="$(mktemp -d)"
+trap 'rm -rf "$SKILL_DIR"' EXIT
 git -C "$SKILL_DIR" init -q
 git -C "$SKILL_DIR" config user.email "test@conjure"
 git -C "$SKILL_DIR" config user.name "conjure-test"
@@ -1069,6 +1072,7 @@ fi
 
 # CLEANUP SKILL sandbox
 rm -rf "$SKILL_DIR"
+trap - EXIT
 
 # ──────────────────────────────────────────────────────────────────────────────
 # OVLY org-overlay tests (OVLY-01 through OVLY-05)
