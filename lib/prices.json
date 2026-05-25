@@ -1,0 +1,29 @@
+{
+  "models": [
+    {
+      "model":           "claude-haiku-4-5",
+      "display_name":    "Claude Haiku 4.5",
+      "pricing_date":    "2026-05",
+      "input_per_mtok":  1,
+      "output_per_mtok": 5,
+      "band_pct":        20
+    },
+    {
+      "model":           "claude-sonnet-4-6",
+      "display_name":    "Claude Sonnet 4.6",
+      "pricing_date":    "2026-05",
+      "input_per_mtok":  3,
+      "output_per_mtok": 15,
+      "band_pct":        20
+    },
+    {
+      "model":           "claude-opus-4-7",
+      "display_name":    "Claude Opus 4.7",
+      "pricing_date":    "2026-05",
+      "input_per_mtok":  5,
+      "output_per_mtok": 25,
+      "band_pct":        20
+    }
+  ],
+  "default_model": "claude-sonnet-4-6"
+}

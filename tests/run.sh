@@ -39,7 +39,7 @@ if command -v jq >/dev/null 2>&1; then
     if jq empty "$json" >/dev/null 2>&1; then pass "json valid: $json"
     else fail "json INVALID: $json"
     fi
-  done < <(find templates .claude-plugin -name '*.json' 2>/dev/null)
+  done < <(find templates .claude-plugin lib -name '*.json' 2>/dev/null)
 fi
 
 # Skill frontmatter validity
