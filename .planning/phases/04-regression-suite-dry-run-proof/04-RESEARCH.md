@@ -568,22 +568,25 @@ Live test: `cp -r tests/fixtures/ts-next → TMP_SNAP`, run `conjure init --dry-
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `scripts/regen-fixtures.sh` grow a `--update-expect` flag?**
    - What we know: regen currently regenerates `.claude/` + manifest stubs; EXPECT files are separate golden files
    - What's unclear: whether `--update-expect` should re-run audit and capture output (complex) or just write a fixed template (simple)
    - Recommendation: start with the fixed-template approach (write `PASS: [0-9]`, `WARN: 0`, `FAIL: 0` unconditionally) since all 9 green fixtures produce the same summary. A `--update-expect` flag can be a thin wrapper around this.
+   - RESOLVED: Yes — implemented in 04-01 Task 3 as `_write_expect` function + `--update-expect` flag in `scripts/regen-fixtures.sh`.
 
 2. **Should the EXPECT loop in run.sh also run for `_broken`?**
    - What we know: `_broken` has `EXPECT` and currently gets a dedicated section
    - What's unclear: whether to unify the loops or keep them separate
    - Recommendation: keep separate. The `_broken` section asserts non-zero exit code AND patterns; the green EXPECT loop asserts only patterns (exit 0 already checked by the existing fixture audit). Merging adds complexity for no gain.
+   - RESOLVED: No — use `[^_]*/` glob to skip `_broken`; keep broken-fixture section separate (existing behavior preserved).
 
 3. **Does the Windows CI job need to install `git init` for the fixture?**
    - What we know: `conjure init` does not require a git repo (verified by reading `init-project.sh`); it only copies files
    - What's unclear: whether any profile's `apply.sh` calls git
    - Recommendation: no `git init` needed for the Windows smoke test. If a profile apply.sh fails, the job catches it. Keep it minimal per D-11.
+   - RESOLVED: No — use `CONJURE_HOME=$GITHUB_WORKSPACE cli/conjure init /tmp/fixture` directly; no `git init` needed (per D-11, no extra dependency installation).
 
 ---
 
