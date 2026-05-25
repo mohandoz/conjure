@@ -152,7 +152,7 @@ Plans:
 
 Plans:
 **Wave 1** *(foundation — no dependencies)*
-- [ ] 06-01-PLAN.md — Create lib/prices.json (baked price table), lib/exact-count.mjs (Anthropic SDK wrapper), wire --cost/--exact flags in cli/conjure cmd_audit() (COST-01, COST-02, COST-03)
+- [x] 06-01-PLAN.md — Create lib/prices.json (baked price table), lib/exact-count.mjs (Anthropic SDK wrapper), wire --cost/--exact flags in cli/conjure cmd_audit() (COST-01, COST-02, COST-03)
 
 **Wave 2** *(blocked on 06-01)*
 - [ ] 06-02-PLAN.md — Implement cost section in scripts/audit-setup.sh: CONJURE_HOME self-derivation, jq price read, per-file breakdown table, --exact integration, label line (COST-01, COST-02, COST-03)
@@ -189,5 +189,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Sandboxed Per-Profile Fixtures | 3/3 | Complete    | 2026-05-24 |
 | 4. Regression Suite & Dry-Run Proof | 3/3 | Complete    | 2026-05-25 |
 | 5. README Demo | 2/2 | Complete    | 2026-05-25 |
-| 6. Cost Estimator | 0/3 | Not started | - |
+| 6. Cost Estimator | 1/3 | In Progress|  |
 | 7. Skill-Firing Telemetry | 0/TBD | Not started | - |
