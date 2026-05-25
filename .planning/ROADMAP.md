@@ -12,7 +12,7 @@ Make Conjure installable and shareable through every standard channel while clea
 
 ## Phases
 
-- [ ] **Phase 08: Nyquist Compliance Backfill** - Write VALIDATION.md for phases 01, 02, 04, 05, 06, 07
+- [x] **Phase 08: Nyquist Compliance Backfill** - Write VALIDATION.md for phases 01, 02, 04, 05, 06, 07 (completed 2026-05-25)
 - [ ] **Phase 09: 3-Way Merge** - Implement `cmd_update --apply` via `lib/merge.sh` + base snapshot
 - [ ] **Phase 10: Marketplace Publish** - Wire and validate the Claude Code Marketplace plugin manifest
 - [ ] **Phase 11: Skill Publishing** - Add `conjure publish-skill` command with egress scan + PR flow
@@ -34,9 +34,9 @@ Make Conjure installable and shareable through every standard channel while clea
 **Plans**: 3 plans
 
 Plans:
-- [ ] 08-01-PLAN.md — Create 01-VALIDATION.md (preflight + cross-platform hooks) and 02-VALIDATION.md (dry-run enforcement) (TECH-02a, TECH-02b)
-- [ ] 08-02-PLAN.md — Create 04-VALIDATION.md (regression suite + dry-run proof) and 05-VALIDATION.md (README demo) (TECH-02c, TECH-02d)
-- [ ] 08-03-PLAN.md — Create 06-VALIDATION.md (cost estimator) and 07-VALIDATION.md (skill-firing telemetry) (TECH-02e, TECH-02f)
+- [x] 08-01-PLAN.md — Create 01-VALIDATION.md (preflight + cross-platform hooks) and 02-VALIDATION.md (dry-run enforcement) (TECH-02a, TECH-02b)
+- [x] 08-02-PLAN.md — Create 04-VALIDATION.md (regression suite + dry-run proof) and 05-VALIDATION.md (README demo) (TECH-02c, TECH-02d)
+- [x] 08-03-PLAN.md — Create 06-VALIDATION.md (cost estimator) and 07-VALIDATION.md (skill-firing telemetry) (TECH-02e, TECH-02f)
 
 ### Phase 09: 3-Way Merge
 **Goal**: `conjure update --apply` performs real 3-way file merges instead of silently ignoring user customizations, and conflicts are safely surfaced as sidecar files
@@ -120,7 +120,7 @@ Plans:
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 08. Nyquist Compliance Backfill | v0.4.0 | 0/3 | Not started | - |
+| 08. Nyquist Compliance Backfill | v0.4.0 | 3/3 | Complete   | 2026-05-25 |
 | 09. 3-Way Merge | v0.4.0 | 0/TBD | Not started | - |
 | 10. Marketplace Publish | v0.4.0 | 0/TBD | Not started | - |
 | 11. Skill Publishing | v0.4.0 | 0/TBD | Not started | - |
