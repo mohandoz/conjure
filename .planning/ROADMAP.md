@@ -39,10 +39,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Pre-flight logic lives in a standalone `scripts/preflight.sh` that both the CLI and `tests/run.sh` invoke (no inline duplication)
   3. A harness scaffolded by `conjure init` wires hooks via a runtime present on the OS (portable `node .mjs` or OS-branched), so hooks fire on native Windows instead of silently no-opping
   4. Required-dependency-missing blocks with a non-zero exit; optional-dependency-missing warns and continues
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: TBD
+- [ ] 01-01-PLAN.md — Extract scripts/preflight.sh, wire conjure preflight subcommand, add preflight test section (SAFE-04)
+- [ ] 01-02-PLAN.md — Update settings.json.tmpl + init-project.sh + audit-setup.sh for node .mjs hook wiring, add template lint assertions (SAFE-03)
 
 ### Phase 2: Dry-Run Enforcement Chokepoint
 **Goal**: `conjure init --dry-run` produces an identical console plan while making zero filesystem mutations, enforced at one chokepoint rather than per call site
@@ -144,7 +145,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Pre-flight & Cross-Platform Hooks | 0/TBD | Not started | - |
+| 1. Pre-flight & Cross-Platform Hooks | 0/2 | Not started | - |
 | 2. Dry-Run Enforcement Chokepoint | 0/TBD | Not started | - |
 | 3. Sandboxed Per-Profile Fixtures | 0/TBD | Not started | - |
 | 4. Regression Suite & Dry-Run Proof | 0/TBD | Not started | - |
