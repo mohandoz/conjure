@@ -175,7 +175,7 @@ Plans:
 
 Plans:
 **Wave 1** *(foundation — no dependencies)*
-- [ ] 07-01-PLAN.md — Create skill-telemetry.mjs hook (PreToolUse/Skill + UserPromptExpansion), TELEMETRY.md schema doc, settings.json.tmpl wiring, .gitignore.tmpl entry (TLMY-01, TLMY-02, TLMY-05)
+- [x] 07-01-PLAN.md — Create skill-telemetry.mjs hook (PreToolUse/Skill + UserPromptExpansion), TELEMETRY.md schema doc, settings.json.tmpl wiring, .gitignore.tmpl entry (TLMY-01, TLMY-02, TLMY-05)
 
 **Wave 2** *(blocked on Wave 1)*
 - [ ] 07-02-PLAN.md — Add --retire-list flag to cli/conjure cmd_audit(), implement retire-list jq aggregation section in audit-setup.sh with date portability (TLMY-04)
@@ -196,4 +196,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Regression Suite & Dry-Run Proof | 3/3 | Complete    | 2026-05-25 |
 | 5. README Demo | 2/2 | Complete    | 2026-05-25 |
 | 6. Cost Estimator | 3/3 | Complete    | 2026-05-25 |
-| 7. Skill-Firing Telemetry | 0/3 | Not started | - |
+| 7. Skill-Firing Telemetry | 1/3 | In Progress|  |
