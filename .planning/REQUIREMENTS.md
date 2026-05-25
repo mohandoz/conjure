@@ -33,11 +33,11 @@ Requirements for the v0.3.0 milestone. Each maps to a roadmap phase. Theme: clos
 
 ### Telemetry
 
-- [ ] **TLMY-01**: Skill-firing telemetry is opt-in (off by default) and PII-free
-- [ ] **TLMY-02**: Telemetry writes local-only append-only JSONL the user owns (`.claude/telemetry/`) with zero network egress
-- [ ] **TLMY-03**: A build/CI test greps all shipped hooks to assert no network egress from telemetry
-- [ ] **TLMY-04**: Conjure produces a skill "retire-list" from the local telemetry event log (which skills loaded per session)
-- [ ] **TLMY-05**: `TELEMETRY.md` schema ships in the same change as the hook, and telemetry honors the `DO_NOT_TRACK` convention
+- [x] **TLMY-01**: Skill-firing telemetry is opt-in (off by default) and PII-free
+- [x] **TLMY-02**: Telemetry writes local-only append-only JSONL the user owns (`.claude/telemetry/`) with zero network egress
+- [x] **TLMY-03**: A build/CI test greps all shipped hooks to assert no network egress from telemetry
+- [x] **TLMY-04**: Conjure produces a skill "retire-list" from the local telemetry event log (which skills loaded per session)
+- [x] **TLMY-05**: `TELEMETRY.md` schema ships in the same change as the hook, and telemetry honors the `DO_NOT_TRACK` convention
 
 ### Docs & Adoption
 
@@ -89,11 +89,11 @@ Each requirement maps to exactly one phase. See `.planning/ROADMAP.md` for phase
 | COST-01 | Phase 6 | Complete |
 | COST-02 | Phase 6 | Complete |
 | COST-03 | Phase 6 | Complete |
-| TLMY-01 | Phase 7 | Pending |
-| TLMY-02 | Phase 7 | Pending |
-| TLMY-03 | Phase 7 | Pending |
-| TLMY-04 | Phase 7 | Pending |
-| TLMY-05 | Phase 7 | Pending |
+| TLMY-01 | Phase 7 | Complete |
+| TLMY-02 | Phase 7 | Complete |
+| TLMY-03 | Phase 7 | Complete |
+| TLMY-04 | Phase 7 | Complete |
+| TLMY-05 | Phase 7 | Complete |
 | DOCS-01 | Phase 5 | Complete |
 
 **Coverage:**
