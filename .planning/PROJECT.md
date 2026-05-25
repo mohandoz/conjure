@@ -38,19 +38,16 @@ and verify a correct, safe harness.
 
 ### Active
 
-<!-- Next milestone: v0.3.0 — Testing + telemetry. Hypotheses until shipped + validated. -->
+<!-- Current milestone: v0.4.0 — Distribution + Ecosystem. Hypotheses until shipped + validated. -->
 
-- [x] Test fixtures: one example project per stack profile, audited green — Validated in Phase 03 (TEST-01, TEST-02, TEST-04)
-- [x] Full regression suite: `tests/run.sh` runs audit assertions per fixture — Validated in Phase 03 (TEST-01, TEST-02, TEST-04)
-- [x] `conjure init --dry-run` enforced everywhere (no mutations on dry run) — Validated in Phase 02 (SAFE-01, SAFE-02)
-- [x] Skill-firing telemetry: hook records which skills load per session → retire-list signal — Validated in Phase 07 (TLMY-01, TLMY-02, TLMY-03, TLMY-04, TLMY-05)
-- [ ] Cost estimator: `conjure audit --cost` predicts session token cost from harness size
-- [x] Pre-flight dependency verification with one-command install fix-its — Validated in Phase 01 (SAFE-04)
-- [x] Failure-mode reproductions encoded as tests — Validated in Phase 04 (TEST-07)
-- [x] Golden-file regression suite: committed EXPECT files + loop in tests/run.sh — Validated in Phase 04 (TEST-03)
-- [x] `--dry-run` byte-identical proof: CI-gated snapshot comparison for all 9 profiles — Validated in Phase 04 (TEST-05)
-- [x] Windows CI job validates SAFE-03 portable hook wiring on `windows-latest` — Validated in Phase 04 (TEST-06)
-- [ ] Formal GSD `.planning/` for Conjure's own continued development (this bootstrap)
+- [ ] DIST-01: Publish to Claude Code Marketplace via `.claude-plugin/marketplace.json`
+- [ ] DIST-02: Homebrew formula (`brew install conjure`)
+- [ ] DIST-03: Docker image with all tools preinstalled
+- [ ] DIST-04: `conjure publish-skill <name>` — contribute project skill to public kit
+- [ ] DIST-05: Org overlay system (base kit + private overlay repo per org)
+- [ ] TECH-01: `cmd_update --apply` 3-way merge implementation (stub at `cli/conjure:171`)
+- [ ] TECH-02: Nyquist compliance pass for phases 01, 02, 04, 05, 06, 07
+- [ ] TECH-03: Windows CI runtime confirmation for TEST-06
 
 ### Out of Scope
 
@@ -77,6 +74,20 @@ and verify a correct, safe harness.
 - **Size caps**: CLAUDE.md ≤100 lines, SKILL.md ≤200, agent ≤80 — enforced by audit/CI.
 - **Compatibility**: requires Claude Code ≥2.1.117; `@imports` forbidden in CLAUDE.md (eager-load foot-gun).
 - **Quality gate**: every PR must pass shellcheck, JSON Schema validation, frontmatter validation, size caps, and migration/profile/compliance coverage checks.
+
+## Current Milestone: v0.4.0 Distribution + Ecosystem
+
+**Goal:** Make Conjure installable and shareable through every standard channel while clearing v0.3.0 tech debt that blocks production use.
+
+**Target features:**
+- DIST-01: Claude Code Marketplace publish
+- DIST-02: Homebrew formula
+- DIST-03: Docker image
+- DIST-04: `conjure publish-skill` command
+- DIST-05: Org overlay system
+- TECH-01: `cmd_update --apply` 3-way merge
+- TECH-02: Nyquist compliance pass (phases 01, 02, 04, 05, 06, 07)
+- TECH-03: Windows CI runtime confirmation
 
 ## Current State
 
@@ -121,4 +132,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-25 — v0.3.0 milestone archived*
+*Last updated: 2026-05-25 — v0.4.0 milestone started*
