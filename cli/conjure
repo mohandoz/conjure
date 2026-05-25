@@ -38,6 +38,7 @@ Usage:
   conjure refresh-graph [target] [--full|--update]
   conjure install-mcp
   conjure preflight
+  conjure publish [--submit] [--dry-run]
   conjure version
   conjure help [<subcommand>]
 
@@ -260,6 +261,22 @@ cmd_preflight() {
   bash "$CONJURE_HOME/scripts/preflight.sh"
 }
 
+cmd_publish() {
+  local do_submit=0
+  local dryrun=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --submit)    do_submit=1 ;;
+      --dry-run)   dryrun=1 ;;
+      --help|-h)   echo "Usage: conjure publish [--submit] [--dry-run]"; return 0 ;;
+      *)           echo "Unknown option: $1"; return 1 ;;
+    esac
+    shift
+  done
+  CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" CONJURE_SUBMIT="$do_submit" \
+    bash "$CONJURE_HOME/scripts/publish-plugin.sh"
+}
+
 cmd_help() {
   if [ -n "${1:-}" ]; then
     sed -n "/^cmd_$1()/,/^}/p" "$0" | head -20
@@ -277,6 +294,7 @@ case "${1:-help}" in
   refresh-graph)   shift; cmd_refresh_graph "$@"   ;;
   install-mcp)     shift; cmd_install_mcp "$@"     ;;
   preflight)       shift; cmd_preflight "$@"       ;;
+  publish)         shift; cmd_publish "$@"         ;;
   version|-v|--version) cmd_version                ;;
   help|-h|--help)  shift; cmd_help "$@"            ;;
   *)               echo "Unknown command: $1"; usage; exit 1 ;;
