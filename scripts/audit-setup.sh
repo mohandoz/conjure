@@ -195,6 +195,51 @@ if [ "${CONJURE_COST:-0}" = "1" ]; then
   fi
 fi
 
+if [ "${CONJURE_RETIRE:-0}" = "1" ]; then
+  : "${CONJURE_HOME:="$(cd "$(dirname "$0")/.." && pwd)"}"
+  LOG="$TARGET/.claude/telemetry/skill-events.jsonl"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "  [--retire-list] jq not installed — install jq to use retire-list"
+  elif [ ! -f "$LOG" ]; then
+    echo
+    echo "── Skill Retire-List ──────────────────────────────────"
+    echo "  No telemetry data. Enable with CONJURE_TELEMETRY=1 in .claude/settings.json env."
+  else
+    CUTOFF=$(date -v-30d -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
+             || date -u -d '30 days ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
+             || echo "0000-00-00T00:00:00Z")
+
+    RETIRE_TMP=$(mktemp)
+    # Combine with any existing EXIT trap to avoid overwriting COST_TMP cleanup
+    trap 'rm -f "${COST_TMP:-}" "${RETIRE_TMP:-}"' EXIT
+
+    # Count skill loads in last 30 days; jq outputs one skill name per matching line
+    jq -r --arg c "$CUTOFF" 'select(.ts >= $c) | .skill' "$LOG" 2>/dev/null \
+      | sort | uniq -c | sort -rn > "$RETIRE_TMP" 2>/dev/null || true
+
+    echo
+    echo "── Skill Retire-List ──────────────────────────────────"
+
+    if ! [ -s "$RETIRE_TMP" ]; then
+      echo "  No telemetry data in last 30 days."
+    else
+      printf "  %-35s %6s %8s\n" "Skill" "Loads" "Status"
+      printf "  %-35s %6s %8s\n" "-----" "-----" "------"
+      while IFS= read -r line; do
+        count=$(printf '%s' "$line" | awk '{print $1}')
+        name=$(printf '%s' "$line" | awk '{$1=""; print $0}' | xargs)
+        if [ "${count:-0}" -gt 0 ]; then
+          status="[active]"
+        else
+          status="[retire?]"
+        fi
+        printf "  %-35s %6s %8s\n" "$name" "$count" "$status"
+      done < "$RETIRE_TMP"
+    fi
+  fi
+fi
+
 [ "$FAIL" -gt 0 ] && exit 2
 [ "$WARN" -gt 0 ] && exit 1
 exit 0
