@@ -113,7 +113,10 @@ fi
 
 # graphify freshness
 if [ -f graphify-out/graph.json ]; then
-  AGE_DAYS=$(( ($(date +%s) - $(stat -f %m graphify-out/graph.json 2>/dev/null || stat -c %Y graphify-out/graph.json)) / 86400 ))
+  _mtime="$(stat -f %m graphify-out/graph.json 2>/dev/null \
+             || stat -c %Y graphify-out/graph.json 2>/dev/null \
+             || echo 0)"
+  AGE_DAYS=$(( ( $(date +%s) - _mtime ) / 86400 ))
   if [ "$AGE_DAYS" -gt 7 ]; then warn "graphify graph is $AGE_DAYS days old — run: graphify . --update"
   else ok "graphify graph: $AGE_DAYS days old"
   fi
@@ -151,15 +154,19 @@ if [ ! -f "$OVERLAY_MARKER" ]; then
 else
   OVERLAY_URL="$(grep '^url=' "$OVERLAY_MARKER" | cut -d= -f2-)"
   PINNED_SHA="$(grep '^sha=' "$OVERLAY_MARKER" | cut -d= -f2)"
-  note "[overlay] url: $OVERLAY_URL"
-  note "[overlay] pinned: $PINNED_SHA"
-  UPSTREAM_SHA="$(git ls-remote "$OVERLAY_URL" HEAD 2>/dev/null | awk '{print $1}')" || true
-  if [ -z "$UPSTREAM_SHA" ]; then
-    warn "[overlay] drift check skipped (git ls-remote failed)"
-  elif [ "$PINNED_SHA" = "$UPSTREAM_SHA" ]; then
-    ok "[overlay] up to date ($PINNED_SHA)"
+  if [ -z "$OVERLAY_URL" ]; then
+    warn "[overlay] marker missing url= field — run conjure init --overlay again"
   else
-    warn "[overlay] DRIFT — pinned=$PINNED_SHA upstream=$UPSTREAM_SHA — run: conjure refresh-overlay"
+    note "[overlay] url: $OVERLAY_URL"
+    note "[overlay] pinned: $PINNED_SHA"
+    UPSTREAM_SHA="$(git ls-remote -- "$OVERLAY_URL" HEAD 2>/dev/null | awk '{print $1}')" || true
+    if [ -z "$UPSTREAM_SHA" ]; then
+      warn "[overlay] drift check skipped (git ls-remote failed)"
+    elif [ "$PINNED_SHA" = "$UPSTREAM_SHA" ]; then
+      ok "[overlay] up to date ($PINNED_SHA)"
+    else
+      warn "[overlay] DRIFT — pinned=$PINNED_SHA upstream=$UPSTREAM_SHA — run: conjure refresh-overlay"
+    fi
   fi
 fi
 
@@ -204,7 +211,8 @@ if [ "${CONJURE_COST:-0}" = "1" ]; then
       TOTAL_COST=$(awk "BEGIN {printf \"%.2f\", $TOKENS_TO_USE * $PRICE_INPUT / 1000000}")
 
       COST_TMP=$(mktemp)
-      trap 'rm -f "$COST_TMP"' EXIT
+      _audit_cleanup() { rm -f "${COST_TMP:-}"; }
+      trap '_audit_cleanup' EXIT
 
       for ctx_file in CLAUDE.md .claude/settings.json; do
         if [ -f "$ctx_file" ]; then
@@ -249,8 +257,6 @@ if [ "${CONJURE_RETIRE:-0}" = "1" ]; then
     CUTOFF=$(date -v-30d -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
              || date -u -d '30 days ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
              || echo "0000-00-00T00:00:00Z")
-
-    trap 'rm -f "${COST_TMP:-}"' EXIT
 
     echo
     echo "── Skill Retire-List ──────────────────────────────────"
