@@ -111,18 +111,20 @@ cmd_migrate() {
 }
 
 cmd_audit() {
-  local target="$(pwd)" do_cost=0 do_exact=0
+  local target="$(pwd)" do_cost=0 do_exact=0 do_retire=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --cost)    do_cost=1 ;;
-      --exact)   do_exact=1 ;;
-      --help|-h) grep -A3 '^  conjure audit' <<<"$(usage)"; return 0 ;;
-      *)         target="$1" ;;
+      --cost)         do_cost=1 ;;
+      --exact)        do_exact=1 ;;
+      --retire-list)  do_retire=1 ;;
+      --help|-h)      grep -A3 '^  conjure audit' <<<"$(usage)"; return 0 ;;
+      *)              target="$1" ;;
     esac
     shift
   done
   cmd_preflight || return 1
   CONJURE_HOME="$CONJURE_HOME" CONJURE_COST="$do_cost" CONJURE_EXACT="$do_exact" \
+    CONJURE_RETIRE="$do_retire" \
     bash "$CONJURE_HOME/scripts/audit-setup.sh" "$target"
 }
 
