@@ -19,7 +19,7 @@ most verification. Each phase makes the next safe to build.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Pre-flight & Cross-Platform Hooks** - Extract reusable pre-flight with OS-aware fix-its and make generated hook wiring run on native Windows
+- [x] **Phase 1: Pre-flight & Cross-Platform Hooks** - Extract reusable pre-flight with OS-aware fix-its and make generated hook wiring run on native Windows (completed 2026-05-24)
 - [ ] **Phase 2: Dry-Run Enforcement Chokepoint** - Route every write through `lib/mutate.sh` so `--dry-run` mutates nothing, everywhere
 - [ ] **Phase 3: Sandboxed Per-Profile Fixtures** - Committed, hermetic example project per stack profile plus one intentionally-failing fixture
 - [ ] **Phase 4: Regression Suite & Dry-Run Proof** - Golden-file fixture loop, byte-identical dry-run snapshot assertion, failure-mode reproductions, and a Windows CI leg
@@ -46,7 +46,7 @@ Plans:
 - [x] 01-01-PLAN.md — Extract scripts/preflight.sh, wire conjure preflight subcommand, add preflight test section (SAFE-04)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 01-02-PLAN.md — Update settings.json.tmpl + init-project.sh + audit-setup.sh for node .mjs hook wiring, add template lint assertions (SAFE-03)
+- [x] 01-02-PLAN.md — Update settings.json.tmpl + init-project.sh + audit-setup.sh for node .mjs hook wiring, add template lint assertions (SAFE-03)
 
 Cross-cutting constraints: scripts/preflight.sh must be POSIX bash 3.2+ (no bash 4+ features); backup-before-mutate on all template edits
 
@@ -150,7 +150,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Pre-flight & Cross-Platform Hooks | 1/2 | In Progress|  |
+| 1. Pre-flight & Cross-Platform Hooks | 2/2 | Complete   | 2026-05-24 |
 | 2. Dry-Run Enforcement Chokepoint | 0/TBD | Not started | - |
 | 3. Sandboxed Per-Profile Fixtures | 0/TBD | Not started | - |
 | 4. Regression Suite & Dry-Run Proof | 0/TBD | Not started | - |

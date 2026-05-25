@@ -12,7 +12,7 @@ Requirements for the v0.3.0 milestone. Each maps to a roadmap phase. Theme: clos
 
 - [ ] **SAFE-01**: `conjure init --dry-run` performs zero filesystem mutations — dry-run threads through `init-project.sh`, profile `apply.sh`, and the `.conjure-version` stamp (fixes live bug: today only `migrations/*` honor it)
 - [ ] **SAFE-02**: All writes route through one shared mutation helper (`lib/mutate.sh`) that honors dry-run, so enforcement is a chokepoint not per-call-site
-- [ ] **SAFE-03**: Generated hook wiring runs on native Windows — init emits portable `node .mjs` hook wiring instead of hardwired `bash .claude/hooks/*.sh` (fixes live bug in `templates/settings.json.tmpl`)
+- [x] **SAFE-03**: Generated hook wiring runs on native Windows — init emits portable `node .mjs` hook wiring instead of hardwired `bash .claude/hooks/*.sh` (fixes live bug in `templates/settings.json.tmpl`)
 - [x] **SAFE-04**: Pre-flight check reports each missing dependency with a copy-pasteable, OS-detected install fix-it (brew/apt/winget/npm) and never auto-installs
 
 ### Testing
@@ -77,7 +77,7 @@ Each requirement maps to exactly one phase. See `.planning/ROADMAP.md` for phase
 |-------------|-------|--------|
 | SAFE-01 | Phase 2 | Pending |
 | SAFE-02 | Phase 2 | Pending |
-| SAFE-03 | Phase 1 | Pending |
+| SAFE-03 | Phase 1 | Complete |
 | SAFE-04 | Phase 1 | Complete |
 | TEST-01 | Phase 3 | Pending |
 | TEST-02 | Phase 3 | Pending |
