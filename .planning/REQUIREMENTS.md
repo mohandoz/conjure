@@ -19,11 +19,11 @@ Requirements for the v0.3.0 milestone. Each maps to a roadmap phase. Theme: clos
 
 - [x] **TEST-01**: One committed example fixture per stack profile under `tests/fixtures/<profile>/`
 - [x] **TEST-02**: Fixtures run sandboxed (isolated `HOME`/`XDG_CONFIG_HOME`/`PATH`, copied to a temp dir) with no leakage to the real `$HOME`
-- [ ] **TEST-03**: `tests/run.sh` drives per-fixture audit assertions via golden-file (`EXPECT`) comparison
+- [x] **TEST-03**: `tests/run.sh` drives per-fixture audit assertions via golden-file (`EXPECT`) comparison
 - [x] **TEST-04**: At least one fixture intentionally fails audit, and assertions check specific findings (proves the suite can catch regressions, not just exit 0)
-- [ ] **TEST-05**: Regression suite asserts a `--dry-run` run leaves the fixture tree byte-identical (snapshot invariant)
-- [ ] **TEST-06**: CI includes a `windows-latest` leg that validates `.mjs` hook wiring
-- [ ] **TEST-07**: Documented failure modes (FAILURE-MODES.md) have reproductions encoded as tests
+- [x] **TEST-05**: Regression suite asserts a `--dry-run` run leaves the fixture tree byte-identical (snapshot invariant)
+- [x] **TEST-06**: CI includes a `windows-latest` leg that validates `.mjs` hook wiring
+- [x] **TEST-07**: Documented failure modes (FAILURE-MODES.md) have reproductions encoded as tests
 
 ### Cost Estimation
 
@@ -81,11 +81,11 @@ Each requirement maps to exactly one phase. See `.planning/ROADMAP.md` for phase
 | SAFE-04 | Phase 1 | Complete |
 | TEST-01 | Phase 3 | Complete |
 | TEST-02 | Phase 3 | Complete |
-| TEST-03 | Phase 4 | Pending |
+| TEST-03 | Phase 4 | Complete |
 | TEST-04 | Phase 3 | Complete |
-| TEST-05 | Phase 4 | Pending |
-| TEST-06 | Phase 4 | Pending |
-| TEST-07 | Phase 4 | Pending |
+| TEST-05 | Phase 4 | Complete |
+| TEST-06 | Phase 4 | Complete |
+| TEST-07 | Phase 4 | Complete |
 | COST-01 | Phase 6 | Pending |
 | COST-02 | Phase 6 | Pending |
 | COST-03 | Phase 6 | Pending |
