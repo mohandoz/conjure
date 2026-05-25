@@ -41,14 +41,14 @@ jobs:
         run: |
           mkdir -p /tmp/fixture && cd /tmp/fixture
           git init -q
-          bash $GITHUB_WORKSPACE/scripts/init-project.sh new /tmp/fixture
+          bash "$GITHUB_WORKSPACE/scripts/init-project.sh" new /tmp/fixture
       - name: Audit fixture
         run: |
           # Fresh fixture has no CLAUDE.md yet (Claude writes it after init).
           # Accept rc=0 (pass), 1 (warnings), 2 (CLAUDE.md missing on fresh fixture is expected).
-          bash $GITHUB_WORKSPACE/scripts/audit-setup.sh /tmp/fixture || true
+          bash "$GITHUB_WORKSPACE/scripts/audit-setup.sh" /tmp/fixture || true
           # Verify the script ran without crashing — that's the real CI check.
-          bash $GITHUB_WORKSPACE/scripts/audit-setup.sh /tmp/fixture > /tmp/audit.log 2>&1 || true
+          bash "$GITHUB_WORKSPACE/scripts/audit-setup.sh" /tmp/fixture > /tmp/audit.log 2>&1 || true
           grep -q "PASS:" /tmp/audit.log
 
   windows-hook-wiring:
