@@ -2,14 +2,15 @@
 # polyglot — minimal overlay for multi-language projects.
 set -uo pipefail
 TARGET="${1:-$(pwd)}"
-DRY="${2:-0}"
 PROFILE_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$CONJURE_HOME/lib/mutate.sh"
 echo "▸ Applying profile: polyglot → $TARGET"
 if [ -f "$TARGET/CLAUDE.md" ] && [ -f "$PROFILE_DIR/CLAUDE.md.fragment" ]; then
   if ! grep -q "<!-- profile:polyglot -->" "$TARGET/CLAUDE.md"; then
-    [ "$DRY" = 0 ] && cat "$PROFILE_DIR/CLAUDE.md.fragment" >> "$TARGET/CLAUDE.md"
+    mutate_write "$TARGET/CLAUDE.md" "$(cat "$PROFILE_DIR/CLAUDE.md.fragment")" "--append"
     echo "  ✓ appended CLAUDE.md fragment"
   fi
 fi
+mutate_summary
 echo "✓ Profile polyglot applied"
 echo "  ℹ Consider adding nested CLAUDE.md per language subtree."
