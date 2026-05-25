@@ -38,6 +38,7 @@
   },
 
   "_comment_hooks": "Exit code 2 = BLOCK. Matcher regex is case-sensitive. Keep each hook under 2 seconds.",
+  "_comment_telemetry": "Uncomment to enable opt-in skill-firing telemetry (set CONJURE_TELEMETRY=1 in env block below to activate; hook entries are always present but write nothing unless opted in)",
   "hooks": {
     "PostToolUse": [
       {
@@ -63,6 +64,15 @@
             "command": "node .claude/hooks/pre-commit-quality-gate.mjs"
           }
         ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/skill-telemetry.mjs"
+          }
+        ]
       }
     ],
     "Stop": [
@@ -84,9 +94,21 @@
           }
         ]
       }
+    ],
+    "UserPromptExpansion": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/skill-telemetry.mjs"
+          }
+        ]
+      }
     ]
   },
 
   "_comment_env": "Per-project env vars Claude should know about (don't put secrets here).",
-  "env": {}
+  "env": {
+    "_comment": "Set CONJURE_TELEMETRY=1 here to enable skill-firing telemetry (see TELEMETRY.md)"
+  }
 }
