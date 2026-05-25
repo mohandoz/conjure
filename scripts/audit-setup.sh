@@ -144,6 +144,25 @@ if [ -d .claude ]; then
   fi
 fi
 
+# Org overlay presence and drift check (OVLY-04)
+OVERLAY_MARKER="$TARGET/.claude/.conjure-org-overlay"
+if [ ! -f "$OVERLAY_MARKER" ]; then
+  ok "no org overlay configured"
+else
+  OVERLAY_URL="$(grep '^url=' "$OVERLAY_MARKER" | cut -d= -f2-)"
+  PINNED_SHA="$(grep '^sha=' "$OVERLAY_MARKER" | cut -d= -f2)"
+  note "[overlay] url: $OVERLAY_URL"
+  note "[overlay] pinned: $PINNED_SHA"
+  UPSTREAM_SHA="$(git ls-remote "$OVERLAY_URL" HEAD 2>/dev/null | awk '{print $1}')" || true
+  if [ -z "$UPSTREAM_SHA" ]; then
+    warn "[overlay] drift check skipped (git ls-remote failed)"
+  elif [ "$PINNED_SHA" = "$UPSTREAM_SHA" ]; then
+    ok "[overlay] up to date ($PINNED_SHA)"
+  else
+    warn "[overlay] DRIFT — pinned=$PINNED_SHA upstream=$UPSTREAM_SHA — run: conjure refresh-overlay"
+  fi
+fi
+
 # Summary
 echo
 echo "─────────────────────────────────────"
