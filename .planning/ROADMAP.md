@@ -67,9 +67,9 @@ Plans:
 - [x] 02-01-PLAN.md — Create lib/mutate.sh: mutate_mkdir, mutate_cp, mutate_write, mutate_summary (SAFE-02)
 
 **Wave 2** *(parallel — all depend on 02-01 only)*
-- [ ] 02-02-PLAN.md — Retrofit scripts/init-project.sh: replace 12 bare write sites with mutate_* calls (SAFE-01, SAFE-02)
-- [ ] 02-03-PLAN.md — Retrofit all 9 profiles/*/apply.sh: remove $DRY positional arg, source mutate.sh, replace write guards (SAFE-01, SAFE-02)
-- [ ] 02-04-PLAN.md — Retrofit all 4 compliance/*/apply.sh: add source + replace bare writes including hipaa cp+chmod (SAFE-01, SAFE-02)
+- [x] 02-02-PLAN.md — Retrofit scripts/init-project.sh: replace 12 bare write sites with mutate_* calls (SAFE-01, SAFE-02)
+- [x] 02-03-PLAN.md — Retrofit all 9 profiles/*/apply.sh: remove $DRY positional arg, source mutate.sh, replace write guards (SAFE-01, SAFE-02)
+- [x] 02-04-PLAN.md — Retrofit all 4 compliance/*/apply.sh: add source + replace bare writes including hipaa cp+chmod (SAFE-01, SAFE-02)
 
 **Wave 3** *(blocked on all Wave 2 plans)*
 - [ ] 02-05-PLAN.md — Wire DRY_RUN threading in cli/conjure cmd_init(): L75 init, L80 profile, L84 version stamp (SAFE-01, SAFE-02)
@@ -163,7 +163,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Pre-flight & Cross-Platform Hooks | 2/2 | Complete    | 2026-05-24 |
-| 2. Dry-Run Enforcement Chokepoint | 1/6 | In Progress|  |
+| 2. Dry-Run Enforcement Chokepoint | 4/6 | In Progress|  |
 | 3. Sandboxed Per-Profile Fixtures | 0/TBD | Not started | - |
 | 4. Regression Suite & Dry-Run Proof | 0/TBD | Not started | - |
 | 5. README Demo | 0/TBD | Not started | - |
