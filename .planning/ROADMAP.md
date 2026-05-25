@@ -129,10 +129,14 @@ Plans:
   1. The README shows an asciinema→GIF demo of `conjure init` followed by `conjure audit`
   2. The demo is recorded against a safe dry-run (no real mutation captured), reproducible from a documented command
   3. The demo reflects current behavior (cross-platform wiring, enforced dry-run) rather than a stale recording
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 05-01: TBD
+**Wave 1**
+- [ ] 05-01-PLAN.md — Create scripts/record-demo.sh: preflight, mktemp isolation, expect automation of conjure init --dry-run + audit, agg GIF conversion (DOCS-01)
+
+**Wave 2** *(blocked on Wave 1 completion and local GIF generation)*
+- [ ] 05-02-PLAN.md — Generate demo.gif locally, embed in README.md Quickstart section, add CI assertion to test job (DOCS-01)
 
 ### Phase 6: Cost Estimator
 **Goal**: `conjure audit --cost` gives an honest, offline-by-default estimate of per-session harness token cost without false precision
@@ -178,6 +182,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Dry-Run Enforcement Chokepoint | 6/6 | Complete    | 2026-05-24 |
 | 3. Sandboxed Per-Profile Fixtures | 3/3 | Complete    | 2026-05-24 |
 | 4. Regression Suite & Dry-Run Proof | 3/3 | Complete    | 2026-05-25 |
-| 5. README Demo | 0/TBD | Not started | - |
+| 5. README Demo | 0/2 | Not started | - |
 | 6. Cost Estimator | 0/TBD | Not started | - |
 | 7. Skill-Firing Telemetry | 0/TBD | Not started | - |
