@@ -148,11 +148,17 @@ Plans:
   2. The output is explicitly labeled an estimate, prints a ±band, and names the model plus pricing as-of date (no precise-looking single number)
   3. The default cost path makes zero network calls; an opt-in `--exact` flag may call Anthropic's `count_tokens` endpoint when credentials exist
   4. A per-skill breakdown shows which skills cost the most context
-**Plans**: TBD
-**Research**: light — confirm the May-2026 price table ($/Mtok + model + date) and the real-world chars-per-token band against a representative harness; verify the `--exact` SDK call shape
+**Plans**: 3 plans
 
 Plans:
-- [ ] 06-01: TBD
+**Wave 1** *(foundation — no dependencies)*
+- [ ] 06-01-PLAN.md — Create lib/prices.json (baked price table), lib/exact-count.mjs (Anthropic SDK wrapper), wire --cost/--exact flags in cli/conjure cmd_audit() (COST-01, COST-02, COST-03)
+
+**Wave 2** *(blocked on 06-01)*
+- [ ] 06-02-PLAN.md — Implement cost section in scripts/audit-setup.sh: CONJURE_HOME self-derivation, jq price read, per-file breakdown table, --exact integration, label line (COST-01, COST-02, COST-03)
+
+**Wave 3** *(blocked on 06-01 and 06-02)*
+- [ ] 06-03-PLAN.md — Extend tests/run.sh with cost estimator test section and lib/prices.json in JSON validity loop (COST-01, COST-02, COST-03)
 
 ### Phase 7: Skill-Firing Telemetry
 **Goal**: Conjure ships local-only, opt-in skill telemetry that produces a retire-list signal while making it provably impossible to phone home — turning "telemetry" into a trust asset
@@ -183,5 +189,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Sandboxed Per-Profile Fixtures | 3/3 | Complete    | 2026-05-24 |
 | 4. Regression Suite & Dry-Run Proof | 3/3 | Complete    | 2026-05-25 |
 | 5. README Demo | 2/2 | Complete    | 2026-05-25 |
-| 6. Cost Estimator | 0/TBD | Not started | - |
+| 6. Cost Estimator | 0/3 | Not started | - |
 | 7. Skill-Firing Telemetry | 0/TBD | Not started | - |
