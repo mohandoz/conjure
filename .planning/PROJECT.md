@@ -111,7 +111,9 @@ and verify a correct, safe harness.
 
 **Phase 12 complete:** Org overlay — `scripts/init-overlay.sh` + `scripts/refresh-overlay.sh` + CLI wiring (`conjure init --overlay`, `conjure refresh-overlay`) + audit drift check — OVLY-01 through OVLY-05 validated, 261 tests green (2026-05-26)
 
-**Next milestone:** v0.4.0 — Distribution + Ecosystem (Phase 13 next: homebrew-tap)
+**Phase 13 complete:** Homebrew tap — `Formula/conjure.rb` (install layout, bin wrapper, sha256 placeholder), `cli/conjure` CONJURE_HOME conditional (D-03), `release.yml` bump-homebrew-formula-action step — BREW-01 through BREW-04 validated, 265 tests green (2026-05-26)
+
+**Next milestone:** v0.4.0 — Distribution + Ecosystem (Phase 14 next: docker-+-windows-ci)
 
 ## Key Decisions
 
@@ -142,4 +144,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-26 — Phase 12 complete, OVLY-01 through OVLY-05 validated*
+*Last updated: 2026-05-26 — Phase 13 complete, BREW-01 through BREW-04 validated*
