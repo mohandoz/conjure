@@ -209,7 +209,8 @@ cmd_update() {
     local ts; ts="$(date +%Y%m%d-%H%M%S)"
     local backup="$target/.claude.backup-${ts}"
     echo "▸ Backing up existing .claude/ → $backup"
-    cp -R "$target/.claude" "$backup"
+    cp -R "$target/.claude" "$backup" \
+      || { echo "✗ Backup failed — aborting merge to protect your files."; return 1; }
   fi
 
   echo "▸ Applying 3-way merge: v${pinned} → v${CONJURE_VERSION}"
