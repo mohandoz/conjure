@@ -231,9 +231,7 @@ if [ "${CONJURE_RETIRE:-0}" = "1" ]; then
              || date -u -d '30 days ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
              || echo "0000-00-00T00:00:00Z")
 
-    RETIRE_TMP=$(mktemp)
-    # Combine with any existing EXIT trap to avoid overwriting COST_TMP cleanup
-    trap 'rm -f "${COST_TMP:-}" "${RETIRE_TMP:-}"' EXIT
+    trap 'rm -f "${COST_TMP:-}"' EXIT
 
     echo
     echo "── Skill Retire-List ──────────────────────────────────"
