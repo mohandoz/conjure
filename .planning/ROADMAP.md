@@ -31,7 +31,12 @@ Make Conjure installable and shareable through every standard channel while clea
   1. A contributor can run the verify commands in each VALIDATION.md and confirm the phase behavior without reading source code
   2. VALIDATION.md files exist for phases 01, 02, 04, 05, 06, and 07 in their respective phase directories
   3. CI passes with the new VALIDATION.md files present (no broken references, no size-cap violations)
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — Create 01-VALIDATION.md (preflight + cross-platform hooks) and 02-VALIDATION.md (dry-run enforcement) (TECH-02a, TECH-02b)
+- [ ] 08-02-PLAN.md — Create 04-VALIDATION.md (regression suite + dry-run proof) and 05-VALIDATION.md (README demo) (TECH-02c, TECH-02d)
+- [ ] 08-03-PLAN.md — Create 06-VALIDATION.md (cost estimator) and 07-VALIDATION.md (skill-firing telemetry) (TECH-02e, TECH-02f)
 
 ### Phase 09: 3-Way Merge
 **Goal**: `conjure update --apply` performs real 3-way file merges instead of silently ignoring user customizations, and conflicts are safely surfaced as sidecar files
@@ -115,7 +120,7 @@ Make Conjure installable and shareable through every standard channel while clea
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 08. Nyquist Compliance Backfill | v0.4.0 | 0/TBD | Not started | - |
+| 08. Nyquist Compliance Backfill | v0.4.0 | 0/3 | Not started | - |
 | 09. 3-Way Merge | v0.4.0 | 0/TBD | Not started | - |
 | 10. Marketplace Publish | v0.4.0 | 0/TBD | Not started | - |
 | 11. Skill Publishing | v0.4.0 | 0/TBD | Not started | - |
