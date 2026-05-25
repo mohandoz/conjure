@@ -15,7 +15,7 @@ Make Conjure installable and shareable through every standard channel while clea
 - [x] **Phase 08: Nyquist Compliance Backfill** - Write VALIDATION.md for phases 01, 02, 04, 05, 06, 07 (completed 2026-05-25)
 - [x] **Phase 09: 3-Way Merge** - Implement `cmd_update --apply` via `lib/merge.sh` + base snapshot (completed 2026-05-25)
 - [x] **Phase 10: Marketplace Publish** - Wire and validate the Claude Code Marketplace plugin manifest (completed 2026-05-25)
-- [ ] **Phase 11: Skill Publishing** - Add `conjure publish-skill` command with egress scan + PR flow
+- [x] **Phase 11: Skill Publishing** - Add `conjure publish-skill` command with egress scan + PR flow (completed 2026-05-25)
 - [x] **Phase 12: Org Overlay** - Implement `conjure init --overlay` + `conjure refresh-overlay` system (completed 2026-05-25)
 - [ ] **Phase 13: Homebrew Tap** - Publish `mohandoz/homebrew-conjure` formula and auto-bump action
 - [ ] **Phase 14: Docker + Windows CI** - Multi-arch Docker image and `windows-latest` CI matrix entry
@@ -100,11 +100,11 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 11-01-PLAN.md — Create scripts/publish-skill.sh (four validation gates + PR instruction printing) (SKILL-01, SKILL-02, SKILL-03, SKILL-04)
+- [x] 11-01-PLAN.md — Create scripts/publish-skill.sh (four validation gates + PR instruction printing) (SKILL-01, SKILL-02, SKILL-03, SKILL-04)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 11-02-PLAN.md — Wire cmd_publish_skill in cli/conjure + add SKILL-01..SKILL-04 regression tests in tests/run.sh (SKILL-01, SKILL-02, SKILL-03, SKILL-04)
+- [x] 11-02-PLAN.md — Wire cmd_publish_skill in cli/conjure + add SKILL-01..SKILL-04 regression tests in tests/run.sh (SKILL-01, SKILL-02, SKILL-03, SKILL-04)
 
 ### Phase 12: Org Overlay
 
@@ -181,7 +181,7 @@ Plans:
 | 08. Nyquist Compliance Backfill | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
 | 09. 3-Way Merge | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
 | 10. Marketplace Publish | v0.4.0 | 4/4 | Complete    | 2026-05-25 |
-| 11. Skill Publishing | v0.4.0 | 0/2 | Not started | - |
+| 11. Skill Publishing | v0.4.0 | 2/2 | Complete    | 2026-05-25 |
 | 12. Org Overlay | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
 | 13. Homebrew Tap | v0.4.0 | 0/TBD | Not started | - |
 | 14. Docker + Windows CI | v0.4.0 | 0/TBD | Not started | - |

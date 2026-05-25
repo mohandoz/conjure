@@ -25,10 +25,10 @@
 
 ### Skill Publishing (DIST-04)
 
-- [ ] **SKILL-01**: User can run `conjure publish-skill <name>` to validate a project skill against frontmatter schema, size cap (≤200 lines), and a static egress scan before submitting
-- [ ] **SKILL-02**: `conjure publish-skill` opens a pull request against the public kit via `gh pr create`; if `gh` is absent, prints the manual PR URL and checklist instead
-- [ ] **SKILL-03**: Published skill commit is SHA-pinned; branch-HEAD references are rejected with an error
-- [ ] **SKILL-04**: User can run `conjure publish-skill <name> --to <org/repo>` to contribute to a private kit or org overlay repo
+- [x] **SKILL-01**: User can run `conjure publish-skill <name>` to validate a project skill against frontmatter schema, size cap (≤200 lines), and a static egress scan before submitting
+- [x] **SKILL-02**: `conjure publish-skill` opens a pull request against the public kit via `gh pr create`; if `gh` is absent, prints the manual PR URL and checklist instead
+- [x] **SKILL-03**: Published skill commit is SHA-pinned; branch-HEAD references are rejected with an error
+- [x] **SKILL-04**: User can run `conjure publish-skill <name> --to <org/repo>` to contribute to a private kit or org overlay repo
 
 ### Org Overlay (DIST-05)
 
