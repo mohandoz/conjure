@@ -5,6 +5,7 @@ set -uo pipefail
 
 CONJURE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$CONJURE_HOME"
+source "$CONJURE_HOME/tests/lib/sandbox.sh"
 
 PASS=0
 FAIL=0
@@ -240,6 +241,45 @@ for c in hipaa soc2 gdpr pci; do
   else fail "compliance MISSING: $c"
   fi
 done
+
+# Fixture audits — sandboxed (TEST-01, TEST-02)
+echo
+echo "▸ Fixture audits — sandboxed (TEST-01, TEST-02)"
+for fx in "$CONJURE_HOME/tests/fixtures"/[^_]*/; do
+  prof=$(basename "$fx")
+  sandbox_setup "$fx"
+  trap 'rm -rf "$SANDBOX_DIR"' EXIT
+  AUDIT_OUT="$(bash "$CONJURE_HOME/scripts/audit-setup.sh" "$SANDBOX_DIR" 2>&1)"
+  AUDIT_RC=$?
+  if [ "$AUDIT_RC" -eq 0 ]; then
+    pass "fixture audit green: $prof"
+  else
+    fail "fixture audit non-green (rc=$AUDIT_RC): $prof"
+    printf '%s\n' "$AUDIT_OUT" | head -5
+  fi
+done
+
+# Broken fixture — specific finding assertion (TEST-04)
+echo
+echo "▸ Broken fixture — specific finding assertion (TEST-04)"
+sandbox_setup "$CONJURE_HOME/tests/fixtures/_broken"
+trap 'rm -rf "$SANDBOX_DIR"' EXIT
+BROKEN_OUT="$(bash "$CONJURE_HOME/scripts/audit-setup.sh" "$SANDBOX_DIR" 2>&1)"
+BROKEN_RC=$?
+if [ "$BROKEN_RC" -ne 0 ]; then
+  pass "_broken: audit exits non-zero (rc=$BROKEN_RC)"
+else
+  fail "_broken: audit should exit non-zero"
+fi
+while IFS= read -r pattern; do
+  [ -z "$pattern" ] && continue
+  case "$pattern" in \#*) continue ;; esac
+  if printf '%s\n' "$BROKEN_OUT" | grep -qE "$pattern"; then
+    pass "_broken: found expected finding: $pattern"
+  else
+    fail "_broken: missing expected finding: $pattern"
+  fi
+done < "$CONJURE_HOME/tests/fixtures/_broken/EXPECT"
 
 # Summary
 echo
