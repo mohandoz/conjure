@@ -40,10 +40,10 @@
 
 ### Homebrew Formula (DIST-02)
 
-- [ ] **BREW-01**: User can install Conjure with `brew install mohandoz/conjure/conjure`; `conjure --version` exits 0
-- [ ] **BREW-02**: `CONJURE_HOME` resolves automatically to `$(brew --prefix)/share/conjure/` when installed via Homebrew (no manual env var required)
-- [ ] **BREW-03**: Homebrew formula is pinned to a tagged tarball URL + SHA256 (never a branch HEAD)
-- [ ] **BREW-04**: `mislav/bump-homebrew-formula-action@v3` fires on every GitHub release to auto-update the SHA256 in the `mohandoz/homebrew-conjure` tap repo
+- [x] **BREW-01**: User can install Conjure with `brew install mohandoz/conjure/conjure`; `conjure --version` exits 0
+- [x] **BREW-02**: `CONJURE_HOME` resolves automatically to `$(brew --prefix)/share/conjure/` when installed via Homebrew (no manual env var required)
+- [x] **BREW-03**: Homebrew formula is pinned to a tagged tarball URL + SHA256 (never a branch HEAD)
+- [x] **BREW-04**: `mislav/bump-homebrew-formula-action@v3` fires on every GitHub release to auto-update the SHA256 in the `mohandoz/homebrew-conjure` tap repo
 
 ### Docker Image (DIST-03)
 
