@@ -52,7 +52,7 @@ Plans:
 
 Plans:
 - [x] 09-01-PLAN.md — Create lib/merge.sh (merge_file_3way, write_merge_sidecar, merge_user_files) + add lib/ to CI shellcheck glob (MERGE-01, MERGE-03)
-- [ ] 09-02-PLAN.md — Modify cli/conjure: cmd_init snapshot write + cmd_update --apply real merge (MERGE-01, MERGE-02, MERGE-03, MERGE-04)
+- [x] 09-02-PLAN.md — Modify cli/conjure: cmd_init snapshot write + cmd_update --apply real merge (MERGE-01, MERGE-02, MERGE-03, MERGE-04)
 - [ ] 09-03-PLAN.md — Add MERGE-05 audit conflict-marker check + MERGE-01/02/03/04 regression tests (MERGE-01, MERGE-02, MERGE-03, MERGE-04, MERGE-05)
 
 ### Phase 10: Marketplace Publish
@@ -126,7 +126,7 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 08. Nyquist Compliance Backfill | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
-| 09. 3-Way Merge | v0.4.0 | 1/3 | In Progress|  |
+| 09. 3-Way Merge | v0.4.0 | 2/3 | In Progress|  |
 | 10. Marketplace Publish | v0.4.0 | 0/TBD | Not started | - |
 | 11. Skill Publishing | v0.4.0 | 0/TBD | Not started | - |
 | 12. Org Overlay | v0.4.0 | 0/TBD | Not started | - |
