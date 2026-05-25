@@ -59,7 +59,7 @@ if [ -d .claude/skills ]; then
     fi
     if ! head -10 "$skill" | grep -q '^description:'; then
       err "Skill '$name': missing 'description:' frontmatter"
-    elif head -10 "$skill" | grep -q '^description: ".\{0,30\}"$'; then
+    elif head -10 "$skill" | grep -qE '^description: "?.{0,29}"?$'; then
       warn "Skill '$name': description very short (<30 chars) — likely won't fire correctly"
     fi
   done < <(find .claude/skills -name SKILL.md)

@@ -52,8 +52,8 @@ while IFS= read -r skill; do
   else fail "frontmatter missing: $skill"
   fi
 
-  # Description length
-  desc_len=$(echo "$desc_line" | sed 's/^description: //;s/^"//;s/"$//' | wc -c | tr -d ' ')
+  # Description length (printf avoids the trailing newline that echo appends)
+  desc_len=$(printf '%s' "$desc_line" | sed 's/^description: //;s/^"//;s/"$//' | wc -c | tr -d ' ')
   if [ "$desc_len" -lt 30 ]; then fail "description too short ($desc_len chars): $skill"; fi
 done < <(find templates/skills -name SKILL.md)
 
