@@ -6,7 +6,7 @@
 set -uo pipefail
 
 TARGET="${1:-$(pwd)}"
-cd "$TARGET"
+cd "$TARGET" || { echo "✗ Cannot cd to target: $TARGET"; exit 2; }
 
 PASS=0
 WARN=0
