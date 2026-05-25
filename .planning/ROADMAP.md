@@ -60,10 +60,22 @@ Cross-cutting constraints: scripts/preflight.sh must be POSIX bash 3.2+ (no bash
   2. All filesystem writes (init, profile/compliance apply, version stamp) route through a single shared `lib/mutate.sh` helper that honors `DRY_RUN`
   3. A dry-run run prints what it *would* write (the plan) for each intended mutation
   4. `DRY_RUN` is parsed once in the CLI and threaded into every child script, not re-checked ad hoc at each write
-**Plans**: TBD
+**Plans**: 6 plans
 
 Plans:
-- [ ] 02-01: TBD
+**Wave 1** *(foundation — no dependencies)*
+- [ ] 02-01-PLAN.md — Create lib/mutate.sh: mutate_mkdir, mutate_cp, mutate_write, mutate_summary (SAFE-02)
+
+**Wave 2** *(parallel — all depend on 02-01 only)*
+- [ ] 02-02-PLAN.md — Retrofit scripts/init-project.sh: replace 12 bare write sites with mutate_* calls (SAFE-01, SAFE-02)
+- [ ] 02-03-PLAN.md — Retrofit all 9 profiles/*/apply.sh: remove $DRY positional arg, source mutate.sh, replace write guards (SAFE-01, SAFE-02)
+- [ ] 02-04-PLAN.md — Retrofit all 4 compliance/*/apply.sh: add source + replace bare writes including hipaa cp+chmod (SAFE-01, SAFE-02)
+
+**Wave 3** *(blocked on all Wave 2 plans)*
+- [ ] 02-05-PLAN.md — Wire DRY_RUN threading in cli/conjure cmd_init(): L75 init, L80 profile, L84 version stamp (SAFE-01, SAFE-02)
+
+**Wave 4** *(blocked on 02-05)*
+- [ ] 02-06-PLAN.md — Add dry-run enforcement integration tests to tests/run.sh (SAFE-01, SAFE-02)
 
 ### Phase 3: Sandboxed Per-Profile Fixtures
 **Goal**: Every stack profile has a committed, audited example project that runs hermetically, plus a deliberately-broken fixture that proves the suite can catch regressions
@@ -151,7 +163,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Pre-flight & Cross-Platform Hooks | 2/2 | Complete    | 2026-05-24 |
-| 2. Dry-Run Enforcement Chokepoint | 0/TBD | Not started | - |
+| 2. Dry-Run Enforcement Chokepoint | 0/6 | Not started | - |
 | 3. Sandboxed Per-Profile Fixtures | 0/TBD | Not started | - |
 | 4. Regression Suite & Dry-Run Proof | 0/TBD | Not started | - |
 | 5. README Demo | 0/TBD | Not started | - |
