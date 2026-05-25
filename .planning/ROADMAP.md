@@ -68,8 +68,8 @@ Plans:
 
 Plans:
 - [x] 10-01-PLAN.md — Restructure .claude-plugin/marketplace.json + plugin.json to pass `claude plugin validate` (MKTPL-01)
-- [ ] 10-02-PLAN.md — Create scripts/publish-plugin.sh + cmd_publish dispatch in cli/conjure (MKTPL-01, MKTPL-04)
-- [ ] 10-03-PLAN.md — Add version-consistency check + claude CLI install + plugin validate steps to ci.yml (MKTPL-02, MKTPL-03)
+- [x] 10-02-PLAN.md — Create scripts/publish-plugin.sh + cmd_publish dispatch in cli/conjure (MKTPL-01, MKTPL-04)
+- [x] 10-03-PLAN.md — Add version-consistency check + claude CLI install + plugin validate steps to ci.yml (MKTPL-02, MKTPL-03)
 - [ ] 10-04-PLAN.md — Inline MKTPL regression tests in tests/run.sh (MKTPL-01, MKTPL-02, MKTPL-04)
 
 ### Phase 11: Skill Publishing
@@ -133,7 +133,7 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 08. Nyquist Compliance Backfill | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
 | 09. 3-Way Merge | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
-| 10. Marketplace Publish | v0.4.0 | 1/4 | In Progress|  |
+| 10. Marketplace Publish | v0.4.0 | 3/4 | In Progress|  |
 | 11. Skill Publishing | v0.4.0 | 0/TBD | Not started | - |
 | 12. Org Overlay | v0.4.0 | 0/TBD | Not started | - |
 | 13. Homebrew Tap | v0.4.0 | 0/TBD | Not started | - |

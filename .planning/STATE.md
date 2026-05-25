@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v0.4.0
 milestone_name: Distribution + Ecosystem
 status: executing
-last_updated: "2026-05-25T19:23:06.867Z"
+last_updated: "2026-05-25T19:26:09.154Z"
 last_activity: 2026-05-25
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 10
-  completed_plans: 7
+  completed_plans: 8
   percent: 25
 ---
 
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-05-25)
 ## Current Position
 
 Phase: 10 (marketplace-publish) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-05-25
 
-Progress: [███████░░░] 70%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [███████░░░] 70%
 - Trend: —
 
 *Updated after each plan completion*
+| Phase 10-marketplace-publish P03 | 49 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,7 @@ Progress: [███████░░░] 70%
 - [v0.4.0 ordering]: Nyquist backfill first, then 3-way merge (deepest logic), then distribution channels
 - [Docker base]: debian:bookworm-slim (not Alpine) to avoid musl libc breaks for optional Go/Rust tools
 - [Homebrew]: Separate tap repo `mohandoz/homebrew-conjure`; formula pinned to tagged tarball SHA256 only
+- [Phase ?]: Three new CI steps (version-consistency, claude CLI install, plugin validate) added to test job — MKTPL-02 and MKTPL-03 delivered
 
 ### Pending Todos
 
@@ -85,6 +87,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-25T19:23:06.862Z
+Last session: 2026-05-25T19:26:09.150Z
 Stopped at: Phase 10 context gathered
 Resume file: None
