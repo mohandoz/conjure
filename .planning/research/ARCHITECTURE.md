@@ -1,367 +1,476 @@
 # Architecture Research
 
-**Domain:** Open-source init kit for Claude Code — POSIX bash CLI + Node `.mjs` hooks (Conjure v0.3.0 "Testing + telemetry")
-**Researched:** 2026-05-24
-**Confidence:** HIGH (existing codebase read directly; integration points verified against real files)
+**Domain:** Open-source init kit for Claude Code — POSIX bash CLI + Node `.mjs` hooks (Conjure v0.4.0 "Distribution + Ecosystem")
+**Researched:** 2026-05-25
+**Confidence:** HIGH (existing codebase read directly; Claude Code Marketplace schema verified against official docs; Homebrew tap conventions verified against official docs)
 
-> **Scope note (subsequent milestone):** This file does NOT re-derive Conjure's
-> existing architecture. It defines how the five v0.3.0 capabilities slot into
-> the *current* file layout — component boundaries, who-writes-what, data flow,
-> and a dependency-ordered build sequence. Existing layout taken as fixed:
-> `cli/conjure` (dispatcher) → `scripts/*.sh` → `profiles/` `compliance/`
-> `migrations/` `templates/`; `tests/run.sh` is the single test entrypoint.
+> **Scope note (subsequent milestone):** This file documents how the seven v0.4.0
+> capabilities (DIST-01 through DIST-05, TECH-01, plus the Homebrew/Docker delivery
+> channels) slot into the *current* file layout. Existing layout is taken as
+> fixed and shipped: `cli/conjure` (dispatcher) → `scripts/*.sh` → `lib/mutate.sh`
+> (write chokepoint) → `profiles/` `compliance/` `migrations/` `templates/`;
+> `tests/run.sh` is the single test entrypoint. Everything from v0.3.0 is already
+> green (200 assertions).
 
-## Standard Architecture
+---
 
-### System Overview — where v0.3.0 work lands
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│  ENTRYPOINTS (existing, lightly extended)                              │
-│  ┌────────────────┐         ┌──────────────────┐                      │
-│  │  cli/conjure   │         │   tests/run.sh   │                      │
-│  │  (dispatcher)  │         │  (test driver)   │                      │
-│  └──────┬─────────┘         └─────────┬────────┘                      │
-│   init / audit / migrate              │ NEW: per-fixture loop          │
-├─────────┼─────────────────────────────┼───────────────────────────────┤
-│  WORKER SCRIPTS (existing + new)      │                                │
-│  ┌──────▼──────────┐  ┌───────────────▼─────┐  ┌──────────────────┐   │
-│  │ init-project.sh │  │  audit-setup.sh     │  │ scripts/preflight│   │
-│  │ + DRY_RUN guard │  │  + --cost section   │  │   .sh (NEW,      │   │
-│  │                 │  │  + telemetry report │  │   extracted)     │   │
-│  └──────┬──────────┘  └──────────┬──────────┘  └──────────────────┘   │
-│         │ DRY_RUN threads through │ reads cost model + event log       │
-├─────────┼────────────────────────┼────────────────────────────────────┤
-│  SHARED LIB (NEW — lib/)         │                                     │
-│  ┌──────▼─────────────────┐  ┌───▼──────────────────┐                 │
-│  │ lib/mutate.sh          │  │ lib/cost.sh          │                 │
-│  │ (write/cp/mkdir guard) │  │ (char→token→$ model) │                 │
-│  └────────────────────────┘  └──────────────────────┘                 │
-├──────────────────────────────────────────────────────────────────────┤
-│  TEMPLATES (shipped into target .claude/)                             │
-│  ┌────────────────────────────┐  ┌──────────────────────────────┐    │
-│  │ templates/hooks/            │  │ templates/hooks-nodejs/      │    │
-│  │  skill-telemetry.sh (NEW)   │  │  skill-telemetry.mjs (NEW)   │    │
-│  └─────────────┬───────────────┘  └──────────────┬───────────────┘    │
-│                │ writes (in target project)        │                   │
-├────────────────┼──────────────────────────────────┼───────────────────┤
-│  TARGET PROJECT (runtime, not the kit)            │                   │
-│  ┌─────────────▼──────────────────────────────────▼──────────────┐    │
-│  │  .claude/telemetry/skill-events.jsonl   (append-only log)      │    │
-│  └────────────────────────────────────────────────────────────────┘   │
-├──────────────────────────────────────────────────────────────────────┤
-│  FIXTURES (NEW — committed test data)                                 │
-│  tests/fixtures/<profile>/  +  tests/fixtures/<profile>/EXPECT.txt    │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-### Component Responsibilities
-
-| Component | Responsibility (what it owns) | Real path |
-|-----------|-------------------------------|-----------|
-| `cli/conjure` | Dispatch + flag parsing; pass `--dry-run`/`--cost` down; call `scripts/preflight.sh` | `cli/conjure` (exists) |
-| `scripts/preflight.sh` | Dependency verification + one-command install fix-its; reusable by CLI and tests | NEW — extracted from `cmd_preflight()` |
-| `lib/mutate.sh` | Single chokepoint for every filesystem write; honors `DRY_RUN`; logs intended mutations | NEW |
-| `lib/cost.sh` | Pure functions: chars→tokens→$ estimate, per-skill breakdown | NEW |
-| `scripts/init-project.sh` | Scaffold `.claude/`; route all writes through `lib/mutate.sh` | exists — refactor writes |
-| `scripts/audit-setup.sh` | Health-check; gains `--cost` block + telemetry "retire-list" report block | exists — extend |
-| `templates/hooks/skill-telemetry.sh` (+ `.mjs`) | Runtime hook in target project; appends one event per skill load | NEW templates |
-| `tests/fixtures/<profile>/` | Committed example project per stack profile, scaffolded + filled, audited green | NEW |
-| `tests/fixtures/<profile>/EXPECT.txt` | Declarative assertion file the runner diffs audit output against | NEW |
-| `tests/run.sh` | Adds a per-fixture loop: run audit in each fixture, compare to EXPECT | exists — extend |
-
-**Boundary rule:** The *kit* (this repo) never writes a telemetry log. Only the
-*shipped hook running inside a target project* writes `.claude/telemetry/`. The
-kit only ships the hook template and reads logs during `audit --cost`/retire
-reporting against whatever project it points at. This keeps the kit stateless.
-
-## Recommended Project Structure
+## Existing Architecture (v0.3.0, fixed baseline)
 
 ```
-conjure/
-├── cli/
-│   └── conjure                      # dispatcher — add --cost route, call scripts/preflight.sh
-├── lib/                             # NEW — sourced helpers (not subcommands)
-│   ├── mutate.sh                    # write_file / copy_into / make_dir — DRY_RUN-aware
-│   └── cost.sh                      # est_tokens(), est_cost(), per_skill_breakdown()
-├── scripts/
-│   ├── init-project.sh              # refactor: source lib/mutate.sh, replace cp/mkdir/cat>
-│   ├── audit-setup.sh               # extend: source lib/cost.sh; add --cost + retire-list blocks
-│   ├── preflight.sh                 # NEW — extracted dependency check + fix-its
-│   └── ...                          # (refresh-graph, install-mcp-stack unchanged)
-├── templates/
-│   ├── hooks/
-│   │   └── skill-telemetry.sh       # NEW — bash telemetry hook (POSIX)
-│   ├── hooks-nodejs/
-│   │   └── skill-telemetry.mjs      # NEW — Node telemetry hook (Windows parity)
-│   └── settings.json.tmpl           # extend: register telemetry hook (see Data Flow)
-└── tests/
-    ├── run.sh                       # extend: fixtures loop + dry-run + preflight assertions
-    ├── lib/
-    │   └── assert.sh                # NEW (optional) — assert_audit_green, assert_no_writes
-    └── fixtures/                    # NEW
-        ├── python-fastapi/          # one dir per profile
-        │   ├── .claude/             # committed, audited-green harness
-        │   ├── CLAUDE.md
-        │   └── EXPECT.txt           # expected audit signature
-        ├── ts-next/
-        ├── rust-axum/
-        └── ...                      # 9 total
+cli/conjure          — dispatcher: parse flags, call scripts/*, source lib/*
+  └── cmd_init        — init|migrate; --profile; --dry-run; calls scripts/init-project.sh
+  └── cmd_audit       — calls scripts/audit-setup.sh; --cost; --retire-list
+  └── cmd_update      — --check shows diff; --apply STUB (cli/conjure:171-178)
+  └── cmd_migrate     — calls migrations/<source>/migrate.sh
+  └── cmd_preflight   — calls scripts/preflight.sh
+  └── cmd_refresh_graph / cmd_install_mcp
+
+lib/mutate.sh         — write chokepoint (ALL filesystem mutations go here)
+lib/cost.sh           — char→token→$ estimation (sourced by audit-setup.sh)
+lib/prices.json       — per-model price table
+lib/exact-count.mjs   — opt-in Anthropic SDK exact token counter
+
+scripts/init-project.sh   — scaffold .claude/
+scripts/audit-setup.sh    — health-check; --cost; --retire-list
+scripts/preflight.sh      — dependency verification
+scripts/refresh-graph.sh
+scripts/install-mcp-stack.sh
+
+profiles/<stack>/apply.sh          — CLAUDE.md fragment + preflight
+compliance/<overlay>/apply.sh      — CLAUDE.md fragment + control files
+
+.claude-plugin/
+  ├── marketplace.json   — marketplace catalog (lists conjure as a plugin)
+  ├── plugin.json        — plugin manifest
+  └── SCHEMAS/           — skill.schema.json, agent.schema.json
+
+tests/run.sh              — 200-assertion suite
+tests/fixtures/<profile>/ — committed scaffolds per profile
 ```
 
-### Structure Rationale
+Key constraint: **every filesystem write in the kit routes through `lib/mutate.sh`**
+(mutate_mkdir / mutate_cp / mutate_write). New commands must follow this invariant.
 
-- **`lib/` (new top-level):** Conjure currently has only entrypoints (`cli/`) and
-  worker scripts (`scripts/`). Telemetry-cost math and the dry-run guard are
-  *shared logic* used by both `audit-setup.sh` and `init-project.sh` (and tests).
-  A sourced-library dir is the idiomatic bash way to share without forking a
-  subprocess. Keep these files non-executable and `source`d, never dispatched.
-- **`scripts/preflight.sh` (extracted, not new logic):** `cmd_preflight()` already
-  lives inline in `cli/conjure` (lines 169–188). Extracting it to a standalone
-  script lets `tests/run.sh` assert on it and lets profile `preflight.sh` scripts
-  reuse the same fix-it strings. The CLI then just calls `bash scripts/preflight.sh`.
-- **`tests/fixtures/<profile>/`:** Mirrors the existing single-fixture CI job
-  (`audit-on-fixture` scaffolds `/tmp/fixture`). v0.3.0 promotes that throwaway
-  fixture into committed, per-profile fixtures so audit assertions are
-  reproducible and reviewable in PRs — not regenerated each CI run.
-- **`EXPECT.txt` beside each fixture:** Declarative golden-file assertions keep
-  `tests/run.sh` simple — it diffs normalized audit output against the expected
-  PASS/WARN/FAIL signature rather than encoding per-fixture logic in the runner.
-- **`.claude/telemetry/skill-events.jsonl` (in target, not kit):** JSON Lines is
-  append-only and crash-safe (one event = one line; partial writes are skippable),
-  needs no parser to append, and `jq -s` can fold it for the retire-list report.
-  This is preferred over the existing prose `EVENT-LOG.md` convention because the
-  retire-list needs machine aggregation, not human prose.
+---
 
-## Architectural Patterns
+## New Components
 
-### Pattern 1: Mutation chokepoint (`DRY_RUN` threaded, not re-checked)
+### 1. `scripts/publish-plugin.sh` (DIST-01)
+**What:** Packages `.claude-plugin/` and prepares the marketplace submission.
 
-**What:** Every filesystem write goes through one of three `lib/mutate.sh`
-functions. `--dry-run` is parsed once in `cli/conjure`, exported as `DRY_RUN`,
-and the chokepoint decides whether to act or just log "[dry-run] would write X".
-**When to use:** Any code path that creates/copies/edits files (init, migrate, profile apply).
-**Trade-offs:** One refactor pass through `init-project.sh` now; but eliminates the
-class of bug where a new write path forgets to honor `--dry-run`. The flag is
-*already* parsed in `cmd_init` (line 56) and passed to migrate/profile apply —
-this pattern makes it actually enforced at the write site instead of advisory.
+The Claude Code Marketplace does not have a REST submission API — distribution is
+done by updating `marketplace.json` in the conjure repo and pushing a git tag.
+Specifically: the official Anthropic marketplace (`claude-plugins-official`) requires
+a PR to add a plugin entry; community marketplaces are self-hosted repos. DIST-01
+therefore means: (a) ensure `.claude-plugin/marketplace.json` is well-formed and
+version-bumped, (b) emit the JSON snippet a maintainer pastes into a PR against
+the Anthropic catalog, and (c) optionally push the conjure repo tag so the
+`git-subdir` source pins to a real SHA.
 
-**Example:**
-```bash
-# lib/mutate.sh
-copy_into() {   # copy_into <src> <dst>
-  if [ "${DRY_RUN:-0}" = 1 ]; then echo "  [dry-run] would copy → $2"; return 0; fi
-  cp -R "$1" "$2"
-}
-# init-project.sh — before:  cp "$KIT/templates/$f" "$f"
-#                   after:   copy_into "$KIT/templates/$f" "$f"
-```
-
-### Pattern 2: Telemetry as an append-only event hook (kit ships, project writes)
-
-**What:** A new hook (`skill-telemetry.sh` / `.mjs`) registered in
-`settings.json.tmpl` fires when skills load and appends one JSONL event to
-`.claude/telemetry/skill-events.jsonl` in the *target* project.
-**When to use:** Runtime in any Conjure-initialized project that opts into telemetry.
-**Trade-offs:** Claude Code's hook event surface determines fidelity — if no
-`SkillLoad`/`UserPromptSubmit`-with-skill event exists, fall back to logging at
-`SessionStart`/`Stop` what skills were *available* + which files were read
-(coarser signal, still feeds retire-list). **Confidence on exact event name: LOW
-— must verify against installed Claude Code ≥2.1.117 hook docs before building.**
-
-**Example (event line, one per skill activation):**
+Fields required in `.claude-plugin/marketplace.json` (verified against official docs):
 ```json
-{"ts":"2026-05-24T19:00:00Z","event":"skill_load","skill":"api-routes","session":"abc123"}
+{
+  "name": "conjure",
+  "owner": { "name": "mohandoz" },
+  "plugins": [{
+    "name": "conjure",
+    "source": { "source": "github", "repo": "mohandoz/conjure", "ref": "v0.4.0", "sha": "<40-char>" },
+    "description": "...",
+    "version": "0.4.0",
+    "category": "developer-tools"
+  }]
+}
 ```
 
-### Pattern 3: Golden-file fixture assertions (declarative regression)
+New file: `scripts/publish-plugin.sh`
+- Reads `VERSION`
+- Validates `.claude-plugin/marketplace.json` with `jq`
+- Resolves the current HEAD SHA (`git rev-parse HEAD`)
+- Writes/updates the `sha` field in marketplace.json via `mutate_write`
+- Prints the JSON snippet for the Anthropic catalog PR
+- Optionally checks `plugin.json` version matches `VERSION`
 
-**What:** Each fixture ships an `EXPECT.txt` capturing the audit summary it must
-produce. `tests/run.sh` runs `audit-setup.sh <fixture>`, normalizes output (strip
-timestamps/paths), and diffs against `EXPECT.txt`.
-**When to use:** Per-profile regression — proves a profile's scaffold stays
-audit-green as templates evolve.
-**Trade-offs:** Golden files need regeneration when audit output intentionally
-changes (add a `tests/update-fixtures.sh` helper). Cheaper than imperative
-assertions and gives readable diffs in PRs.
-
-**Example:**
-```bash
-# tests/run.sh — new block
-for fx in tests/fixtures/*/; do
-  prof=$(basename "$fx")
-  got=$(bash scripts/audit-setup.sh "$fx" 2>&1 | grep -E '^(PASS|WARN|FAIL):' )
-  exp=$(cat "$fx/EXPECT.txt")
-  [ "$got" = "$exp" ] && pass "fixture audit: $prof" || fail "fixture drift: $prof"
-done
+### 2. `cmd_publish` in `cli/conjure` (DIST-01)
+**What:** New dispatch case in the CLI.
 ```
+conjure publish [--dry-run]
+```
+Calls `scripts/publish-plugin.sh`. Follows the same `--dry-run` env pattern.
+Minimal: ~10 lines in the dispatch table + function.
 
-## Data Flow
-
-### Telemetry flow (session → hook → log → retire-list)
+### 3. `scripts/publish-skill.sh` (DIST-04)
+**What:** Packages a named skill from `.claude/skills/<name>/` and emits the plugin
+entry JSON needed to contribute it to the conjure public kit (or a custom marketplace).
 
 ```
-Claude Code session in target project
-        │ (skill loads / session events fire)
-        ▼
-.claude/hooks/skill-telemetry.sh   (shipped by init-project.sh)
-        │ appends one JSON line
-        ▼
-.claude/telemetry/skill-events.jsonl   (append-only, in TARGET repo)
-        │ read later (not during the session)
-        ▼
-conjure audit --cost   →  scripts/audit-setup.sh
-        │ folds events with `jq -s`, joins against skills present on disk
-        ▼
-"Retire-list" report block:
-  skills with 0 loads in N sessions  →  candidates to retire
-  + cost block: harness chars→tokens→$ from lib/cost.sh
+conjure publish-skill <name> [--dry-run]
 ```
 
-### Cost-estimate flow (`conjure audit --cost`)
+Flow:
+1. Locate `<target>/.claude/skills/<name>/SKILL.md` (default target = cwd)
+2. Validate frontmatter against `.claude-plugin/SCHEMAS/skill.schema.json`
+3. Emit a `plugin.json` stub for the skill as a standalone plugin
+4. Print instructions for opening a PR against `mohandoz/conjure` to add it to `templates/skills/`
+
+Does NOT require 3-way merge (TECH-01). Depends on schema validation only.
+
+### 4. `scripts/apply-org-overlay.sh` (DIST-05)
+**What:** Fetches and applies a private org overlay repo.
 
 ```
-conjure audit --cost .
-        │ cli/conjure routes --cost → audit-setup.sh (passes flag through)
-        ▼
-audit-setup.sh sources lib/cost.sh
-        │ already computes TOTAL_CHARS for .claude/ (audit-setup.sh:124)
-        ▼
-lib/cost.sh: est_tokens(chars)=chars/4 ; est_cost(tokens)=tokens * $/Mtok
-        │ + per-skill breakdown (which skills cost the most context)
-        ▼
-prints "Estimated per-session harness load: ~N tokens (~$X.XX at <model rate>)"
+conjure init --org-overlay=<git-url-or-local-path> [target]
 ```
 
-### Dry-run flow (single parse, threaded enforcement)
+An org overlay is structurally identical to a compliance overlay: a directory with
+`apply.sh` + optional `CLAUDE.md.fragment` + additional templates. The only new
+capability is *fetching* it from a remote git URL before applying.
 
-```
-conjure init --dry-run .        (flag parsed once: cli/conjure:56)
-        │ export DRY_RUN=1
-        ▼
-init-project.sh  →  every write calls lib/mutate.sh helper
-        │ DRY_RUN=1 → print "[dry-run] would …", make NO change
-        ▼
-profile apply.sh / migrate.sh  (already receive dryrun arg)
-        │ also route writes through lib/mutate.sh
-        ▼
-Result: identical console plan, zero filesystem mutations  (assert in tests/run.sh)
-```
+Flow:
+1. Accept `--org-overlay=<git-url-or-local-path>` in `cmd_init`
+2. If URL: `git clone --depth 1 <url> /tmp/conjure-org-overlay-$$` into a temp dir
+3. Source and call the overlay's `apply.sh` (same interface as compliance overlays)
+4. Clean up temp clone
+5. Stamp `.claude/.conjure-org-overlay` with the URL + clone SHA for audit traceability
 
-### Pre-flight flow
+The overlay is a git repo users own. No conjure-side registry needed.
 
-```
-conjure init / migrate / audit
-        │ cli/conjure calls  bash scripts/preflight.sh  (before any mutation)
-        ▼
-scripts/preflight.sh checks required (git, jq, rg) + optional (graphify, ast-grep…)
-        │ missing → prints exact one-command fix-it ("brew install … / apt-get install …")
-        ▼
-required missing → exit non-zero (block);  optional missing → warn + continue
-```
+### 5. `lib/merge.sh` (TECH-01)
+**What:** 3-way merge implementation for `cmd_update --apply`.
 
-### Key Data Flows (summary)
+The existing stub at `cli/conjure:171-178` acknowledges the placeholder. The
+implementation uses `git merge-file` (available wherever git is installed, which is
+a preflight requirement), which takes three files: `current` (project's file),
+`base` (the kit version that was installed when the project was initialized), and
+`new` (current kit template). This is the canonical POSIX approach — no additional
+tooling needed.
 
-1. **Skill telemetry:** session → hook → `skill-events.jsonl` → `audit --cost` folds → retire-list. Log lives in the *target* project; the kit only reads it.
-2. **Cost:** existing `.claude/` char count (audit already computes it) → `lib/cost.sh` → token + dollar estimate + per-skill breakdown.
-3. **Dry-run:** parsed once in CLI → `DRY_RUN` env → enforced at `lib/mutate.sh` chokepoint across init/migrate/profile.
-4. **Fixtures:** committed `tests/fixtures/<profile>/` → `audit-setup.sh` → normalized output diffed vs `EXPECT.txt` in `tests/run.sh`.
+File: `lib/merge.sh`
+Functions:
+- `merge_skill(current, base, new, dest)` — calls `git merge-file -p current base new`; on conflict prints markers and returns non-zero
+- `merge_with_backup(src, dest, base_ref)` — wraps `merge_skill` + backup-before-mutate via `lib/mutate.sh`
 
-## Scaling Considerations
+`cmd_update --apply` in `cli/conjure` is then completed:
+1. For each differing skill: find `base` from `.conjure-version` stamp + git tag lookup, run `merge_with_backup`
+2. Conflicts: print file paths, instruct user to resolve (no interactive editor — cross-platform constraint)
+3. On clean merge: update `.conjure-version`
 
-*(Reframed for a CLI/test-kit: "scale" = number of profiles, fixtures, and telemetry log growth — not user load.)*
+### 6. `Dockerfile` + `.github/workflows/docker.yml` (DIST-03)
+**What:** Multi-stage Docker image with bash + jq + shellcheck + git + node pre-installed.
+Not a CLI command — a delivery channel.
 
-| Scale | Architecture adjustments |
-|-------|--------------------------|
-| 9 profiles / 9 fixtures (now) | Flat `tests/fixtures/<profile>/`, linear loop in `run.sh` — fine. CI time dominated by 9 audit runs (<seconds each). |
-| +compliance overlay fixtures | Add `tests/fixtures/<profile>+<overlay>/` sparingly (combinatorial — pick representative pairs, not all 9×4). |
-| Telemetry log growth in a busy project | `skill-events.jsonl` is append-only; add a size/age note in audit ("rotate if >N MB"). Retire-list reads last N sessions, not whole file. |
+Location: `Dockerfile` at repo root, `docker.yml` CI job.
 
-### Scaling Priorities
+Base image: `debian:bookworm-slim` (not Alpine — bash 3.2 compat, jq in apt).
+Published to: `ghcr.io/mohandoz/conjure:latest` + `ghcr.io/mohandoz/conjure:v<VERSION>`.
 
-1. **First bottleneck:** CI wall-time as fixtures grow — keep audit fast; avoid spawning `graphify`/network in fixture audits (fixtures must be hermetic, offline).
-2. **Second bottleneck:** Fixture maintenance burden when audit output format changes — mitigate with a `tests/update-fixtures.sh` regenerator so EXPECT files aren't hand-edited.
+### 7. `homebrew-conjure` tap (DIST-02)
+**What:** External Homebrew tap repository — not a file in this repo.
 
-## Anti-Patterns
+Location: separate GitHub repo `mohandoz/homebrew-conjure` (naming convention required
+by Homebrew: `homebrew-<tapname>`). Contains `Formula/conjure.rb`.
 
-### Anti-Pattern 1: Re-checking `--dry-run` at every call site
+The formula:
+- `url` points to the GitHub release tarball `https://github.com/mohandoz/conjure/archive/refs/tags/v<VERSION>.tar.gz`
+- `sha256` is the tarball hash (must be updated per release)
+- `install` copies `cli/conjure` to `bin/conjure` and installs `scripts/`, `lib/`, `profiles/`, `compliance/`, `templates/`, `.claude-plugin/`
+- `depends_on "jq"`, `depends_on "git"` — shellcheck is not in homebrew-core; note it as optional
+- Sets `CONJURE_HOME` to the formula's prefix via a wrapper script
 
-**What people do:** Sprinkle `[ "$DRY" = 0 ] && cp …` at each write (the profile
-`apply.sh` already does this — see `profiles/python-fastapi/apply.sh`).
-**Why it's wrong:** Every new write path is a chance to forget the guard; that's
-exactly the "not enforced everywhere" gap the roadmap calls out.
-**Do this instead:** Route all writes through `lib/mutate.sh`; the guard lives in one place.
+A GitHub Actions job in this repo (`.github/workflows/release.yml`) should be
+extended to automatically open a PR against `mohandoz/homebrew-conjure` after each
+release tag, updating the `sha256` and `url` fields.
 
-### Anti-Pattern 2: Kit writes telemetry into its own repo
+---
 
-**What people do:** Have `conjure` write an event log under the kit's own tree.
-**Why it's wrong:** Conjure is stateless tooling; telemetry is per-*target*-project
-data and belongs in that project's `.claude/telemetry/`, gitignored there.
-**Do this instead:** Ship the hook; the hook (running in the target) owns the log. Kit only reads.
+## Modified Components
 
-### Anti-Pattern 3: Imperative per-fixture assertions inside `run.sh`
+### `cli/conjure` — MODIFIED
+**Changes:**
+- Add `cmd_publish` function (~10 lines); dispatch `publish` case
+- Add `cmd_publish_skill` function (~15 lines); dispatch `publish-skill` case
+- Add `--org-overlay=<url>` flag parsing in `cmd_init`
+- Complete `cmd_update --apply` by replacing the stub (lines 174-178) with a call to `lib/merge.sh:merge_with_backup`
 
-**What people do:** Hard-code "python-fastapi should have 18 skills, 6 agents…" in the runner.
-**Why it's wrong:** Runner balloons; every profile tweak edits shared test code.
-**Do this instead:** Golden `EXPECT.txt` per fixture; runner stays a generic diff loop.
+**What does NOT change:** dispatch pattern, flag-parsing style, DRY_RUN threading, preflight call pattern. All new commands follow the existing `source lib/mutate.sh` + `bash scripts/<worker>.sh` pattern.
 
-### Anti-Pattern 4: Non-hermetic fixtures
+### `scripts/audit-setup.sh` — MODIFIED
+**Changes:**
+- Add a check for `.claude/.conjure-org-overlay` presence → report URL + SHA (traceability)
+- Add version-pinning check: warn if `marketplace.json` version does not match `VERSION`
 
-**What people do:** Fixture audit invokes `graphify`, `git`, or network during CI.
-**Why it's wrong:** Flaky CI; `audit-setup.sh` already conditionals on `graphify-out/`
-and `git` — fixtures must omit those so the audit signature is deterministic.
-**Do this instead:** Commit fixtures with no `graphify-out/`, stub git state; assert only on deterministic blocks.
+### `.github/workflows/release.yml` — MODIFIED
+**Changes:**
+- After creating the GitHub release: invoke `scripts/publish-plugin.sh` to generate the marketplace snippet and commit the updated SHA to `.claude-plugin/marketplace.json` via a bot commit
+- Add a step to trigger a PR against `mohandoz/homebrew-conjure` (using `gh` CLI or a `repository_dispatch` event)
+- Add a step to trigger the Docker build/push workflow
+
+### `.github/workflows/ci.yml` — MODIFIED
+**Changes:**
+- Add `lib/merge.sh` to the shellcheck glob (currently `find cli scripts migrations profiles compliance templates/hooks tests -name '*.sh'` — add `lib`)
+- Add a Docker build smoke test job (build only, no push, for PRs)
+
+### `.claude-plugin/marketplace.json` — MODIFIED
+**Changes:**
+- Update `version` field to match `VERSION` on each release
+- Add `sha` field pointing to release commit (done by `scripts/publish-plugin.sh`)
+
+---
 
 ## Integration Points
 
-### External tools
+### lib/mutate.sh chokepoint
+Every new script that writes files MUST source `lib/mutate.sh` and use
+`mutate_mkdir` / `mutate_cp` / `mutate_write`. This applies to:
+- `scripts/publish-plugin.sh` (writes updated marketplace.json sha field)
+- `scripts/apply-org-overlay.sh` (writes `.claude/.conjure-org-overlay` stamp)
+- `lib/merge.sh` (writes merged files via `mutate_write`)
 
-| Tool | Integration pattern | Notes |
-|------|---------------------|-------|
-| Claude Code hooks | `settings.json.tmpl` registers `skill-telemetry.{sh,mjs}` | **Verify the exact skill-load hook event name vs CC ≥2.1.117 before building** — telemetry fidelity depends on it. |
-| `jq` | Fold `skill-events.jsonl` for retire-list; already a preflight dep | Audit already gates on `jq` presence (`audit-setup.sh:86`). |
-| `shellcheck` (CI) | New `lib/*.sh` + `scripts/preflight.sh` join the lint glob | Update CI find-glob in `.github/workflows/ci.yml` to include `lib`. |
+Scripts that only READ (publish-skill emitting JSON to stdout; the Homebrew formula)
+do not need mutate.sh, but must not call `cp`/`mkdir`/`cat >` directly for
+any writes they do make.
 
-### Internal boundaries
+### Compliance overlay interface (org overlay reuse)
+`scripts/apply-org-overlay.sh` is designed to call an overlay's own `apply.sh`
+(same interface as `compliance/<overlay>/apply.sh`). This means org overlays are
+not a new interface — they are standard compliance overlays hosted externally and
+fetched at runtime. The only novel piece is the git-clone + temp-dir + stamp logic.
 
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| `cli/conjure` ↔ `scripts/*` | subprocess (`bash …`) + args/env | Existing pattern; `--cost`/`DRY_RUN` flow as arg/env. |
-| `scripts/*` ↔ `lib/*` | `source` (same process) | New; lib functions need caller's vars (`DRY_RUN`, paths). |
-| hook (target) ↔ telemetry log | append to file in target `.claude/` | One-directional write; kit never writes here. |
-| `tests/run.sh` ↔ fixtures | `audit-setup.sh <fixture>` + diff `EXPECT.txt` | Generic loop, declarative expectations. |
+### Version stamp chain
+```
+VERSION file
+  └─ read by cli/conjure → CONJURE_VERSION
+       └─ stamped to <target>/.claude/.conjure-version on init
+            └─ read by cmd_update --check / --apply (base for 3-way merge)
+       └─ read by scripts/publish-plugin.sh → written to marketplace.json `version`
+       └─ verified by .github/workflows/release.yml (tag must match VERSION)
+```
 
-## Suggested Build Order (dependency-driven)
+### 3-way merge dependency chain
+```
+.conjure-version (base ref)
+  └─ git tag exists for that version? → git show v<base>:templates/skills/<name>/SKILL.md
+       └─ lib/merge.sh:merge_with_backup(current, base, new)
+            └─ git merge-file -p current base new
+```
+This means `cmd_update --apply` requires: (a) git installed (already a preflight dep),
+(b) the version tag for the project's pinned version exists in the conjure repo.
+Implication: all release tags must be preserved (no force-delete). Add a note to CONTRIBUTING.md.
 
-Ordered so each phase unblocks the next; maps to roadmap phases under v0.3.0.
+### Docker image vs CLI commands
+The Docker image is purely a delivery channel. It contains the conjure CLI pre-installed
+with all dependencies (bash, jq, git, shellcheck, node). No new CLI commands are
+Docker-specific. The image's entrypoint is `conjure`; users run:
+```
+docker run --rm -v $(pwd):/repo mohandoz/conjure init
+```
 
-1. **Pre-flight extraction** (`scripts/preflight.sh`) — smallest, standalone;
-   immediately testable; the fix-it strings are reused by later phases. No deps.
-2. **`lib/mutate.sh` + dry-run enforcement** — refactor `init-project.sh` writes
-   through the chokepoint. Independent of telemetry/cost. Unblocks safe fixture
-   generation (you want `--dry-run` correct before you trust generated fixtures).
-3. **Test fixtures per profile** (`tests/fixtures/<profile>/` + `EXPECT.txt`) —
-   depends on a trustworthy `init` (steps 1–2) so generated fixtures are correct.
-   Generate via `conjure init --profile=X`, fill CLAUDE.md, audit green, snapshot.
-4. **Regression suite wiring** (`tests/run.sh` fixture loop) — depends on fixtures
-   (3) existing. Adds golden-file diff loop + dry-run assertion (asserts step 2).
-5. **`lib/cost.sh` + `audit --cost`** — depends only on audit's existing char
-   count; can proceed in parallel with 3–4, but fixtures (3) give it test targets.
-6. **Skill telemetry hook** (`templates/hooks/skill-telemetry.{sh,mjs}` + settings
-   registration) — last, because (a) it needs the CC hook-event verification, and
-   (b) the retire-list report it feeds plugs into the now-extended `audit --cost`
-   (step 5) and is best validated against fixtures (step 3) carrying sample logs.
+### Homebrew tap vs repo
+The tap lives in a separate repository. The `cli/conjure` binary discovers
+`CONJURE_HOME` via `$(cd "$(dirname "$0")/.." && pwd)` — this works because
+Homebrew's `install` copies the whole tree into the formula prefix, and the
+wrapper script sets `PATH` so that `conjure` resolves to the prefix copy.
+No changes to `cli/conjure` are needed for Homebrew compatibility.
 
-**Why this order:** safety primitives (preflight, dry-run) first → trustworthy
-fixtures → regression net that guards everything after → analytical features
-(cost, telemetry) last, since they consume the fixtures and the extended audit.
+---
+
+## Suggested Build Order
+
+Dependencies are explicit: each item lists what it unblocks.
+
+### Step 1 — TECH-01: `lib/merge.sh` + `cmd_update --apply`
+**Why first:** The 3-way merge is the deepest new logic and the only piece that
+touches an existing stub. Implementing it first lets all subsequent testing
+(fixtures, publish round-trips) verify it in context. It has no dependencies on
+any other DIST item. Once the stub is replaced with a working implementation,
+the test suite can add merge regression fixtures.
+
+Dependencies: git (already preflight), lib/mutate.sh (already shipped).
+Unblocks: nothing else depends on it, but implementing it clears the tech debt
+early before distribution work adds surface area.
+
+### Step 2 — DIST-01: `scripts/publish-plugin.sh` + `cmd_publish`
+**Why second:** Requires no new dependencies. Validates that `.claude-plugin/marketplace.json`
+is correct before any external distribution happens. Short (one script + one CLI
+function). The output is a JSON snippet + an updated marketplace.json SHA — a
+low-risk, high-value capability that exercises the release pipeline.
+
+Dependencies: `jq` (already preflight), `lib/mutate.sh` (shipped), `git rev-parse`.
+Unblocks: DIST-02 and DIST-03 (both need a correct release artifact with a valid marketplace.json).
+
+### Step 3 — DIST-04: `scripts/publish-skill.sh` + `cmd_publish_skill`
+**Why third:** Builds on the same script + CLI-function pattern as DIST-01. Shares
+the schema validation logic from `.claude-plugin/SCHEMAS/skill.schema.json`. No
+external services, no git-clone, no merge logic needed. Can be done in parallel
+with Step 2 if two people are working, but in a solo context it reuses the pattern
+learned in Step 2.
+
+Dependencies: `.claude-plugin/SCHEMAS/skill.schema.json` (already shipped), `jq`.
+Unblocks: community contribution workflow (PR-based).
+
+### Step 4 — DIST-05: `scripts/apply-org-overlay.sh` + `--org-overlay` flag
+**Why fourth:** Introduces the only genuinely new runtime behavior (git-clone in a
+temp dir). Should be built after the simpler publish scripts so the pattern is
+established and the test fixtures have been used to build confidence. The temp-dir
++cleanup pattern needs careful `set -e` + trap handling — worth a focused pass.
+
+Dependencies: `git clone` (already preflight), `lib/mutate.sh`, compliance overlay
+`apply.sh` interface (stable).
+Unblocks: org adoption stories; this is the feature that lets teams use private overlays.
+
+### Step 5 — DIST-02: `mohandoz/homebrew-conjure` tap repo
+**Why fifth:** Depends on a clean release artifact (Step 2 must have produced a
+correct marketplace.json at a tagged version). The tap formula is straightforward
+Ruby but lives in a separate repo — it requires a GitHub release to exist with the
+correct tarball. Best done after the first successful `conjure publish` run so
+the SHA is stable.
+
+Dependencies: GitHub release (from release.yml), `VERSION` matching the tag.
+Unblocks: `brew install conjure`.
+
+### Step 6 — DIST-03: `Dockerfile` + `docker.yml` CI
+**Why last among DIST items:** Docker is purely delivery; no CLI logic. Building it
+last means the final image contains all v0.4.0 features. The Dockerfile is
+straightforward (package installs + COPY); the CI job is small. Docker build
+failures don't block any other work.
+
+Dependencies: all scripts and CLI changes complete (Steps 1-5) so the image
+contains the full v0.4.0 feature set.
+Unblocks: `docker run mohandoz/conjure init`.
+
+### Step 7 — Release pipeline wiring (`.github/workflows/release.yml` extension)
+**Why last:** This step connects all of the above into a single release trigger.
+Extend `release.yml` to: (a) run `scripts/publish-plugin.sh` and commit the SHA
+update, (b) trigger the Homebrew tap PR, (c) trigger the Docker build/push. All
+three targets must exist before this wiring is useful.
+
+Dependencies: Steps 1-6 all complete; `gh` CLI available in CI (already present for
+release creation).
+Unblocks: automated release distribution.
+
+---
+
+### Build order summary table
+
+| Step | Work item | New/Modified | Key dep | Unblocks |
+|------|-----------|--------------|---------|----------|
+| 1 | `lib/merge.sh` + `cmd_update --apply` | NEW + MODIFIED | git, lib/mutate.sh | tech debt cleared |
+| 2 | `scripts/publish-plugin.sh` + `cmd_publish` | NEW + MODIFIED | jq, git rev-parse | Steps 5, 6, 7 |
+| 3 | `scripts/publish-skill.sh` + `cmd_publish_skill` | NEW + MODIFIED | skill schema | community workflow |
+| 4 | `scripts/apply-org-overlay.sh` + `--org-overlay` | NEW + MODIFIED | git clone, mutate.sh | org adoption |
+| 5 | `mohandoz/homebrew-conjure` tap | NEW (separate repo) | GitHub release tag | brew install |
+| 6 | `Dockerfile` + `docker.yml` | NEW | all CLI complete | docker run |
+| 7 | `release.yml` pipeline extension | MODIFIED | Steps 2, 5, 6 | automated release |
+
+---
+
+## Architecture Diagram (v0.4.0 additions highlighted)
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  ENTRYPOINTS                                                                   │
+│  ┌──────────────────────────────────────────────────────────────┐             │
+│  │  cli/conjure  (dispatcher)                                    │             │
+│  │   init / migrate / audit / update / preflight  [existing]     │             │
+│  │   publish         [NEW — DIST-01]                             │             │
+│  │   publish-skill   [NEW — DIST-04]                             │             │
+│  │   init --org-overlay=<url>  [NEW flag — DIST-05]             │             │
+│  │   update --apply  [STUB → REAL — TECH-01]                    │             │
+│  └──────────────────┬───────────────────────────────────────────┘             │
+│                     │ subprocess (bash scripts/*.sh)                          │
+├─────────────────────┼──────────────────────────────────────────────────────┤
+│  WORKER SCRIPTS                                                               │
+│  ┌──────────────────▼──────┐  ┌─────────────────┐  ┌──────────────────────┐  │
+│  │ init-project.sh [exist] │  │ publish-plugin  │  │ publish-skill.sh     │  │
+│  │ audit-setup.sh  [exist] │  │ .sh [NEW-D01]   │  │ [NEW-D04]            │  │
+│  │ preflight.sh    [exist] │  └────────┬────────┘  └──────────┬───────────┘  │
+│  └─────────────────────────┘           │ mutate_write          │ stdout JSON  │
+│  ┌──────────────────────────┐           │                       │             │
+│  │ apply-org-overlay.sh     │           │                       │             │
+│  │ [NEW-D05]                │           │                       │             │
+│  │  git clone (temp)        │           │                       │             │
+│  │  → calls overlay/apply.sh│           │                       │             │
+│  └──────────────────────────┘           │                       │             │
+├────────────────────────────────────────┼───────────────────────┼─────────────┤
+│  SHARED LIB (sourced, not dispatched)  │                       │             │
+│  ┌──────────────────────────────┐  ┌───▼──────────────────┐    │             │
+│  │ lib/mutate.sh  [existing]    │  │ lib/merge.sh [NEW-T01]│    │             │
+│  │ (ALL writes route here)      │  │ merge_skill()         │    │             │
+│  └──────────────────────────────┘  │ merge_with_backup()   │    │             │
+│  ┌──────────────────────────────┐  └───────────────────────┘    │             │
+│  │ lib/cost.sh    [existing]    │                                │             │
+│  └──────────────────────────────┘                                │             │
+├──────────────────────────────────────────────────────────────────┼─────────────┤
+│  DISTRIBUTION CHANNELS (not CLI commands)                         │             │
+│  ┌───────────────────────────┐  ┌────────────────┐  ┌────────────▼──────────┐  │
+│  │ mohandoz/homebrew-conjure │  │  Dockerfile    │  │ .claude-plugin/       │  │
+│  │ [NEW-D02 separate repo]   │  │ [NEW-D03]      │  │ marketplace.json      │  │
+│  │  Formula/conjure.rb       │  │  ghcr.io image │  │ (SHA updated by D01)  │  │
+│  └───────────────────────────┘  └────────────────┘  └───────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  CI / RELEASE PIPELINE                                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐       │
+│  │ .github/workflows/release.yml [MODIFIED]                             │       │
+│  │   push tag → verify VERSION → extract changelog → create GH release  │       │
+│  │   → run publish-plugin.sh (SHA commit)                               │       │
+│  │   → PR to homebrew-conjure tap [NEW]                                 │       │
+│  │   → trigger docker build/push [NEW]                                  │       │
+│  └──────────────────────────────────────────────────────────────────────┘       │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Anti-Patterns to Avoid
+
+### Anti-Pattern 1: Bypassing lib/mutate.sh in new publish scripts
+**What:** Calling `jq --arg ... > file.json` directly in `publish-plugin.sh`.
+**Why bad:** Breaks `--dry-run` contract; inconsistent behavior; future callers assume
+all writes are DRY_RUN-aware.
+**Do this instead:** Read with `jq`, build content string, pass to `mutate_write`.
+
+### Anti-Pattern 2: Bundling git-clone side-effects into lib/ functions
+**What:** Putting `git clone` inside a lib/ function so it "can be reused."
+**Why bad:** lib/ functions are sourced and must be side-effect-free except for
+the explicit mutate_* primitives. Network + subprocess in a sourced lib file is
+unpredictable.
+**Do this instead:** `git clone` stays in `scripts/apply-org-overlay.sh` (a worker
+script). Only the stamp-write goes through lib/mutate.sh.
+
+### Anti-Pattern 3: Interactive merge editor in cmd_update --apply
+**What:** Spawning `$VISUAL` or `vimdiff` for merge conflict resolution.
+**Why bad:** Breaks Docker/CI usage; not cross-platform (no `vi` on Windows CI).
+**Do this instead:** On conflict, print the conflicting file paths with `<<<<<<<`
+markers and exit non-zero with a message: "Conflicts in X file(s) — resolve manually,
+then run: echo '<version>' > .claude/.conjure-version". No editor spawned.
+
+### Anti-Pattern 4: Separate version tracking for marketplace.json
+**What:** Having marketplace.json `version` field managed separately from `VERSION`.
+**Why bad:** They drift; release automation breaks; audit's version consistency
+check fails.
+**Do this instead:** `scripts/publish-plugin.sh` always reads `VERSION` and writes
+it to marketplace.json atomically via mutate_write. Single source of truth.
+
+### Anti-Pattern 5: Org overlay stored inside the conjure kit repo
+**What:** Adding org-specific overlays as committed directories under `compliance/`.
+**Why bad:** Private compliance configs committed to a public OSS repo. Legal/trust
+problem. Also defeats the purpose of org overlays.
+**Do this instead:** Org overlays are always external repos, fetched at `init` time
+via `--org-overlay=<url>`, never stored in conjure itself.
+
+---
 
 ## Sources
 
-- `cli/conjure`, `scripts/init-project.sh`, `scripts/audit-setup.sh`, `tests/run.sh`, `templates/settings.json.tmpl`, `templates/hooks/*`, `profiles/python-fastapi/{apply,preflight}.sh`, `.github/workflows/ci.yml` — read directly this session (HIGH confidence).
-- `.planning/PROJECT.md`, `planning/ROADMAP.md`, `planning/GSD-INTEGRATION.md` — v0.3.0 scope + constraints (HIGH).
-- Claude Code hook event surface (skill-load event name) — NOT verified this session; **flag for phase-time verification** against installed CC ≥2.1.117 docs (LOW until confirmed).
+- `cli/conjure` (full content read this session) — HIGH confidence
+- `lib/mutate.sh` (full content read this session) — HIGH confidence
+- `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json` (read this session) — HIGH confidence
+- `.planning/PROJECT.md` v0.4.0 requirements (read this session) — HIGH confidence
+- `.github/workflows/release.yml`, `ci.yml` (read this session) — HIGH confidence
+- Claude Code official docs: "Create and distribute a plugin marketplace" at `code.claude.com/docs/en/plugin-marketplaces` — HIGH confidence (fetched this session; schema verified)
+- `anthropics/claude-plugins-official` marketplace.json structure — HIGH confidence (fetched this session)
+- Homebrew tap docs at `docs.brew.sh/Taps` and `docs.brew.sh/How-to-Create-and-Maintain-a-Tap` — HIGH confidence
+- `git merge-file` documentation at `git-scm.com/docs/git-merge-file` — HIGH confidence
 
 ---
-*Architecture research for: Conjure v0.3.0 testing + telemetry integration*
-*Researched: 2026-05-24*
+*Architecture research for: Conjure v0.4.0 Distribution + Ecosystem integration*
+*Researched: 2026-05-25*

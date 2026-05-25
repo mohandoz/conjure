@@ -1,163 +1,210 @@
-# Project Research Summary
+# Research Summary — Conjure v0.4.0 Distribution + Ecosystem
 
-**Project:** Conjure — v0.3.0 "Testing + telemetry" milestone
-**Domain:** Open-source developer tooling — Claude Code init kit (POSIX bash CLI + Node `.mjs` hooks)
-**Researched:** 2026-05-24
-**Confidence:** HIGH
+**Project:** Conjure
+**Domain:** CLI tool distribution, ecosystem integration, and 3-way merge for a POSIX bash + Node.js init kit
+**Researched:** 2026-05-25
+**Confidence:** HIGH (official sources for all distribution channels; codebase read directly)
+
+---
 
 ## Executive Summary
 
-This is a *subsequent* milestone on a mature OSS init kit (v0.2.1, 112 green self-tests, 9 profiles, 4 compliance overlays). v0.3.0 is the "earn-trust-before-reach" milestone: five capabilities — per-profile test fixtures, a regression suite, genuinely-enforced `--dry-run`, local-only skill-firing telemetry, and an `audit --cost` estimator — plus the pre-flight hardening that ties them together. Research across all four files converges on one theme: **this milestone is fundamentally about closing the gap between what Conjure *claims* and what it *verifiably does*.** Two of the five features (`--dry-run`, cross-platform hooks) are already advertised but provably broken in the working tree today; the suite is what proves the rest.
+Conjure v0.4.0 adds seven capabilities across two tracks: distribution (Marketplace,
+Homebrew, Docker, publish-skill, org overlays) and tech debt (3-way merge, Windows CI).
+The distribution track opens install channels for macOS, Linux, CI environments, and
+enterprise teams with private overlays. The tech debt track completes the `cmd_update
+--apply` stub that has been inert since it was scaffolded, and confirms the cross-platform
+claim with an actual Windows CI matrix entry. Together, the milestone makes Conjure
+installable through every standard channel and keeps the "harness stays healthy" core
+value intact.
 
-The recommended approach is **deliberately dependency-free and local-first**, matching the kit's existing constraints. Extend the hand-rolled `tests/run.sh` with a per-fixture golden-file loop (bats-core v1.13.0 only if unit-level specs grow; shellspec is disqualified as unmaintained since 2021). Telemetry is an append-only JSONL file written by a Claude Code hook *inside the target project* — never the kit — parsed later by `jq`. The cost estimator is a `chars/4` heuristic times a baked, dated price table, explicitly labeled an estimate with a ±band; no tokenizer is bundled (Anthropic's own tokenizer is inaccurate for Claude 4.x), with an optional opt-in online `--exact` path. Architecturally, all writes funnel through a new `lib/mutate.sh` chokepoint so `--dry-run` is enforced in *one* place instead of N call sites, and pre-flight is extracted to `scripts/preflight.sh` so both the CLI and tests can reuse it.
+The recommended approach is to sequence the work depth-first by dependency: 3-way merge
+first (unblocks update correctness), then Marketplace publish (validates the release
+artifact), then the two ecosystem commands (publish-skill, org overlays), then delivery
+channels (Homebrew, Docker), and finally release-pipeline wiring. No new runtime
+dependencies are introduced — the stack stays bash + Node stdlib + jq + git + shellcheck.
+Docker uses a Debian-slim base (not Alpine) to avoid musl libc incompatibilities with
+optional Go/Rust power tools. The Homebrew formula lives in a separate tap repo
+(`mohandoz/homebrew-conjure`) to keep separation clean.
 
-The dominant risk is **trust collapse from getting telemetry wrong** — the April-2026 GitHub CLI opt-out backlash is the cautionary tale, and Conjure is a safety/compliance tool where phoning home would be self-contradicting. Telemetry must be off-by-default, opt-in, local-only (zero network egress), PII-free, and user-inspectable, with a build-time no-egress test that greps every hook for `curl`/`fetch`/`http`/socket and fails CI if found — turning the trust promise into an enforced invariant. The secondary risks are the two live bugs (dry-run mutates disk; Windows hooks are wired `bash`-only and silently dead) and a cost estimator that quotes a precise-looking number users will screenshot and be burned by. All are well-understood with concrete prevention strategies below.
+The dominant risk is supply-chain trust: Conjure distributes AI configuration that
+Claude executes as instructions. Skills published through any channel can contain
+prompt-injection payloads. A static egress scan (grep for `curl`/`wget`/network calls
+in `run:` blocks) must be a CI gate across all distribution paths before any channel
+opens. The second risk is the mutate.sh bypass: all four new mutation paths (overlay
+apply, merge apply, publish-skill, publish-plugin) must route writes through
+`lib/mutate.sh` or the `--dry-run` guarantee silently regresses.
 
-## Key Findings
+---
 
-### Recommended Stack
+## Stack Additions
 
-The kit's hard constraint — POSIX bash + Node `.mjs`, no heavy runtime dependency — drives every pick. Testing extends the existing hand-rolled `tests/run.sh` rather than adopting a framework, because per-profile fixtures are a `for` loop over `audit-setup.sh`, not a framework need. Telemetry, cost, and pre-flight all reuse tools already in pre-flight (`jq`, `node` stdlib). The only new vendored option is bats-core, and only as an optional git submodule for unit-level specs. See `.planning/research/STACK.md`.
+| Tool / Format | Version | Purpose | Why |
+|---------------|---------|---------|-----|
+| `debian:bookworm-slim` | current | Docker base image | musl/Alpine breaks glibc-linked Go/Rust optional tools; Debian slim keeps image ~150 MB |
+| `koalaman/shellcheck:stable` | stable tag | Multi-stage Docker shellcheck copy | Statically linked; `COPY --from=koalaman/shellcheck:stable` is the official pattern |
+| `node:20-alpine` | 20 LTS | Docker Node layer (STACK.md sketch; bash added via apk) | Node 20 LTS; migrate to 22 before EOL 2026-04-30 |
+| `.claude-plugin/marketplace.json` | Claude Code schema | Marketplace publish (DIST-01) | Already present at v0.2.0; needs `plugins[]` array + version bump to 0.4.0 |
+| `mislav/bump-homebrew-formula-action` | v3 | Automate Homebrew SHA256 on release | Cross-repo write to tap; needs `HOMEBREW_TAP_TOKEN` with `repo` + `workflow` scopes |
+| `git merge-file` | git >=2.x (already preflight dep) | 3-way merge for `cmd_update --apply` | Git builtin; `--diff3` conflict style; exit 0 = clean, >0 = N conflicts |
+| `gh` (GitHub CLI) | system advisory dep | `conjure publish-skill` opens PR | Already in contributor workflow; print fallback if absent |
 
-**Core technologies:**
-- **Hand-rolled `tests/run.sh` (extended):** fixture-driven regression loop — already ships, zero install, models the assertion pattern perfectly.
-- **bats-core v1.13.0 (optional submodule):** unit-level specs (dry-run invariants, arg parsing) only if inline helpers get unwieldy — actively maintained (Nov 2025), bash 3.2+, TAP output. shellspec rejected (unmaintained since Jan 2021).
-- **Append-only JSONL + `jq`:** local telemetry store written by a hook, folded for the retire-list — no SDK, no sqlite, no phone-home.
-- **`chars/4` heuristic + baked price table:** cost estimate — no tokenizer dependency (Anthropic's is inaccurate for Claude 4.x); optional opt-in `--exact` via lazy `npx @anthropic-ai/sdk` `countTokens()` when creds exist.
-- **`command -v` probe (bash) + mirrored `.mjs` probe:** OS-aware pre-flight with copy-pasteable install hints (brew/apt/winget/npm); never auto-installs.
+**No new runtime npm dependencies.** `dependencies: {}` stays empty. Base stack
+(bash + Node stdlib + jq + shellcheck + git) is unchanged.
 
-### Expected Features
+---
 
-The audience (developers scrutinizing a dev tool) makes "verifiable" the table-stakes bar. See `.planning/research/FEATURES.md`.
+## Feature Table Stakes
 
-**Must have (table stakes):**
-- Telemetry OFF by default, opt-in, **local-only / zero network egress**, PII-free, with a documented schema (`TELEMETRY.md`) and inspectable log (`conjure telemetry show`). Honor `DO_NOT_TRACK`.
-- Per-profile test fixtures audited green + a one-command, CI-gated regression suite (golden-file pattern, PR-approved updates).
-- `--dry-run` that genuinely mutates nothing, *everywhere*, with a test asserting zero mutation.
-- Pre-flight dependency verification with one-command, OS-correct fix-its (never auto-install).
+### DIST-01 — Marketplace Publish
+- Valid `marketplace.json` with `plugins[]` array, `github` source, SHA-pinned version
+- `claude plugin validate` passes locally and in CI on every PR
+- Version field (`marketplace.json` + `plugin.json`) kept in sync with `VERSION` — CI gate required
+- Community marketplace submission to `anthropics/claude-plugins-community` (process work, can be async)
 
-**Should have (competitive differentiators):**
-- Local-only skill-firing telemetry → quarterly "retire-list" signal — turns the dreaded word "telemetry" into a trust asset, on-thesis with "less context = better adherence."
-- `conjure audit --cost` heuristic estimator with a stated ±band — no comparable kit estimates harness token cost.
-- Failure-mode reproductions encoded as tests — turns FAILURE-MODES.md docs into guarantees.
-- asciinema → GIF demo in README — highest-ROI adoption move, safe to record once dry-run is real.
+### DIST-02 — Homebrew Tap
+- `brew install mohandoz/conjure/conjure` works end-to-end
+- `CONJURE_HOME` resolves to `$(brew --prefix)/share/conjure/` automatically
+- `test do` block: `conjure --version` exits 0 with greppable output
+- Formula pinned to tagged tarball URL + SHA256 (never branch HEAD)
+- `bump-homebrew-formula-action` fires on every release to auto-update SHA256 in tap repo
 
-**Defer (v0.3.x / v0.4.0+):**
-- Dynamic CI-generated test-count badge; `--print-install` aggregate block; per-profile cost rows in SIZING.md.
-- Distribution (Marketplace, Homebrew, Docker), any aggregate/network telemetry, web dashboard — explicitly out of scope per PROJECT.md.
+### DIST-03 — Docker Image
+- `docker run ghcr.io/mohandoz/conjure:v0.4.0 conjure audit .` works with `-v $(pwd):/work`
+- Non-root user (`USER conjure`, UID 1000); host files stay user-owned after volume-mount writes
+- Published to `ghcr.io` via `GITHUB_TOKEN`; semantic version tags + `latest`
+- Multi-arch: `linux/amd64` + `linux/arm64`; baseline image ≤200 MB
+- README shows `$(pwd)` / `${PWD}` / `%CD%` forms for bash/PowerShell/cmd
 
-### Architecture Approach
+### DIST-04 — `conjure publish-skill`
+- Validates frontmatter schema + size cap (≤200 lines) before submitting — reuses existing audit logic
+- Static egress scan: fail publish if skill contains `curl`/`wget`/network calls in `run:` blocks
+- SHA-pins the published commit; PR-based contribution only (never auto-merge)
+- Degrades gracefully without `gh` (print manual PR steps)
 
-v0.3.0 work slots into the existing `cli/conjure → scripts/*.sh` layout by adding one new top-level `lib/` (sourced helpers) and promoting throwaway fixtures into committed per-profile fixtures. Two patterns are load-bearing: a **single mutation chokepoint** (`lib/mutate.sh`) so `--dry-run` is parsed once and enforced at the write site, and **golden-file fixtures** (`EXPECT.txt` per profile) so the runner stays a generic diff loop. The kit stays stateless: only the *shipped hook running inside a target project* writes telemetry; the kit only reads it during `audit --cost`. See `.planning/research/ARCHITECTURE.md`.
+### DIST-05 — Org Overlay
+- `conjure init --overlay <git-url>` applies base kit then org overlay via temp clone
+- All writes through `lib/mutate.sh`; backup-before-mutate on conflicts
+- `.claude/.conjure-org-overlay` marker records URL + clone SHA for audit traceability
+- Overlay URL stored credential-free; authentication via user's existing git credential store
+- `conjure refresh-overlay` re-pulls and re-applies; `conjure audit` detects and reports overlay presence
 
-**Major components:**
-1. **`scripts/preflight.sh`** (extracted from inline `cmd_preflight()`) — dependency checks + fix-its, reusable by CLI and tests.
-2. **`lib/mutate.sh`** — single chokepoint for every filesystem write; honors `DRY_RUN`; logs intended mutations.
-3. **`lib/cost.sh`** — pure `chars→tokens→$` functions + per-skill breakdown, sourced by `audit-setup.sh`.
-4. **`tests/fixtures/<profile>/` + `EXPECT.txt`** — committed example projects + declarative golden assertions; `tests/run.sh` diffs normalized audit output.
-5. **`templates/hooks/skill-telemetry.{sh,mjs}`** — runtime hook appending JSONL to the *target* project's `.claude/telemetry/`.
+### TECH-01 — 3-Way Merge (`cmd_update --apply`)
+- Replaces stub at `cli/conjure:174` with `lib/merge.sh` using `git merge-file --diff3`
+- Base snapshot stored at `.claude/.conjure-templates-<version>/` written at `conjure init` time
+- Conflicts written to sidecar (`.conjure-conflict-<file>`), never into the live file
+- Generated files (`.conjure-version`, `settings.json`) always take upstream; user-owned files (`CLAUDE.md`, skills) get 3-way merge
+- `conjure audit` must detect `^<<<<<<<` conflict markers and fail with specific error
 
-### Critical Pitfalls
+### TECH-03 — Windows CI
+- `windows-latest` matrix entry in CI: `shell: bash` for CLI path, `shell: pwsh` for `.mjs` hooks
+- `.mjs` hooks use `path.join()` for all file paths (no string-concat `/` separators)
+- `compatibility.platforms` stays `["darwin","linux","wsl"]` — no `"windows"` until a PowerShell entrypoint exists
 
-1. **`--dry-run` is a lie today (LIVE BUG).** `conjure init --dry-run` parses the flag but never threads `DRY_RUN` into `init-project.sh`, profile `apply.sh`, or the unconditional `.conjure-version` stamp — only migrations honor it. Dry-run mutates disk now. **Avoid:** route all writes through `lib/mutate.sh`; thread `DRY_RUN` into every child incl. the version stamp; prove it with a tree+mtime snapshot test.
-2. **Cross-platform hooks wired `bash`-only (LIVE BUG).** `templates/settings.json.tmpl` hardwires `bash .claude/hooks/*.sh` for all four hooks; on native Windows without Git Bash every hook silently no-ops, despite the `.mjs` files existing. **Avoid:** emit `node .claude/hooks/<name>.mjs` (universal) or branch by detected OS at init; add a test asserting the wired command references a runtime present on the OS; add a `windows-latest` CI leg.
-3. **Telemetry that erodes trust — the star-killer.** Opt-out, silent, or phone-home telemetry triggers the exact backlash Conjure is chasing stars to avoid. **Avoid:** local-only by design, opt-in, PII-free; build-time no-egress grep test on all hooks; log is gitignored + names-only; document loudly.
-4. **Cost estimator uses the wrong tokenizer / over-precise framing.** `tiktoken`/heuristics differ 20–40% from Claude's tokenizer; a precise-looking number gets quoted and burns users. **Avoid:** label an order-of-magnitude estimate, print model + `$/Mtok` + as-of date + ±band; price in a dated constant block; offline default, opt-in online `--exact` for accuracy.
-5. **Fixtures leak real `$HOME`/global config/network, flake, or rot silently.** Un-sandboxed fixtures read the dev's real `~/.claude`/git/tools; time/path/randomness cause heisentests; green-only suites mask regressions. **Avoid:** sandbox `HOME`/`XDG_CONFIG_HOME`/`CLAUDE_CONFIG_DIR`/`PATH` in `setup()`; copy fixtures to tmp; PATH-shim external tools; normalize output before diffing; ship ≥1 intentionally-failing fixture and assert *specific* findings, not just exit 0.
+---
 
-## Implications for Roadmap
+## Phase Order Recommendation
 
-Research yields a clear **dependency-ordered build sequence** (from ARCHITECTURE.md, corroborated by the pitfall-to-phase mapping). Safety primitives first → trustworthy fixtures → the regression net that guards everything → analytical features (cost, telemetry) last, since they consume the fixtures and the extended audit.
+Ordering logic: dependency-first, then complexity-first within independent groups.
+TECH-02 (Nyquist) and TECH-01 (merge) precede distribution to keep the codebase
+correct and covered before new surface area is added. DIST-01 unlocks DIST-02/03.
+DIST-04/05 share the mutate.sh discipline. Release pipeline wiring is last.
 
-### Phase 1: Pre-flight extraction + cross-platform hook wiring
-**Rationale:** Smallest, standalone, no deps; the fix-it strings are reused later. Pairs naturally with fixing the `bash`-only hook wiring (LIVE BUG #2), since both are about "detect the platform, emit the right thing."
-**Delivers:** `scripts/preflight.sh` (extracted from inline `cmd_preflight()`), OS-aware install hints, and per-platform hook wiring (`node .mjs` universal or OS-branched) in `settings.json.tmpl`.
-**Addresses:** Pre-flight dependency verification with one-command fix-its (table stakes).
-**Avoids:** Pitfall 5 (bash-only hooks silently dead on Windows), Pitfall UX (wrong installer per OS).
+| Phase | Feature | Rationale |
+|-------|---------|-----------|
+| **1** | TECH-02 Nyquist compliance backfill | Do first: write VALIDATION.md files in-context, not bulk post-hoc. Closes coverage gaps before new surface area arrives. Pitfall I-2 says deferring this produces shallow tests. |
+| **2** | TECH-01 `lib/merge.sh` + `cmd_update --apply` | Deepest new logic; touches the existing stub; no distribution deps. Clears most-requested tech debt early. Base snapshot design must happen here. |
+| **3** | DIST-01 Marketplace publish | Validates the release artifact. Correct `marketplace.json` + SHA is a prerequisite for Homebrew SHA pinning and Docker version tags. Low code complexity. |
+| **4** | DIST-04 `conjure publish-skill` | Builds on DIST-01 plugin format; same script + CLI-function pattern; no external services. Validates ecosystem contribution flywheel. |
+| **5** | DIST-05 Org overlay | Introduces git-clone-in-temp-dir (the one novel runtime behavior). Should follow simpler publish scripts so the pattern is established. Needs TECH-01 (update --apply) for overlay version coordination. |
+| **6** | DIST-02 Homebrew tap | Depends on a clean tagged release artifact (Phase 3). Separate repo setup; straight-line formula work. Run `brew search conjure` before writing formula. |
+| **7** | DIST-03 Docker image + TECH-03 Windows CI | Docker is delivery-only; image contains full v0.4.0 feature set. Windows CI matrix entry is low-effort and validates the Docker multi-arch claim simultaneously. |
+| **8** | Release pipeline wiring (`release.yml` extension) | Connects Phases 3, 6, 7 into a single release trigger. Must come after all targets exist. |
 
-### Phase 2: `lib/mutate.sh` + dry-run enforcement
-**Rationale:** Must precede fixtures — you want `--dry-run` correct before you trust generated fixtures. Independent of telemetry/cost. Closes LIVE BUG #1.
-**Delivers:** `lib/mutate.sh` chokepoint; `init-project.sh`, profile/compliance `apply.sh`, and the `.conjure-version` stamp all routed through it; `DRY_RUN` threaded everywhere.
-**Uses:** Sourced-library bash pattern (STACK.md / ARCHITECTURE.md Pattern 1).
-**Avoids:** Pitfall 1 (dry-run partial mutation) — the worst credibility bug in the tree.
+**Can defer to v0.4.x:** TECH-02 Nyquist pass (if capacity forces a cut, but this
+risks shallow tests); community marketplace submission (process work, async).
 
-### Phase 3: Per-profile test fixtures (sandboxed)
-**Rationale:** Depends on a trustworthy `init` (Phases 1–2). Generate each via `conjure init --profile=X`, fill, audit green, snapshot to `EXPECT.txt`.
-**Delivers:** `tests/fixtures/<profile>/` (9 profiles) + `EXPECT.txt`; shared sandboxed `setup()` isolating `HOME`/`XDG_CONFIG_HOME`/`CLAUDE_CONFIG_DIR`/`PATH`; PATH-shimmed external tools; ≥1 intentionally-failing fixture.
-**Implements:** Golden-file fixture pattern (ARCHITECTURE.md Pattern 3).
-**Avoids:** Pitfalls 2, 6, 7 (env leakage, flakiness, silent rot).
+---
 
-### Phase 4: Regression suite wiring + dry-run proof
-**Rationale:** Depends on fixtures (Phase 3) existing. Adds the golden-diff loop and the test that *proves* Phase 2's dry-run by asserting the fixture tree is byte-identical after `--dry-run`.
-**Delivers:** `tests/run.sh` fixture loop; normalized-output golden diffing; the dry-run snapshot assertion; `update-fixtures` regenerate-and-diff helper; `windows-latest` CI leg.
-**Addresses:** One-command CI-gated regression suite (table stakes); clone-and-verify trust signal.
-**Avoids:** Pitfall 7 (regenerate-and-diff prevents silent rot); verifies Pitfalls 1 and 5.
+## Watch Out For
 
-### Phase 5: `lib/cost.sh` + `audit --cost`
-**Rationale:** Depends only on audit's existing char count; can overlap Phases 3–4, but fixtures give it test targets. Lower trust-risk than telemetry, so it lands before it.
-**Delivers:** `lib/cost.sh` (`chars/4` + dated baked price table + per-skill breakdown); `audit --cost` block printing model + `$/Mtok` + as-of date + ±band; optional opt-in `--exact` online path.
-**Uses:** Existing `.claude/` char count, SIZING.md baselines (STACK.md / FEATURES.md accuracy bar).
-**Avoids:** Pitfall 4 (wrong tokenizer / over-precise framing).
+### 1. Supply-chain prompt injection (DS-1, S-2) — CRITICAL
+Skills distributed through any channel are Claude instructions, not inert code. A
+malicious `run:` block can exfiltrate credentials silently during normal AI-assisted
+work. Research (Mitiga, JFrog 2026) shows 13%+ of public AI skill marketplaces contain
+active vulnerabilities. **Prevention:** static egress CI scan (`grep` for
+`curl`/`wget`/`fetch`/`$HOME/.ssh`/`process.env` in `run:` blocks) must be green before
+any distribution channel opens. PR review required for all public-kit skill contributions.
+Signed build provenance on every release.
 
-### Phase 6: Skill-firing telemetry (last)
-**Rationale:** Last because (a) it needs Claude Code hook-event verification at phase time, and (b) the retire-list it feeds plugs into the now-extended `audit --cost` (Phase 5) and is best validated against fixtures (Phase 3) carrying sample logs.
-**Delivers:** `templates/hooks/skill-telemetry.{sh,mjs}`; settings registration; append-only `.claude/telemetry/skill-events.jsonl` in the *target*; `TELEMETRY.md` schema; `conjure telemetry show`; retire-list block in audit; **build-time no-egress test** on all hooks.
-**Addresses:** The headline differentiator, done the trust-preserving way.
-**Avoids:** Pitfall 3 (the star-killer) — local-only/no-egress is a phase success criterion, not an afterthought.
+### 2. `lib/mutate.sh` bypass breaks `--dry-run` (I-1) — CRITICAL
+All four new mutation paths (overlay apply, merge apply, publish-skill, publish-plugin)
+must route writes through `lib/mutate.sh`. Raw `cp`/`>`/`>>` calls silently skip the
+`--dry-run` guard and backup guarantee. **Prevention:** extend the existing raw-write CI
+guard (`grep -rn 'cp \|^>\|>> ' scripts/ cli/`) to cover all new v0.4.0 scripts on day
+one before writing any distribution script.
 
-### Phase Ordering Rationale
+### 3. Conflict markers written into live CLAUDE.md (T-1) — HIGH
+`git merge-file` exits non-zero AND writes conflict markers into the output file. If the
+calling script passes that merged file directly to the project, Claude Code loads
+`<<<<<<< HEAD` as live instructions — undefined behavior. **Prevention:** on non-zero
+`merge-file` exit, write to a `.conjure-conflict-<file>` sidecar and leave the original
+untouched. `conjure audit` must grep for `^<<<<<<<` and fail with a specific error code.
 
-- **Dependency-driven, straight from architecture research:** preflight → dry-run chokepoint → fixtures → regression suite (asserts dry-run) → cost → telemetry. Each phase unblocks the next; the regression net exists before the analytical features it must guard.
-- **Live bugs front-loaded:** the two already-shipping bugs (dry-run, Windows wiring) are fixed in Phases 1–2 because everything downstream (fixtures, demo GIF) depends on a trustworthy `init`.
-- **Trust-risk ordered last:** telemetry — the highest reputational risk — lands last, with the most verification (no-egress test, schema doc, inspector) and after the regression suite can guard it.
-- **The demo GIF** (a docs item) is best slotted after Phase 4, once dry-run is provably enforced and fixtures are green — record without fear of mutation.
+### 4. `marketplace.json` version field left stale (M-1) — HIGH
+The current manifests are at v0.2.0; the repo is at v0.3.0. If version fields stay
+stale, Claude Code shows no update notification to existing plugin users — silent split.
+**Prevention:** CI version-consistency check (grep `CONJURE_VERSION` vs `version` in
+both manifests) gated on every release commit. Include both files in release checklist.
 
-### Research Flags
+### 5. Docker image runs as root — host files owned by root (D-1) — HIGH
+A root-running container writing into `-v $(pwd):/work` creates root-owned files the
+user cannot delete or `git add`. **Prevention:** `USER conjure` (UID 1000) in Dockerfile;
+document `--user $(id -u):$(id -g)` in README Docker usage; smoke-test file UID in CI.
 
-Phases likely needing deeper research during planning (`/gsd:plan-phase --research-phase`):
-- **Phase 6 (telemetry):** **MUST verify the exact Claude Code skill-load hook event name/shape against installed CC ≥2.1.117** before building. Stack research expects `PreToolUse` with `tool_name: "Skill"` + `tool_input.skill_name` plus `InstructionsLoaded`, but architecture research flags this as LOW-confidence-until-confirmed. Telemetry fidelity depends on it; have a `SessionStart`/`Stop` coarse-signal fallback ready.
-- **Phase 5 (cost), light:** confirm the May-2026 price table and the chars-per-token ratio's real-world band against a representative harness; the `--exact` SDK call shape needs a quick check.
+---
 
-Phases with standard patterns (skip research-phase):
-- **Phase 1 (pre-flight):** `command -v` probing + OS detection are well-trodden; half already exists.
-- **Phase 2 (dry-run chokepoint):** standard sourced-lib bash refactor; pattern fully specified in ARCHITECTURE.md.
-- **Phase 3–4 (fixtures + suite):** golden-file/sandboxing patterns are well-documented and partly modeled by the existing single-fixture CI job.
+## Open Questions
+
+| Question | Impact | How to Resolve |
+|----------|--------|----------------|
+| **Docker base: STACK.md suggests `node:20-alpine` + bash; FEATURES.md recommends `debian:bookworm-slim`** | Alpine musl breaks optional Go/Rust tools (ast-grep, gitleaks); Debian slim avoids this | Decide before writing Dockerfile. Recommended: Debian-slim baseline; add `conjure:full` tag for optional tools later |
+| **Merge base source for non-git installs (Homebrew, tarball)** | Without `.conjure-templates-<version>/` snapshot, TECH-01 degrades to 2-way diff | Decide: (a) always snapshot at init time (recommended, v0.4.0), or (b) document limitation for non-git installs |
+| **`brew search conjure` collision check** | If taken in homebrew-core, formula must use `conjure-kit` or `conjure-claude` | Run `brew search conjure` before Phase 6 formula work |
+| **Overlay version compatibility contract** | Org overlays may break on base-kit upgrade if schema drifts | Define `compatible-kit-version` in overlay manifest during DIST-05 before first overlay is published |
+| **Community marketplace submission timing** | DIST-01 code work covers self-hosted use; Anthropic catalog submission is process-only | Can be async with Phase 3; decide whether it's in v0.4.0 scope or post-ship |
+
+---
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Hooks API, pricing, tokenizer status, bats/shellspec maintenance all verified against official/primary sources. |
-| Features | HIGH | Telemetry/dry-run/golden patterns verified across current sources incl. the April-2026 gh telemetry backlash. Cost-accuracy band is MEDIUM (Claude's exact tokenizer is not public). |
-| Architecture | HIGH | Derived from reading the actual codebase this session; integration points verified against real files. One LOW spot: exact hook event name (flagged for Phase 6). |
-| Pitfalls | HIGH | Most pitfalls verified against this repo's own source with `file:line`; two are confirmed live bugs in the tree. |
+| Stack | HIGH | All additions verified against official docs; base stack unchanged |
+| Features | HIGH (DIST-01/02/03, TECH-01/03) / MEDIUM (DIST-04/05) | Marketplace, Homebrew, Docker are well-established. publish-skill and org overlay have no Claude Code-native prior art. |
+| Architecture | HIGH | Codebase read directly; chokepoints (mutate.sh, dispatch pattern) confirmed; build order verified against dependency graph |
+| Pitfalls | HIGH (code + official sources) / MEDIUM (supply-chain patterns) | Supply-chain pitfalls sourced from security research (Mitiga, JFrog, Snyk), not Anthropic docs |
 
-**Overall confidence:** HIGH
+**Overall confidence:** HIGH for must-ship items (DIST-01/02/03, TECH-01/03). MEDIUM
+for DIST-04/05 (emerging patterns with no Claude Code-native reference implementations).
 
-### Gaps to Address
-
-- **Claude Code skill-load hook event name/shape (Phase 6):** the single real unknown. Verify against installed CC ≥2.1.117 at phase-planning time; design the telemetry hook with a coarse `SessionStart`/`Stop` fallback so the retire-list still works if the granular `Skill` event differs from expectation.
-- **Cost-estimate accuracy band (Phase 5):** the `chars/4` heuristic is well-sourced for English (~5–15%) but Claude's BPE differs and isn't public. Handle by *framing* (label estimate, print assumptions/date/±band) rather than chasing precision; offer opt-in `--exact` for users who need it.
-- **Compliance-overlay fixture combinatorics (Phase 3):** 9 profiles × 4 overlays is too many to fixture exhaustively. Pick representative pairs, not the full matrix, to keep CI fast and hermetic.
+---
 
 ## Sources
 
-### Primary (HIGH confidence)
-- This repository, read directly this session — `cli/conjure`, `scripts/init-project.sh`, `scripts/audit-setup.sh`, `tests/run.sh`, `templates/settings.json.tmpl`, `templates/hooks*/`, `profiles/*/apply.sh`, `.github/workflows/ci.yml`, FAILURE-MODES.md, PROJECT.md, planning/ROADMAP.md (the two live bugs are confirmed with `file:line`).
-- [Claude Code Hooks reference](https://code.claude.com/docs/en/hooks) — event list, `PreToolUse`/`tool_name:"Skill"`, `InstructionsLoaded`, exit-code/output semantics.
-- [bats-core releases](https://github.com/bats-core/bats-core) (v1.13.0, 2025-11) and [shellspec releases](https://github.com/shellspec/shellspec) (0.28.1, 2021 — unmaintained).
-- [@anthropic-ai/tokenizer (npm)](https://www.npmjs.com/package/@anthropic-ai/tokenizer) — inaccurate for Claude 3+; [Claude token counting](https://platform.claude.com/docs/en/build-with-claude/token-counting) and [pricing](https://platform.claude.com/docs/en/about-claude/pricing).
-- [GitHub CLI opt-out telemetry changelog](https://github.blog/changelog/2026-04-22-github-cli-opt-out-usage-telemetry/) — primary cautionary tale.
+### Primary (HIGH)
+- Claude Code official docs: plugin marketplaces, plugin schema, `claude plugin validate` — verified 2026-05-25
+- Homebrew: Tap docs, Formula Cookbook, `bump-formula-pr` — official docs
+- Docker: building best practices, `ghcr.io` publish workflow, multi-stage builds — official docs
+- `git merge-file` documentation — git-scm.com official
+- Conjure working tree: `cli/conjure`, `lib/mutate.sh`, `.claude-plugin/*.json`, `.github/workflows/`, `tests/run.sh` — read directly this session
 
-### Secondary (MEDIUM confidence)
-- CLI telemetry best practices (marcon.me), gh backlash coverage (Groundy, The Register), Next.js telemetry issues (vercel/next.js #59686).
-- Golden/snapshot testing and `terraform plan` dry-run model references.
-- Token-cost estimation guides (ML Journey, tokenx, Winder.ai) — corroborate 20–40% cross-tokenizer drift.
-- OSS adoptability / README / asciinema references.
-
-### Tertiary (LOW confidence)
-- Exact Claude Code skill-load hook event name — inferred from current docs, **not verified against an installed CC ≥2.1.117 instance**; flagged for Phase 6 verification.
+### Secondary (MEDIUM)
+- `mislav/bump-homebrew-formula-action` v3 — well-documented ecosystem tooling
+- Mitiga / JFrog / Snyk / NVIDIA: AI skill supply-chain attack research 2026 — independent security research
+- GitHub Actions Windows runner behavior — community discussion + confirmed runner docs
+- Kustomize base+overlay as analog for DIST-05 — no Claude Code-native prior art; analog only
 
 ---
-*Research completed: 2026-05-24*
+*Research completed: 2026-05-25*
 *Ready for roadmap: yes*
