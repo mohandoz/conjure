@@ -120,12 +120,12 @@ regen_profile() {
   _write_manifest "$p" "$seed"
   _write_seed_claude "$seed"
   CONJURE_HOME="$CONJURE_HOME" "$CONJURE_HOME/cli/conjure" init --profile="$p" "$seed" >/dev/null
-  rm -rf "${FIXTURES_DIR:?}/$p"
-  cp -r "$seed/." "$FIXTURES_DIR/$p/"
-  if ! bash "$CONJURE_HOME/scripts/audit-setup.sh" "$FIXTURES_DIR/$p" >/dev/null 2>&1; then
-    printf '[regen] WARN: %s fixture fails audit — check profile output\n' "$p" >&2
+  if ! bash "$CONJURE_HOME/scripts/audit-setup.sh" "$seed" >/dev/null 2>&1; then
+    printf '[regen] WARN: %s fixture fails audit — committed fixture unchanged\n' "$p" >&2
     return 1  # triggers 'trap RETURN', cleans $seed; caller decides whether to abort
   fi
+  rm -rf "${FIXTURES_DIR:?}/$p"
+  cp -r "$seed/." "$FIXTURES_DIR/$p/"
   _write_expect "$p"
   printf '[regen] %s done\n' "$p"
 }
