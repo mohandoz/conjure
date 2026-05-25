@@ -611,7 +611,7 @@ exit "$RC"
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does release.yml need updating in this phase?**
    - What we know: CONTEXT.md scopes phase 10 to ci.yml only (MKTPL-02); release.yml changes are scoped to Phase 15 (REL-01).
