@@ -39,3 +39,12 @@ jobs:
           body_path: release-notes.md
           draft: false
           prerelease: false
+
+      - name: Bump Homebrew formula
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: conjure
+          homebrew-tap: mohandoz/homebrew-conjure
+          download-url: https://github.com/mohandoz/conjure/archive/refs/tags/${{ github.ref_name }}.tar.gz
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
