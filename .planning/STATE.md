@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v0.4.0
 milestone_name: Distribution + Ecosystem
 status: planning
-last_updated: "2026-05-25"
-last_activity: 2026-05-25
+last_updated: "2026-05-25T14:35:32.682Z"
+last_activity: 2026-05-25 — v0.4.0 roadmap created (Phases 08–15)
 progress:
   total_phases: 8
   completed_phases: 0
@@ -83,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-25
-Stopped at: Roadmap created for v0.4.0 (Phases 08–15); ready to plan Phase 08
-Resume file: None
+Last session: 2026-05-25T14:35:32.677Z
+Stopped at: Phase 08 context gathered
+Resume file: .planning/phases/08-nyquist-compliance-backfill/08-CONTEXT.md
