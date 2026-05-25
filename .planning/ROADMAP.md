@@ -25,7 +25,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Regression Suite & Dry-Run Proof** - Golden-file fixture loop, byte-identical dry-run snapshot assertion, failure-mode reproductions, and a Windows CI leg (completed 2026-05-25)
 - [x] **Phase 5: README Demo** - asciinema→GIF demo of `conjure init` + `conjure audit` recorded against safe dry-run (completed 2026-05-25)
 - [x] **Phase 6: Cost Estimator** - `conjure audit --cost` offline token/dollar estimate with an explicit ±band, plus opt-in `--exact` (completed 2026-05-25)
-- [ ] **Phase 7: Skill-Firing Telemetry** - Opt-in, local-only, PII-free skill telemetry feeding a retire-list, with an enforced no-egress test
+- [x] **Phase 7: Skill-Firing Telemetry** - Opt-in, local-only, PII-free skill telemetry feeding a retire-list, with an enforced no-egress test (completed 2026-05-25)
 
 ## Phase Details
 
@@ -181,7 +181,7 @@ Plans:
 - [x] 07-02-PLAN.md — Add --retire-list flag to cli/conjure cmd_audit(), implement retire-list jq aggregation section in audit-setup.sh with date portability (TLMY-04)
 
 **Wave 3** *(blocked on Wave 1 and Wave 2)*
-- [ ] 07-03-PLAN.md — Extend tests/run.sh with telemetry test section covering TLMY-01 through TLMY-05 (no-egress grep, JSONL write with mock stdin, retire-list render) (TLMY-01, TLMY-02, TLMY-03, TLMY-04, TLMY-05)
+- [x] 07-03-PLAN.md — Extend tests/run.sh with telemetry test section covering TLMY-01 through TLMY-05 (no-egress grep, JSONL write with mock stdin, retire-list render) (TLMY-01, TLMY-02, TLMY-03, TLMY-04, TLMY-05)
 
 ## Progress
 
@@ -196,4 +196,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Regression Suite & Dry-Run Proof | 3/3 | Complete    | 2026-05-25 |
 | 5. README Demo | 2/2 | Complete    | 2026-05-25 |
 | 6. Cost Estimator | 3/3 | Complete    | 2026-05-25 |
-| 7. Skill-Firing Telemetry | 2/3 | In Progress|  |
+| 7. Skill-Firing Telemetry | 3/3 | Complete   | 2026-05-25 |
