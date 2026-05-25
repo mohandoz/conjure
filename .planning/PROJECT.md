@@ -78,13 +78,30 @@ and verify a correct, safe harness.
 - **Compatibility**: requires Claude Code ≥2.1.117; `@imports` forbidden in CLAUDE.md (eager-load foot-gun).
 - **Quality gate**: every PR must pass shellcheck, JSON Schema validation, frontmatter validation, size caps, and migration/profile/compliance coverage checks.
 
+## Current State
+
+**Shipped:** v0.3.0 — "Testing + Telemetry" (2026-05-25)
+
+- 200 test assertions, all green (`bash tests/run.sh`)
+- 9 sandboxed per-profile fixtures committed (`tests/fixtures/`)
+- `--dry-run` enforced at `lib/mutate.sh` chokepoint (zero mutations verified)
+- `node .mjs` hook wiring on all platforms including native Windows
+- `conjure audit --cost` offline cost estimator with per-skill breakdown
+- Local-only opt-in skill telemetry with CI-enforced no-egress guarantee
+- README animated GIF demo (314KB, Quickstart section)
+
+**Next milestone:** v0.4.0 — Distribution + Ecosystem (not yet started — run `/gsd-new-milestone`)
+
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Scope first GSD milestone to v0.3.0 (Testing + telemetry) | Quality/trust precede distribution; matches committed next version in planning/ROADMAP.md | — Pending |
-| Defer distribution (v0.4.0) to a later milestone | "Production ready" depends on test fixtures + audit confidence before chasing stars | — Pending |
-| Adopt formal GSD `.planning/` alongside existing `planning/` docs | Real plan→execute→verify rigor for continued dev | — Pending |
+| Scope first GSD milestone to v0.3.0 (Testing + telemetry) | Quality/trust precede distribution; matches committed next version in planning/ROADMAP.md | Shipped 2026-05-25 |
+| Defer distribution (v0.4.0) to a later milestone | "Production ready" depends on test fixtures + audit confidence before chasing stars | Confirmed — v0.4.0 is next |
+| Adopt formal GSD `.planning/` alongside existing `planning/` docs | Real plan→execute→verify rigor for continued dev | In use throughout v0.3.0 |
+| All writes funnel through `lib/mutate.sh` | Dry-run enforced once, not per call site | Validated Phase 2 |
+| `node .mjs` hooks universally in settings template | No OS branching, no shell arg expansion — cross-platform by design | Validated Phase 1 |
+| Telemetry: local-only, opt-in, PII-free, no-egress CI-enforced | Trust asset, not a liability; contradicts compliance overlays otherwise | Validated Phase 7 |
 
 ## Evolution
 
@@ -104,4 +121,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-25 after Phase 05 completion — README demo GIF shipped*
+*Last updated: 2026-05-25 — v0.3.0 milestone archived*
