@@ -301,6 +301,24 @@ for fx in "$CONJURE_HOME/tests/fixtures"/[^_]*/; do
   done < "$expect_file"
 done
 
+echo
+echo "▸ Dry-run byte-identical snapshot (TEST-05)"
+for fx in "$CONJURE_HOME/tests/fixtures"/[^_]*/; do
+  prof=$(basename "$fx")
+  DRY_ORIG="$(mktemp -d)"
+  DRY_SNAP="$(mktemp -d)"
+  cp -r "$fx/." "$DRY_ORIG/"
+  cp -r "$fx/." "$DRY_SNAP/"
+  CONJURE_HOME="$CONJURE_HOME" cli/conjure init --dry-run "$DRY_SNAP" >/dev/null 2>&1 || true
+  if diff -r "$DRY_SNAP" "$DRY_ORIG" >/dev/null 2>&1; then
+    pass "dry-run snapshot identical: $prof"
+  else
+    fail "dry-run mutated tree: $prof"
+    diff -r "$DRY_SNAP" "$DRY_ORIG" | head -10
+  fi
+  rm -rf "$DRY_ORIG" "$DRY_SNAP"
+done
+
 # Summary
 echo
 echo "═══════════════════════════════════════════════════════════════════"
