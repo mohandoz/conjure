@@ -139,59 +139,65 @@ if [ "${CONJURE_COST:-0}" = "1" ]; then
   : "${CONJURE_HOME:="$(cd "$(dirname "$0")/.." && pwd)"}"
   PRICE_FILE="$CONJURE_HOME/lib/prices.json"
 
-  if ! command -v jq >/dev/null 2>&1; then
+  if [ ! -f "$PRICE_FILE" ]; then
+    echo "  [--cost] prices.json missing at $PRICE_FILE"
+  elif ! command -v jq >/dev/null 2>&1; then
     echo "  [--cost] jq not installed — install jq to use cost estimation"
   else
-    MODEL=$(jq -r '.default_model' "$PRICE_FILE")
+    MODEL=$(jq -r '.default_model // empty' "$PRICE_FILE")
     PRICE_INPUT=$(jq -r --arg m "$MODEL" '.models[] | select(.model==$m) | .input_per_mtok' "$PRICE_FILE")
-    PRICING_DATE=$(jq -r --arg m "$MODEL" '.models[] | select(.model==$m) | .pricing_date' "$PRICE_FILE")
-    BAND_PCT=$(jq -r --arg m "$MODEL" '.models[] | select(.model==$m) | .band_pct' "$PRICE_FILE")
+    if [ -z "$PRICE_INPUT" ]; then
+      echo "  [--cost] model '$MODEL' not found in prices.json — skipping cost estimate"
+    else
+      PRICING_DATE=$(jq -r --arg m "$MODEL" '.models[] | select(.model==$m) | .pricing_date' "$PRICE_FILE")
+      BAND_PCT=$(jq -r --arg m "$MODEL" '.models[] | select(.model==$m) | .band_pct' "$PRICE_FILE")
 
-    TOKENS_TO_USE="${EST_TOKENS:-0}"
+      TOKENS_TO_USE="${EST_TOKENS:-0}"
 
-    if [ "${CONJURE_EXACT:-0}" = "1" ]; then
-      if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-        echo "  [--exact] ANTHROPIC_API_KEY not set — falling back to chars/4 heuristic."
-      elif command -v node >/dev/null 2>&1 && [ -f "$CONJURE_HOME/lib/exact-count.mjs" ]; then
-        EXACT_TOKENS=$(node "$CONJURE_HOME/lib/exact-count.mjs" "$TARGET" 2>/dev/null)
-        if [ $? -eq 0 ] && [ -n "$EXACT_TOKENS" ]; then
-          TOKENS_TO_USE="$EXACT_TOKENS"
-        else
-          echo "  [--exact] exact count failed — falling back to chars/4 heuristic."
+      if [ "${CONJURE_EXACT:-0}" = "1" ]; then
+        if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+          echo "  [--exact] ANTHROPIC_API_KEY not set — falling back to chars/4 heuristic."
+        elif command -v node >/dev/null 2>&1 && [ -f "$CONJURE_HOME/lib/exact-count.mjs" ]; then
+          EXACT_TOKENS=$(node "$CONJURE_HOME/lib/exact-count.mjs" "$TARGET" 2>/dev/null)
+          if [ $? -eq 0 ] && [ -n "$EXACT_TOKENS" ]; then
+            TOKENS_TO_USE="$EXACT_TOKENS"
+          else
+            echo "  [--exact] exact count failed — falling back to chars/4 heuristic."
+          fi
         fi
       fi
-    fi
 
-    TOTAL_COST=$(awk "BEGIN {printf \"%.2f\", $TOKENS_TO_USE * $PRICE_INPUT / 1000000}")
+      TOTAL_COST=$(awk "BEGIN {printf \"%.2f\", $TOKENS_TO_USE * $PRICE_INPUT / 1000000}")
 
-    COST_TMP=$(mktemp)
-    trap 'rm -f "$COST_TMP"' EXIT
+      COST_TMP=$(mktemp)
+      trap 'rm -f "$COST_TMP"' EXIT
 
-    for ctx_file in CLAUDE.md .claude/settings.json; do
-      if [ -f "$ctx_file" ]; then
-        chars=$(wc -c < "$ctx_file" | tr -d ' ')
+      for ctx_file in CLAUDE.md .claude/settings.json; do
+        if [ -f "$ctx_file" ]; then
+          chars=$(wc -c < "$ctx_file" | tr -d ' ')
+          tokens=$((chars / 4))
+          cost=$(awk "BEGIN {printf \"%.6f\", $tokens * $PRICE_INPUT / 1000000}")
+          printf '%s %s %s %s\n' "$ctx_file" "$chars" "$tokens" "$cost" >> "$COST_TMP"
+        fi
+      done
+
+      while IFS= read -r skill; do
+        chars=$(wc -c < "$skill" | tr -d ' ')
         tokens=$((chars / 4))
         cost=$(awk "BEGIN {printf \"%.6f\", $tokens * $PRICE_INPUT / 1000000}")
-        printf '%s %s %s %s\n' "$ctx_file" "$chars" "$tokens" "$cost" >> "$COST_TMP"
-      fi
-    done
+        printf '%s %s %s %s\n' "$skill" "$chars" "$tokens" "$cost" >> "$COST_TMP"
+      done < <(find .claude/skills -name SKILL.md 2>/dev/null)
 
-    while IFS= read -r skill; do
-      chars=$(wc -c < "$skill" | tr -d ' ')
-      tokens=$((chars / 4))
-      cost=$(awk "BEGIN {printf \"%.6f\", $tokens * $PRICE_INPUT / 1000000}")
-      printf '%s %s %s %s\n' "$skill" "$chars" "$tokens" "$cost" >> "$COST_TMP"
-    done < <(find .claude/skills -name SKILL.md 2>/dev/null)
-
-    echo
-    echo "── Cost Estimate ──────────────────────────────────────"
-    printf "  %-30s %8s %8s %12s\n" "File" "Chars" "~Tokens" "Est.Cost"
-    printf "  %-30s %8s %8s %12s\n" "----" "-----" "-------" "--------"
-    sort -t' ' -k4 -rn "$COST_TMP" | while IFS=' ' read -r name chars tokens cost; do
-      printf "  %-30s %8s %8s  \$%10.6f\n" "$name" "$chars" "$tokens" "$cost"
-    done
-    printf "  %-30s %8s %8s  \$%10.2f\n" "TOTAL" "${TOTAL_CHARS:-0}" "$TOKENS_TO_USE" "$TOTAL_COST"
-    echo "  Estimate: \$$TOTAL_COST ±${BAND_PCT}% (chars/4 heuristic · prices: $PRICING_DATE · model: $MODEL)"
+      echo
+      echo "── Cost Estimate ──────────────────────────────────────"
+      printf "  %-30s %8s %8s %12s\n" "File" "Chars" "~Tokens" "Est.Cost"
+      printf "  %-30s %8s %8s %12s\n" "----" "-----" "-------" "--------"
+      sort -t' ' -k4 -rn "$COST_TMP" | while IFS=' ' read -r name chars tokens cost; do
+        printf "  %-30s %8s %8s  \$%10.6f\n" "$name" "$chars" "$tokens" "$cost"
+      done
+      printf "  %-30s %8s %8s  \$%10.2f\n" "TOTAL" "${TOTAL_CHARS:-0}" "$TOKENS_TO_USE" "$TOTAL_COST"
+      echo "  Estimate: \$$TOTAL_COST ±${BAND_PCT}% (chars/4 heuristic · prices: $PRICING_DATE · model: $MODEL)"
+    fi
   fi
 fi
 
