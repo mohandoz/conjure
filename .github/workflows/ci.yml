@@ -50,3 +50,29 @@ jobs:
           # Verify the script ran without crashing — that's the real CI check.
           bash $GITHUB_WORKSPACE/scripts/audit-setup.sh /tmp/fixture > /tmp/audit.log 2>&1 || true
           grep -q "PASS:" /tmp/audit.log
+
+  windows-hook-wiring:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scaffold fixture
+        shell: bash
+        run: |
+          mkdir -p /tmp/fixture
+          CONJURE_HOME="$GITHUB_WORKSPACE" cli/conjure init /tmp/fixture
+
+      - name: Assert node version
+        shell: bash
+        run: node --version
+
+      - name: Assert node hook wiring in settings.json
+        shell: bash
+        run: grep 'node' /tmp/fixture/.claude/settings.json
+
+      - name: Assert no bash hook regression
+        shell: bash
+        run: |
+          if grep 'bash .claude/hooks' /tmp/fixture/.claude/settings.json; then
+            echo "FAIL: bash hook commands found (SAFE-03 regression)" && exit 1
+          fi
