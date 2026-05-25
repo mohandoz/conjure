@@ -10,7 +10,7 @@ set -euo pipefail
 MODE="${1:-existing}"
 TARGET="${2:-$(pwd)}"
 KIT="$(cd "$(dirname "$0")/.." && pwd)"
-source "$CONJURE_HOME/lib/mutate.sh"
+source "$KIT/lib/mutate.sh"
 
 if [[ "$MODE" != "new" && "$MODE" != "existing" ]]; then
   echo "Usage: $0 [new|existing] [target-dir]"

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # tests/lib/sandbox.sh — sourced sandbox isolation helper for Conjure test suite.
 # Source this file (do NOT execute directly — no shebang).
 # POSIX bash 3.2+ compatible. No associative arrays, no mapfile, no local -n.
