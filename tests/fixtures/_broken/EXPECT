@@ -1,0 +1,3 @@
+# tests/fixtures/_broken/EXPECT
+# One extended-grep pattern per line. Comments (# prefix) and blank lines are ignored.
+HARD CAP exceeded

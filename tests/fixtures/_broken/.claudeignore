@@ -1,0 +1,77 @@
+# .claudeignore — patterns Claude Code should not read
+# Same syntax as .gitignore. Saves context on every session.
+
+# Build outputs
+build/
+dist/
+out/
+target/
+.next/
+.nuxt/
+.svelte-kit/
+.vercel/
+.netlify/
+
+# Dependency caches
+node_modules/
+.pnpm-store/
+vendor/
+.venv/
+venv/
+.gradle/
+.m2/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Lock files (rarely needed; Claude treats them as opaque)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+poetry.lock
+Cargo.lock
+Gemfile.lock
+composer.lock
+
+# Generated code (regenerate via the generator script, do not hand-edit)
+**/generated/
+*.pb.go
+*_generated.go
+*.gen.ts
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Coverage / reports
+coverage/
+.coverage
+htmlcov/
+.nyc_output/
+*.lcov
+
+# Large fixtures / sample data
+fixtures/large/
+testdata/snapshots/
+*.parquet
+*.h5
+*.pkl
+
+# graphify outputs are huge; Claude reads them via CLI, not direct read
+graphify-out/
+
+# Logs
+*.log
+logs/
+
+# Secrets — defense in depth; .gitignore should also cover these
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/

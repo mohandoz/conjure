@@ -1,0 +1,92 @@
+{
+  "$schema": "https://schemastore.org/claude-code-settings.json",
+
+  "_comment_permissions": "Allowlist common read-only commands so Claude doesn't prompt for every grep/ls. Add stack-specific build/test commands here.",
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(fd:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git stash list:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh run view:*)",
+      "Bash(graphify query:*)",
+      "Bash(graphify path:*)",
+      "Bash(graphify explain:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /*)",
+      "Bash(:(){:|:&};:)",
+      "Bash(curl * | sh*)",
+      "Bash(curl * | bash*)",
+      "Bash(wget * | sh*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)"
+    ]
+  },
+
+  "_comment_hooks": "Exit code 2 = BLOCK. Matcher regex is case-sensitive. Keep each hook under 2 seconds.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/post-edit-format.mjs"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/pre-bash-block-destructive.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/pre-commit-quality-gate.mjs"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/stop-compound-engineering.mjs"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/session-start-context.mjs"
+          }
+        ]
+      }
+    ]
+  },
+
+  "_comment_env": "Per-project env vars Claude should know about (don't put secrets here).",
+  "env": {}
+}
