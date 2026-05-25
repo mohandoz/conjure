@@ -48,7 +48,12 @@ Plans:
   3. When a merge produces conflicts, the original live file is untouched and a `.conjure-conflict-<filename>` sidecar holds the conflicted content
   4. Generated files (`.conjure-version`, `settings.json`) always accept upstream; user-owned files (`CLAUDE.md`, skills, agents) go through 3-way merge
   5. `conjure audit` detects `^<<<<<<<` conflict markers in any harness file and exits non-zero with a specific error message
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — Create lib/merge.sh (merge_file_3way, write_merge_sidecar, merge_user_files) + add lib/ to CI shellcheck glob (MERGE-01, MERGE-03)
+- [ ] 09-02-PLAN.md — Modify cli/conjure: cmd_init snapshot write + cmd_update --apply real merge (MERGE-01, MERGE-02, MERGE-03, MERGE-04)
+- [ ] 09-03-PLAN.md — Add MERGE-05 audit conflict-marker check + MERGE-01/02/03/04 regression tests (MERGE-01, MERGE-02, MERGE-03, MERGE-04, MERGE-05)
 
 ### Phase 10: Marketplace Publish
 **Goal**: The Conjure plugin manifest is valid, version-consistent, and a developer can run `conjure publish` to update and submit it to the community catalog
@@ -121,7 +126,7 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 08. Nyquist Compliance Backfill | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
-| 09. 3-Way Merge | v0.4.0 | 0/TBD | Not started | - |
+| 09. 3-Way Merge | v0.4.0 | 0/3 | In progress | - |
 | 10. Marketplace Publish | v0.4.0 | 0/TBD | Not started | - |
 | 11. Skill Publishing | v0.4.0 | 0/TBD | Not started | - |
 | 12. Org Overlay | v0.4.0 | 0/TBD | Not started | - |
