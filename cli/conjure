@@ -85,6 +85,16 @@ cmd_init() {
 
   # Stamp version
   mutate_write "$target/.claude/.conjure-version" "$CONJURE_VERSION"
+
+  # Write base snapshot for future 3-way merges (MERGE-02, D-03)
+  local snap_dir="$target/.claude/.conjure-templates-${CONJURE_VERSION}"
+  mutate_mkdir "$snap_dir"
+  mutate_cp "$CONJURE_HOME/templates/CLAUDE.md.tmpl" "$snap_dir/CLAUDE.md.tmpl"
+  mutate_cp "$CONJURE_HOME/templates/skills"          "$snap_dir/skills"
+  mutate_cp "$CONJURE_HOME/templates/agents"          "$snap_dir/agents"
+  mutate_cp "$CONJURE_HOME/templates/hooks-nodejs"    "$snap_dir/hooks"
+  echo "▸ Snapshot written: $snap_dir"
+
   mutate_summary
   echo "▸ Pinned conjure version: $CONJURE_VERSION"
 }
@@ -171,10 +181,61 @@ cmd_update() {
     return 0
   fi
 
-  # --apply: interactive merge (placeholder; production version uses diff tool)
-  echo "▸ Interactive update not yet implemented in v$CONJURE_VERSION."
-  echo "  For now: review CHANGELOG.md, hand-merge changes, then:"
-  echo "  echo '$CONJURE_VERSION' > $target/.claude/.conjure-version"
+  # --apply: real 3-way merge via lib/merge.sh (MERGE-01, D-01)
+  source "$CONJURE_HOME/lib/mutate.sh" \
+    || { echo "✗ Failed to load lib/mutate.sh — check CONJURE_HOME ($CONJURE_HOME)"; return 1; }
+  source "$CONJURE_HOME/lib/merge.sh" \
+    || { echo "✗ Failed to load lib/merge.sh — check CONJURE_HOME ($CONJURE_HOME)"; return 1; }
+
+  # Read pinned version from project (already read into $pinned above)
+  local snap_dir="$target/.claude/.conjure-templates-${pinned}"
+
+  # D-01: abort if snapshot missing
+  if [ ! -d "$snap_dir" ]; then
+    echo "✗ No base snapshot for v${pinned}. Re-run 'conjure init' to write one, then update."
+    return 1
+  fi
+
+  # Backup before any mutation (pattern from cmd_migrate)
+  if [ -d "$target/.claude" ]; then
+    local ts; ts="$(date +%Y%m%d-%H%M%S)"
+    local backup="$target/.claude.backup-${ts}"
+    echo "▸ Backing up existing .claude/ → $backup"
+    cp -R "$target/.claude" "$backup"
+  fi
+
+  echo "▸ Applying 3-way merge: v${pinned} → v${CONJURE_VERSION}"
+
+  # MERGE-04: generated files — take upstream unconditionally (no 3-way merge)
+  if [ -f "$CONJURE_HOME/templates/settings.json.tmpl" ]; then
+    mutate_cp "$CONJURE_HOME/templates/settings.json.tmpl" "$target/.claude/settings.json"
+    echo "  ✓ settings.json taken from upstream (generated file)"
+  fi
+
+  # MERGE-01: user-owned files — 3-way merge via lib/merge.sh
+  merge_user_files "$target" "$snap_dir" "$CONJURE_VERSION" "$pinned"
+  local merge_rc=$?
+  if [ "$merge_rc" -eq 2 ]; then
+    echo "✗ Merge aborted due to git error — see messages above"
+    return 2
+  fi
+
+  # D-06: report conflicts and exit 1; stamp version only on zero conflicts
+  if [ "${CONJURE_MERGE_CONFLICT_COUNT:-0}" -gt 0 ]; then
+    echo
+    echo "✗ Conflicts in the following files:"
+    for sf in $CONJURE_MERGE_CONFLICT_FILES; do
+      echo "    $sf"
+    done
+    echo "  Resolve conflicts, delete the .conjure-conflict-* sidecars, then run:"
+    echo "  echo '${CONJURE_VERSION}' > $target/.claude/.conjure-version"
+    return 1
+  fi
+
+  # Clean: stamp new version
+  mutate_write "$target/.claude/.conjure-version" "$CONJURE_VERSION"
+  mutate_summary
+  echo "✓ Updated to v${CONJURE_VERSION}"
 }
 
 cmd_refresh_graph() {
