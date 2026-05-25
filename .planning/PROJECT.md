@@ -46,7 +46,7 @@ and verify a correct, safe harness.
 - [ ] DIST-04: `conjure publish-skill <name>` — contribute project skill to public kit
 - [ ] DIST-05: Org overlay system (base kit + private overlay repo per org)
 - [ ] TECH-01: `cmd_update --apply` 3-way merge implementation (stub at `cli/conjure:171`)
-- [ ] TECH-02: Nyquist compliance pass for phases 01, 02, 04, 05, 06, 07
+- [x] TECH-02: Nyquist compliance pass for phases 01, 02, 04, 05, 06, 07 — Validated Phase 08
 - [ ] TECH-03: Windows CI runtime confirmation for TEST-06
 
 ### Out of Scope
@@ -101,7 +101,9 @@ and verify a correct, safe harness.
 - Local-only opt-in skill telemetry with CI-enforced no-egress guarantee
 - README animated GIF demo (314KB, Quickstart section)
 
-**Next milestone:** v0.4.0 — Distribution + Ecosystem (not yet started — run `/gsd-new-milestone`)
+**Phase 08 complete:** VALIDATION.md added for all 6 phases (01, 02, 04, 05, 06, 07) — Nyquist compliance backfill done, TECH-02 validated (2026-05-25)
+
+**Next milestone:** v0.4.0 — Distribution + Ecosystem (Phase 09 next: 3-way merge)
 
 ## Key Decisions
 
@@ -132,4 +134,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-25 — v0.4.0 milestone started*
+*Last updated: 2026-05-25 — Phase 08 complete, TECH-02 validated*
