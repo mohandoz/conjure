@@ -18,7 +18,8 @@
 #   HOME             → $SANDBOX_DIR
 #   XDG_CONFIG_HOME  → $SANDBOX_DIR
 #   CLAUDE_CONFIG_DIR → $SANDBOX_DIR
-#   PATH             → $CONJURE_HOME/cli:/usr/local/bin:/usr/bin:/bin
+#   PATH             → $CONJURE_HOME/cli:[resolved-node-dir]:/usr/local/bin:/usr/bin:/bin
+#                      resolved-node-dir is empty when node is not in PATH (safe no-op).
 #
 # Cleanup:
 #   trap 'rm -rf "$SANDBOX_DIR"' EXIT is registered inside sandbox_setup() (per D-06).
@@ -37,5 +38,9 @@ sandbox_setup() {
   export HOME="$SANDBOX_DIR"
   export XDG_CONFIG_HOME="$SANDBOX_DIR"
   export CLAUDE_CONFIG_DIR="$SANDBOX_DIR"
-  export PATH="$CONJURE_HOME/cli:/usr/local/bin:/usr/bin:/bin"
+  # Resolve node's parent directory so nvm/fnm/volta/Homebrew installations remain
+  # reachable inside the sandbox. Falls back gracefully when node is absent (WR-01).
+  local _node_dir
+  _node_dir="$(dirname "$(command -v node 2>/dev/null || true)" 2>/dev/null || true)"
+  export PATH="$CONJURE_HOME/cli:${_node_dir:+$_node_dir:}/usr/local/bin:/usr/bin:/bin"
 }
