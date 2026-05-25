@@ -603,6 +603,157 @@ fi
 rm -rf "$SANDBOX_DIR"
 trap - EXIT
 
+echo
+echo "▸ 3-way merge tests (MERGE-01, MERGE-02, MERGE-03, MERGE-04)"
+
+# Source merge lib once (reused across MERGE-01 and MERGE-02)
+# shellcheck disable=SC1090
+source "$CONJURE_HOME/lib/mutate.sh"
+# shellcheck disable=SC1090
+source "$CONJURE_HOME/lib/merge.sh"
+
+# MERGE-01: Clean merge — user and upstream changed non-adjacent lines
+# Expected: merge_file_3way returns 0, merged file has both edits, no sidecar written
+# NOTE: changed lines must be non-adjacent so git merge-file treats them as separate hunks.
+MERGE_DIR="$(mktemp -d)"
+trap 'rm -rf "$MERGE_DIR"' EXIT
+mkdir -p "$MERGE_DIR/.claude/.conjure-templates-0.0.1/skills/testskill"
+mkdir -p "$MERGE_DIR/.claude/skills/testskill"
+# base (snapshot — original ancestor); lineA and lineH are far apart
+printf 'name: testskill\ndescription: A 30-char minimum test skill here\nlineA: base\nlineB: b\nlineC: c\nlineD: d\nlineE: e\nlineF: f\nlineG: g\nlineH: base\n' \
+  > "$MERGE_DIR/.claude/.conjure-templates-0.0.1/skills/testskill/SKILL.md"
+# current (user changed lineH only — far from lineA)
+printf 'name: testskill\ndescription: A 30-char minimum test skill here\nlineA: base\nlineB: b\nlineC: c\nlineD: d\nlineE: e\nlineF: f\nlineG: g\nlineH: USER_EDIT\n' \
+  > "$MERGE_DIR/.claude/skills/testskill/SKILL.md"
+# new upstream template (changed lineA only — far from lineH)
+MERGE_TMPL="$(mktemp)"
+printf 'name: testskill\ndescription: A 30-char minimum test skill here\nlineA: UPSTREAM_EDIT\nlineB: b\nlineC: c\nlineD: d\nlineE: e\nlineF: f\nlineG: g\nlineH: base\n' \
+  > "$MERGE_TMPL"
+# Reset module-level state before direct lib call
+CONJURE_MERGE_CONFLICT_COUNT=0
+CONJURE_MERGE_CONFLICT_FILES=""
+DRY_RUN=0 merge_file_3way \
+  "$MERGE_DIR/.claude/skills/testskill/SKILL.md" \
+  "$MERGE_DIR/.claude/.conjure-templates-0.0.1/skills/testskill/SKILL.md" \
+  "$MERGE_TMPL" \
+  "skills/testskill/SKILL.md" "0.0.1" "0.3.0"
+MERGE_RC=$?
+rm -f "$MERGE_TMPL"
+if [ "$MERGE_RC" -eq 0 ]; then pass "clean merge exits 0 (MERGE-01)"
+else fail "clean merge should exit 0, got $MERGE_RC (MERGE-01)"; fi
+if grep -q "lineA: UPSTREAM_EDIT" "$MERGE_DIR/.claude/skills/testskill/SKILL.md" && \
+   grep -q "lineH: USER_EDIT" "$MERGE_DIR/.claude/skills/testskill/SKILL.md"; then
+  pass "merged file contains both user and upstream edits (MERGE-01)"
+else fail "merged file missing expected content (MERGE-01)"; fi
+if [ -z "$(find "$MERGE_DIR/.claude" -name '.conjure-conflict-*' 2>/dev/null)" ]; then
+  pass "no sidecar written on clean merge (MERGE-01)"
+else fail "sidecar unexpectedly present on clean merge (MERGE-01)"; fi
+rm -rf "$MERGE_DIR"
+trap - EXIT
+
+# MERGE-02: Conflict — user and upstream changed the same line
+# Expected: merge_file_3way returns 1, sidecar written with markers, original untouched
+MERGE_DIR="$(mktemp -d)"
+trap 'rm -rf "$MERGE_DIR"' EXIT
+mkdir -p "$MERGE_DIR/.claude/.conjure-templates-0.0.1/skills/testskill"
+mkdir -p "$MERGE_DIR/.claude/skills/testskill"
+# base (ancestor)
+printf 'name: testskill\ndescription: A 30-char minimum test skill here\nconflict_line: base\n' \
+  > "$MERGE_DIR/.claude/.conjure-templates-0.0.1/skills/testskill/SKILL.md"
+# current (user changed conflict_line)
+printf 'name: testskill\ndescription: A 30-char minimum test skill here\nconflict_line: USER_VERSION\n' \
+  > "$MERGE_DIR/.claude/skills/testskill/SKILL.md"
+# new upstream (also changed conflict_line — genuine conflict)
+MERGE_TMPL="$(mktemp)"
+printf 'name: testskill\ndescription: A 30-char minimum test skill here\nconflict_line: UPSTREAM_VERSION\n' \
+  > "$MERGE_TMPL"
+# Reset module-level state before direct lib call
+CONJURE_MERGE_CONFLICT_COUNT=0
+CONJURE_MERGE_CONFLICT_FILES=""
+DRY_RUN=0 merge_file_3way \
+  "$MERGE_DIR/.claude/skills/testskill/SKILL.md" \
+  "$MERGE_DIR/.claude/.conjure-templates-0.0.1/skills/testskill/SKILL.md" \
+  "$MERGE_TMPL" \
+  "skills/testskill/SKILL.md" "0.0.1" "0.3.0"
+MERGE_RC=$?
+rm -f "$MERGE_TMPL"
+if [ "$MERGE_RC" -eq 1 ]; then pass "conflict exits 1 (MERGE-02)"
+else fail "conflict should exit 1, got $MERGE_RC (MERGE-02)"; fi
+# D-05: original file must be untouched (no <<<<<<< markers in original)
+if grep -q "USER_VERSION" "$MERGE_DIR/.claude/skills/testskill/SKILL.md" && \
+   ! grep -q '<<<<<<<' "$MERGE_DIR/.claude/skills/testskill/SKILL.md"; then
+  pass "original file untouched on conflict (MERGE-02 / D-05)"
+else fail "original file was modified on conflict — D-05 violation (MERGE-02)"; fi
+# Sidecar must exist at expected encoded path
+SIDECAR="$MERGE_DIR/.claude/skills/testskill/.conjure-conflict-skills_testskill_SKILL.md"
+if [ -f "$SIDECAR" ]; then pass "sidecar written at correct path (MERGE-02)"
+else fail "sidecar missing at $SIDECAR (MERGE-02)"; fi
+if grep -q '<<<<<<<' "$SIDECAR"; then pass "sidecar contains conflict markers (MERGE-02)"
+else fail "sidecar missing conflict markers (MERGE-02)"; fi
+rm -rf "$MERGE_DIR"
+trap - EXIT
+
+# MERGE-03: Missing snapshot — cli/conjure update --apply aborts with D-01 message
+# Expected: exits non-zero, prints "No base snapshot for v..."
+MERGE_DIR="$(mktemp -d)"
+trap 'rm -rf "$MERGE_DIR"' EXIT
+mkdir -p "$MERGE_DIR/.claude"
+printf '0.1.0\n' > "$MERGE_DIR/.claude/.conjure-version"
+# Intentionally NO .conjure-templates-0.1.0/ directory
+# Single invocation captures both output and exit code (do NOT use || true when testing exit code)
+MERGE_OUT="$(CONJURE_HOME="$CONJURE_HOME" cli/conjure update --apply "$MERGE_DIR" 2>&1)"
+MERGE_RC=$?
+if [ "$MERGE_RC" -ne 0 ]; then pass "missing snapshot exits non-zero (MERGE-03)"
+else fail "missing snapshot should exit non-zero (MERGE-03)"; fi
+if printf '%s\n' "$MERGE_OUT" | grep -q "No base snapshot for v0.1.0"; then
+  pass "correct abort message for missing snapshot (MERGE-03)"
+else fail "abort message missing 'No base snapshot for v0.1.0' (MERGE-03)"; fi
+rm -rf "$MERGE_DIR"
+trap - EXIT
+
+# MERGE-04: Generated files take upstream unconditionally (no 3-way merge, no sidecar)
+# Expected: settings.json replaced by upstream; no .conjure-conflict-*settings* sidecar
+# The stale key "conjure_test_stale_key" cannot appear in any real template — uniquely identifies old content
+# Use an older pinned version (0.0.1) so conjure update --apply proceeds past the "up to date" guard
+MERGE_DIR="$(mktemp -d)"
+trap 'rm -rf "$MERGE_DIR"' EXIT
+mkdir -p "$MERGE_DIR/.claude/.conjure-templates-0.0.1"
+# Stale settings.json with a unique key that no template contains
+printf '{"conjure_test_stale_key": "should_be_replaced", "version": "old"}\n' \
+  > "$MERGE_DIR/.claude/settings.json"
+printf '0.0.1\n' > "$MERGE_DIR/.claude/.conjure-version"
+# Run update --apply (pinned=0.0.1, current=CONJURE_VERSION → proceeds to merge)
+CONJURE_HOME="$CONJURE_HOME" cli/conjure update --apply "$MERGE_DIR" >/dev/null 2>&1
+# settings.json must NOT still contain the unique stale key (it was replaced by upstream)
+if ! grep -q '"conjure_test_stale_key"' "$MERGE_DIR/.claude/settings.json" 2>/dev/null; then
+  pass "settings.json replaced by upstream (stale key gone) (MERGE-04)"
+else
+  fail "settings.json not replaced by upstream (MERGE-04)"
+fi
+# No sidecar for settings.json
+if [ -z "$(find "$MERGE_DIR/.claude" -name '.conjure-conflict-*settings*' 2>/dev/null)" ]; then
+  pass "no conflict sidecar for generated settings.json (MERGE-04)"
+else fail "sidecar written for generated settings.json — should take upstream (MERGE-04)"; fi
+rm -rf "$MERGE_DIR"
+trap - EXIT
+
+# MERGE-05: audit detects <<<<<<< markers in .claude/ and exits non-zero
+MERGE_DIR="$(mktemp -d)"
+trap 'rm -rf "$MERGE_DIR"' EXIT
+mkdir -p "$MERGE_DIR/.claude/skills/testskill"
+# Plant a conflict marker in a real skill file (not a sidecar)
+printf 'name: testskill\ndescription: A test skill with 30+ characters here\n<<<<<<< your version\nconflict_line: A\n=======\nconflict_line: B\n>>>>>>> upstream\n' \
+  > "$MERGE_DIR/.claude/skills/testskill/SKILL.md"
+AUDIT_OUT="$(bash "$CONJURE_HOME/scripts/audit-setup.sh" "$MERGE_DIR" 2>&1)"
+AUDIT_RC=$?
+if [ "$AUDIT_RC" -ne 0 ]; then pass "audit exits non-zero when conflict markers present (MERGE-05)"
+else fail "audit should exit non-zero with conflict markers (MERGE-05)"; fi
+if printf '%s\n' "$AUDIT_OUT" | grep -q "Unresolved merge conflicts"; then
+  pass "audit reports 'Unresolved merge conflicts' (MERGE-05)"
+else fail "audit missing 'Unresolved merge conflicts' message (MERGE-05)"; fi
+rm -rf "$MERGE_DIR"
+trap - EXIT
+
 # Summary
 echo
 echo "═══════════════════════════════════════════════════════════════════"
