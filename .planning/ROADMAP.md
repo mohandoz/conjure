@@ -81,7 +81,11 @@ Plans:
   2. `conjure publish-skill` opens a PR via `gh pr create`; if `gh` is absent, it prints the manual PR URL and checklist instead
   3. Attempting to publish a skill at a branch HEAD (not a SHA-pinned commit) produces an error that stops submission
   4. User can run `conjure publish-skill <name> --to <org/repo>` to contribute to a private kit or org overlay repo
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 11-01-PLAN.md — Create scripts/publish-skill.sh (four validation gates + PR instruction printing) (SKILL-01, SKILL-02, SKILL-03, SKILL-04)
+- [ ] 11-02-PLAN.md — Wire cmd_publish_skill in cli/conjure + add SKILL-01..SKILL-04 regression tests in tests/run.sh (SKILL-01, SKILL-02, SKILL-03, SKILL-04)
 
 ### Phase 12: Org Overlay
 **Goal**: An organization can define a private overlay repo that is applied on top of the base kit, with full audit traceability and credential-safe re-pull support
@@ -134,7 +138,7 @@ Plans:
 | 08. Nyquist Compliance Backfill | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
 | 09. 3-Way Merge | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
 | 10. Marketplace Publish | v0.4.0 | 4/4 | Complete    | 2026-05-25 |
-| 11. Skill Publishing | v0.4.0 | 0/TBD | Not started | - |
+| 11. Skill Publishing | v0.4.0 | 0/2 | Not started | - |
 | 12. Org Overlay | v0.4.0 | 0/TBD | Not started | - |
 | 13. Homebrew Tap | v0.4.0 | 0/TBD | Not started | - |
 | 14. Docker + Windows CI | v0.4.0 | 0/TBD | Not started | - |
