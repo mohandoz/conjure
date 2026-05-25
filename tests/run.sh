@@ -215,6 +215,12 @@ else
   fail "dry-run: summary line missing or count is 0 (D-05)"
 fi
 
+# Dry-run section done — clean up now before sandbox_setup registers its own EXIT trap.
+# bash 'trap ... EXIT' is not additive; sandbox_setup would overwrite this trap and leak
+# TMPDIR_TARGET for the rest of the OS session (CR-01).
+rm -rf "$TMPDIR_TARGET"
+trap - EXIT
+
 # Migration scripts exist for every documented source
 echo
 echo "▸ Migration coverage"
