@@ -220,28 +220,33 @@ if [ "${CONJURE_RETIRE:-0}" = "1" ]; then
     # Combine with any existing EXIT trap to avoid overwriting COST_TMP cleanup
     trap 'rm -f "${COST_TMP:-}" "${RETIRE_TMP:-}"' EXIT
 
-    # Count skill loads in last 30 days; jq outputs one skill name per matching line
-    jq -r --arg c "$CUTOFF" 'select(.ts >= $c) | .skill' "$LOG" 2>/dev/null \
-      | sort | uniq -c | sort -rn > "$RETIRE_TMP" 2>/dev/null || true
-
     echo
     echo "── Skill Retire-List ──────────────────────────────────"
 
-    if ! [ -s "$RETIRE_TMP" ]; then
-      echo "  No telemetry data in last 30 days."
+    # Cross-reference installed skills against telemetry counts.
+    # Skills with zero fires in the last 30 days are invisible in the JSONL log;
+    # iterating installed SKILL.md files is the only way to surface them.
+    SKILL_PATHS=()
+    while IFS= read -r skill_path; do
+      SKILL_PATHS+=("$skill_path")
+    done < <(find "$TARGET/.claude/skills" -name SKILL.md 2>/dev/null)
+
+    if [ "${#SKILL_PATHS[@]}" -eq 0 ]; then
+      echo "  No installed skills found in $TARGET/.claude/skills/."
     else
       printf "  %-35s %6s %8s\n" "Skill" "Loads" "Status"
       printf "  %-35s %6s %8s\n" "-----" "-----" "------"
-      while IFS= read -r line; do
-        count=$(printf '%s' "$line" | awk '{print $1}')
-        name=$(printf '%s' "$line" | awk '{$1=""; print $0}' | xargs)
+      for skill_path in "${SKILL_PATHS[@]}"; do
+        name=$(basename "$(dirname "$skill_path")")
+        count=$(jq -r --arg c "$CUTOFF" --arg s "$name" \
+          'select(.ts >= $c and .skill == $s) | .skill' "$LOG" 2>/dev/null | wc -l | tr -d ' ')
         if [ "${count:-0}" -gt 0 ]; then
           status="[active]"
         else
           status="[retire?]"
         fi
         printf "  %-35s %6s %8s\n" "$name" "$count" "$status"
-      done < "$RETIRE_TMP"
+      done
     fi
   fi
 fi
