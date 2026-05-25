@@ -281,6 +281,26 @@ while IFS= read -r pattern; do
   fi
 done < "$CONJURE_HOME/tests/fixtures/_broken/EXPECT"
 
+echo
+echo "▸ Golden-file EXPECT loop (TEST-03)"
+for fx in "$CONJURE_HOME/tests/fixtures"/[^_]*/; do
+  prof=$(basename "$fx")
+  expect_file="${fx}EXPECT"
+  [ ! -f "$expect_file" ] && continue
+  sandbox_setup "$fx"
+  trap 'rm -rf "$SANDBOX_DIR"' EXIT
+  AUDIT_OUT="$(bash "$CONJURE_HOME/scripts/audit-setup.sh" "$SANDBOX_DIR" 2>&1)"
+  while IFS= read -r pattern; do
+    [ -z "$pattern" ] && continue
+    case "$pattern" in \#*) continue ;; esac
+    if printf '%s\n' "$AUDIT_OUT" | grep -qE "$pattern"; then
+      pass "$prof EXPECT: $pattern"
+    else
+      fail "$prof EXPECT: missing pattern: $pattern"
+    fi
+  done < "$expect_file"
+done
+
 # Summary
 echo
 echo "═══════════════════════════════════════════════════════════════════"
