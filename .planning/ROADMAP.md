@@ -171,11 +171,17 @@ Plans:
   3. A build/CI test greps all shipped hooks and fails if any emit network egress (curl/fetch/http/socket)
   4. `conjure audit` produces a skill "retire-list" (skills with 0 loads across recent sessions) folded from the local event log
   5. `TELEMETRY.md` documenting the schema ships in the same change as the hook
-**Plans**: TBD
-**Research**: required — MUST verify the exact Claude Code skill-load hook event name/shape against installed CC ≥2.1.117 before building (expected `PreToolUse` + `tool_name:"Skill"` / `InstructionsLoaded`, LOW-confidence until confirmed); design the hook with a `SessionStart`/`Stop` coarse-signal fallback so the retire-list still works if the granular event differs
+**Plans**: 3 plans
 
 Plans:
-- [ ] 07-01: TBD
+**Wave 1** *(foundation — no dependencies)*
+- [ ] 07-01-PLAN.md — Create skill-telemetry.mjs hook (PreToolUse/Skill + UserPromptExpansion), TELEMETRY.md schema doc, settings.json.tmpl wiring, .gitignore.tmpl entry (TLMY-01, TLMY-02, TLMY-05)
+
+**Wave 2** *(blocked on Wave 1)*
+- [ ] 07-02-PLAN.md — Add --retire-list flag to cli/conjure cmd_audit(), implement retire-list jq aggregation section in audit-setup.sh with date portability (TLMY-04)
+
+**Wave 3** *(blocked on Wave 1 and Wave 2)*
+- [ ] 07-03-PLAN.md — Extend tests/run.sh with telemetry test section covering TLMY-01 through TLMY-05 (no-egress grep, JSONL write with mock stdin, retire-list render) (TLMY-01, TLMY-02, TLMY-03, TLMY-04, TLMY-05)
 
 ## Progress
 
@@ -190,4 +196,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Regression Suite & Dry-Run Proof | 3/3 | Complete    | 2026-05-25 |
 | 5. README Demo | 2/2 | Complete    | 2026-05-25 |
 | 6. Cost Estimator | 3/3 | Complete    | 2026-05-25 |
-| 7. Skill-Firing Telemetry | 0/TBD | Not started | - |
+| 7. Skill-Firing Telemetry | 0/3 | Not started | - |
