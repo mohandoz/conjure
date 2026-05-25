@@ -46,7 +46,10 @@ and verify a correct, safe harness.
 - [ ] Skill-firing telemetry: hook records which skills load per session → retire-list signal
 - [ ] Cost estimator: `conjure audit --cost` predicts session token cost from harness size
 - [x] Pre-flight dependency verification with one-command install fix-its — Validated in Phase 01 (SAFE-04)
-- [ ] Failure-mode reproductions encoded as tests
+- [x] Failure-mode reproductions encoded as tests — Validated in Phase 04 (TEST-07)
+- [x] Golden-file regression suite: committed EXPECT files + loop in tests/run.sh — Validated in Phase 04 (TEST-03)
+- [x] `--dry-run` byte-identical proof: CI-gated snapshot comparison for all 9 profiles — Validated in Phase 04 (TEST-05)
+- [x] Windows CI job validates SAFE-03 portable hook wiring on `windows-latest` — Validated in Phase 04 (TEST-06)
 - [ ] Formal GSD `.planning/` for Conjure's own continued development (this bootstrap)
 
 ### Out of Scope
