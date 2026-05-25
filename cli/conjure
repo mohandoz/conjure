@@ -30,12 +30,13 @@ conjure $CONJURE_VERSION — Claude Code harness kit
 Home: $CONJURE_HOME
 
 Usage:
-  conjure init [new|existing|migrate] [--profile=<stack>] [--dry-run] [target]
+  conjure init [new|existing|migrate] [--profile=<stack>] [--overlay=<git-url>] [--dry-run] [target]
   conjure migrate <source> [target]            (sources: from-claude, from-cursor,
                                                 from-aider, from-continue, from-copilot)
   conjure audit [target]
   conjure update [--check|--apply] [target]
   conjure refresh-graph [target] [--full|--update]
+  conjure refresh-overlay [target]
   conjure install-mcp
   conjure preflight
   conjure publish [--submit] [--dry-run]
@@ -52,11 +53,12 @@ EOF
 cmd_version() { echo "conjure $CONJURE_VERSION"; }
 
 cmd_init() {
-  local mode="existing" profile="" dryrun=0 target="$(pwd)"
+  local mode="existing" profile="" overlay="" dryrun=0 target="$(pwd)"
   while [ $# -gt 0 ]; do
     case "$1" in
       new|existing|migrate) mode="$1" ;;
       --profile=*)          profile="${1#--profile=}" ;;
+      --overlay=*)          overlay="${1#--overlay=}" ;;
       --dry-run)            dryrun=1 ;;
       --help|-h)            grep -A3 '^  conjure init' <<<"$(usage)"; return 0 ;;
       *)                    target="$1" ;;
@@ -83,6 +85,12 @@ cmd_init() {
   if [ -n "$profile" ] && [ -d "$CONJURE_HOME/profiles/$profile" ]; then
     echo "▸ Applying profile: $profile"
     CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" bash "$CONJURE_HOME/profiles/$profile/apply.sh" "$target"
+  fi
+
+  # Apply org overlay if specified (OVLY-01)
+  if [ -n "$overlay" ]; then
+    CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" \
+      bash "$CONJURE_HOME/scripts/init-overlay.sh" "$overlay" "$target"
   fi
 
   # Stamp version
@@ -254,6 +262,10 @@ cmd_refresh_graph() {
   bash "$CONJURE_HOME/scripts/refresh-graph.sh" "$@"
 }
 
+cmd_refresh_overlay() {
+  bash "$CONJURE_HOME/scripts/refresh-overlay.sh" "$@"
+}
+
 cmd_install_mcp() {
   bash "$CONJURE_HOME/scripts/install-mcp-stack.sh"
 }
@@ -314,6 +326,7 @@ case "${1:-help}" in
   audit)           shift; cmd_audit "$@"           ;;
   update)          shift; cmd_update "$@"          ;;
   refresh-graph)   shift; cmd_refresh_graph "$@"   ;;
+  refresh-overlay) shift; cmd_refresh_overlay "$@" ;;
   install-mcp)     shift; cmd_install_mcp "$@"     ;;
   preflight)       shift; cmd_preflight "$@"       ;;
   publish)         shift; cmd_publish "$@"         ;;
