@@ -64,7 +64,7 @@ Cross-cutting constraints: scripts/preflight.sh must be POSIX bash 3.2+ (no bash
 
 Plans:
 **Wave 1** *(foundation — no dependencies)*
-- [ ] 02-01-PLAN.md — Create lib/mutate.sh: mutate_mkdir, mutate_cp, mutate_write, mutate_summary (SAFE-02)
+- [x] 02-01-PLAN.md — Create lib/mutate.sh: mutate_mkdir, mutate_cp, mutate_write, mutate_summary (SAFE-02)
 
 **Wave 2** *(parallel — all depend on 02-01 only)*
 - [ ] 02-02-PLAN.md — Retrofit scripts/init-project.sh: replace 12 bare write sites with mutate_* calls (SAFE-01, SAFE-02)
@@ -163,7 +163,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Pre-flight & Cross-Platform Hooks | 2/2 | Complete    | 2026-05-24 |
-| 2. Dry-Run Enforcement Chokepoint | 0/6 | Planned     | - |
+| 2. Dry-Run Enforcement Chokepoint | 1/6 | In Progress|  |
 | 3. Sandboxed Per-Profile Fixtures | 0/TBD | Not started | - |
 | 4. Regression Suite & Dry-Run Proof | 0/TBD | Not started | - |
 | 5. README Demo | 0/TBD | Not started | - |
