@@ -438,6 +438,140 @@ fi
 rm -rf "$SANDBOX_DIR"
 trap - EXIT
 
+echo
+echo "▸ Telemetry tests (TLMY-01 through TLMY-05)"
+
+# TLMY-01: hook file existence
+TLMY_HOOK="$CONJURE_HOME/templates/hooks-nodejs/skill-telemetry.mjs"
+if [ -f "$TLMY_HOOK" ]; then
+  pass "skill-telemetry.mjs exists (TLMY-01)"
+else
+  fail "skill-telemetry.mjs missing (TLMY-01)"
+fi
+
+# TLMY-03: no network egress in hook (static grep — no sandbox needed)
+if [ -f "$TLMY_HOOK" ]; then
+  EGRESS_PATTERNS='curl|fetch|http|socket|XMLHttpRequest|require\(.https.\)|require\(.http.\)|import.*https|import.*http|net\.Socket'
+  if grep -qE "$EGRESS_PATTERNS" "$TLMY_HOOK" 2>/dev/null; then
+    fail "skill-telemetry.mjs contains network egress pattern (TLMY-03)"
+  else
+    pass "skill-telemetry.mjs: no network egress (TLMY-03)"
+  fi
+else
+  fail "skill-telemetry.mjs missing — cannot check egress (TLMY-03)"
+fi
+
+# TLMY-05: TELEMETRY.md at repo root
+if [ -f "$CONJURE_HOME/TELEMETRY.md" ]; then
+  pass "TELEMETRY.md present at repo root (TLMY-05)"
+else
+  fail "TELEMETRY.md missing (TLMY-05)"
+fi
+
+if grep -q 'session_id' "$CONJURE_HOME/TELEMETRY.md" 2>/dev/null && \
+   grep -q 'project_cwd' "$CONJURE_HOME/TELEMETRY.md" 2>/dev/null && \
+   grep -q 'DO_NOT_TRACK' "$CONJURE_HOME/TELEMETRY.md" 2>/dev/null; then
+  pass "TELEMETRY.md contains required schema fields + DO_NOT_TRACK (TLMY-05)"
+else
+  fail "TELEMETRY.md missing required fields (session_id, project_cwd, or DO_NOT_TRACK) (TLMY-05)"
+fi
+
+# TLMY-04: --retire-list flag present in cli/conjure
+if grep -q '\-\-retire-list' "$CONJURE_HOME/cli/conjure"; then
+  pass "--retire-list flag present in cli/conjure (TLMY-04)"
+else
+  fail "--retire-list flag missing from cli/conjure (TLMY-04)"
+fi
+
+# Sandbox-based tests (TLMY-01 opt-in gate, TLMY-02 JSONL write, TLMY-04 retire-list render)
+TLMY_FX="$CONJURE_HOME/tests/fixtures/python-fastapi"
+sandbox_setup "$TLMY_FX"
+trap 'rm -rf "$SANDBOX_DIR"' EXIT
+
+# TLMY-01: hook exits 0 silently when CONJURE_TELEMETRY is unset
+UNSET_RC=0
+printf '{}' | CONJURE_TELEMETRY="" node "$TLMY_HOOK" >/dev/null 2>&1 || UNSET_RC=$?
+if [ "$UNSET_RC" -eq 0 ]; then
+  pass "hook exits 0 silently when CONJURE_TELEMETRY unset (TLMY-01)"
+else
+  fail "hook exited $UNSET_RC when CONJURE_TELEMETRY unset — expected 0 (TLMY-01)"
+fi
+
+# TLMY-01: hook exits 0 silently when CONJURE_TELEMETRY unset — no file written
+if [ ! -f "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl" ]; then
+  pass "no JSONL written when CONJURE_TELEMETRY unset (TLMY-01)"
+else
+  fail "JSONL was written even though CONJURE_TELEMETRY was unset (TLMY-01)"
+fi
+
+# TLMY-01: DO_NOT_TRACK=1 suppresses writes even when CONJURE_TELEMETRY=1
+SKILL_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill_name":"test-skill"},"session_id":"sess-001","cwd":"'"$SANDBOX_DIR"'"}'
+DNT_RC=0
+printf '%s' "$SKILL_PAYLOAD" | DO_NOT_TRACK=1 CONJURE_TELEMETRY=1 node "$TLMY_HOOK" >/dev/null 2>&1 || DNT_RC=$?
+if [ "$DNT_RC" -eq 0 ]; then
+  pass "hook exits 0 when DO_NOT_TRACK=1 (TLMY-01)"
+else
+  fail "hook exited $DNT_RC with DO_NOT_TRACK=1 — expected 0 (TLMY-01)"
+fi
+if [ ! -f "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl" ]; then
+  pass "no JSONL written when DO_NOT_TRACK=1 (TLMY-01)"
+else
+  fail "JSONL written despite DO_NOT_TRACK=1 (TLMY-01)"
+fi
+
+# TLMY-02: hook writes JSONL when CONJURE_TELEMETRY=1 with PreToolUse/Skill payload
+WRITE_RC=0
+printf '%s' "$SKILL_PAYLOAD" | CONJURE_TELEMETRY=1 node "$TLMY_HOOK" >/dev/null 2>&1 || WRITE_RC=$?
+if [ "$WRITE_RC" -eq 0 ]; then
+  pass "hook exits 0 when writing JSONL (TLMY-02)"
+else
+  fail "hook exited $WRITE_RC when CONJURE_TELEMETRY=1 — expected 0 (TLMY-02)"
+fi
+if [ -f "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl" ]; then
+  pass "JSONL file created by hook (TLMY-02)"
+else
+  fail "JSONL file NOT created when CONJURE_TELEMETRY=1 (TLMY-02)"
+fi
+
+# TLMY-02: JSONL line is valid JSON
+if command -v jq >/dev/null 2>&1 && [ -f "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl" ]; then
+  if jq empty "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl" 2>/dev/null; then
+    pass "JSONL file contains valid JSON lines (TLMY-02)"
+  else
+    fail "JSONL file contains invalid JSON (TLMY-02)"
+  fi
+fi
+
+# TLMY-02: JSONL contains expected fields
+if [ -f "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl" ]; then
+  JSONL_LINE=$(head -1 "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl")
+  if printf '%s' "$JSONL_LINE" | grep -q '"skill_invoke"' && \
+     printf '%s' "$JSONL_LINE" | grep -q '"test-skill"' && \
+     printf '%s' "$JSONL_LINE" | grep -q '"session_id"' && \
+     printf '%s' "$JSONL_LINE" | grep -q '"project_cwd"'; then
+    pass "JSONL record contains required fields (event, skill, session_id, project_cwd) (TLMY-02)"
+  else
+    fail "JSONL record missing required fields — got: $JSONL_LINE (TLMY-02)"
+  fi
+fi
+
+# TLMY-04: retire-list section renders when CONJURE_RETIRE=1
+RETIRE_OUT="$(CONJURE_RETIRE=1 bash "$CONJURE_HOME/scripts/audit-setup.sh" "$SANDBOX_DIR" 2>&1)"
+RETIRE_RC=$?
+if printf '%s' "$RETIRE_OUT" | grep -q '── Skill Retire-List ──'; then
+  pass "retire-list section header present (TLMY-04)"
+else
+  fail "retire-list section header missing (TLMY-04)"
+fi
+if [ "$RETIRE_RC" -le 2 ]; then
+  pass "retire-list section exit code ≤ 2 (TLMY-04)"
+else
+  fail "retire-list section crashed (rc=$RETIRE_RC) (TLMY-04)"
+fi
+
+rm -rf "$SANDBOX_DIR"
+trap - EXIT
+
 # Summary
 echo
 echo "═══════════════════════════════════════════════════════════════════"
