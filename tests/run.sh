@@ -263,6 +263,8 @@ for fx in "$CONJURE_HOME/tests/fixtures"/[^_]*/; do
     fail "fixture audit non-green (rc=$AUDIT_RC): $prof"
     printf '%s\n' "$AUDIT_OUT" | head -5
   fi
+  rm -rf "$SANDBOX_DIR"
+  trap - EXIT
 done
 
 # Broken fixture — specific finding assertion (TEST-04)
@@ -286,6 +288,8 @@ while IFS= read -r pattern; do
     fail "_broken: missing expected finding: $pattern"
   fi
 done < "$CONJURE_HOME/tests/fixtures/_broken/EXPECT"
+rm -rf "$SANDBOX_DIR"
+trap - EXIT
 
 echo
 echo "▸ Golden-file EXPECT loop (TEST-03)"
@@ -305,6 +309,8 @@ for fx in "$CONJURE_HOME/tests/fixtures"/[^_]*/; do
       fail "$prof EXPECT: missing pattern: $pattern"
     fi
   done < "$expect_file"
+  rm -rf "$SANDBOX_DIR"
+  trap - EXIT
 done
 
 echo
