@@ -100,6 +100,63 @@ if [ "$rc" -le 2 ]; then pass "audit-setup.sh ran (rc=$rc, expected 0|1|2)"
 else fail "audit-setup.sh crashed (rc=$rc)"
 fi
 
+# Preflight script checks
+echo
+echo "▸ Preflight script"
+
+# a) Smoke: all required deps present in test env
+if bash scripts/preflight.sh >/dev/null 2>&1; then
+  pass "scripts/preflight.sh: exits 0 (all required deps present)"
+else
+  fail "scripts/preflight.sh: non-zero exit (required dep missing in test env?)"
+fi
+
+# b) Block-on-required and d) Fix-it output (both use node-strip, share STRIPPED_PATH)
+# Strip ALL directories that provide node (accounts for fnm/nvm multi-path envs)
+STRIPPED_PATH=""
+if command -v node >/dev/null 2>&1; then
+  STRIPPED_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r dir; do
+    [ -x "$dir/node" ] || printf '%s\n' "$dir"
+  done | tr '\n' ':' | sed 's/:$//')"
+
+  # b) Block-on-required: strip node from PATH, expect non-zero exit
+  if PATH="$STRIPPED_PATH" bash scripts/preflight.sh >/dev/null 2>&1; then
+    fail "scripts/preflight.sh: did NOT block when node missing"
+  else
+    pass "scripts/preflight.sh: correctly blocks when node missing"
+  fi
+
+  # d) Fix-it output check: grep output for OS-specific package manager
+  FIXIT_OUT="$(PATH="$STRIPPED_PATH" bash scripts/preflight.sh 2>&1 || true)"
+  OS_NAME="$(uname -s)"
+  if [ "$OS_NAME" = "Darwin" ]; then
+    if printf '%s' "$FIXIT_OUT" | grep -q "brew"; then
+      pass "scripts/preflight.sh: fix-it output contains brew (macOS)"
+    else
+      fail "scripts/preflight.sh: fix-it output missing brew on macOS"
+    fi
+  else
+    if printf '%s' "$FIXIT_OUT" | grep -qE "apt|winget"; then
+      pass "scripts/preflight.sh: fix-it output contains apt/winget"
+    else
+      fail "scripts/preflight.sh: fix-it output missing package manager hint"
+    fi
+  fi
+else
+  pass "scripts/preflight.sh: skip node-strip test (node not in PATH — already fails smoke)"
+fi
+
+# c) Optional-missing exits 0: if shellcheck is absent, preflight must still exit 0
+if ! command -v shellcheck >/dev/null 2>&1; then
+  if bash scripts/preflight.sh >/dev/null 2>&1; then
+    pass "scripts/preflight.sh: exits 0 with shellcheck absent (optional)"
+  else
+    fail "scripts/preflight.sh: exits non-zero with only optional dep missing"
+  fi
+else
+  pass "scripts/preflight.sh: shellcheck present — optional-missing test skipped"
+fi
+
 # Migration scripts exist for every documented source
 echo
 echo "▸ Migration coverage"
