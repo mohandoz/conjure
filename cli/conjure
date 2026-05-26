@@ -34,7 +34,7 @@ Usage:
   conjure migrate <source> [target]            (sources: from-claude, from-cursor,
                                                 from-aider, from-continue, from-copilot)
   conjure audit [target]
-  conjure update [--check|--apply] [target]
+  conjure update [--check|--apply|--pr|--cron] [target]
   conjure check [--porcelain] [target]
   conjure resolve [--dry-run] [target]
   conjure refresh-graph [target] [--full|--update]
@@ -194,10 +194,114 @@ cmd_update() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --check|--apply) action="$1" ;;
+      --pr)            action="--pr" ;;
+      --cron)          action="--cron" ;;
+      --help|-h)       echo "Usage: conjure update [--check|--apply|--pr|--cron] [target]"; return 0 ;;
       *)               target="$1" ;;
     esac
     shift
   done
+
+  # --pr: open a GitHub PR with harness drift applied on a new branch (AUTPR-01)
+  if [ "$action" = "--pr" ]; then
+    if ! command -v gh >/dev/null 2>&1; then
+      echo "✗ gh CLI required for --pr (install: https://cli.github.com)" >&2
+      return 2
+    fi
+
+    # Zero-drift guard: if no drift, nothing to do
+    local check_rc
+    CONJURE_HOME="$CONJURE_HOME" bash "$CONJURE_HOME/cli/conjure" check "$target" >/dev/null 2>&1 && check_rc=0 || check_rc=$?
+    if [ "$check_rc" -eq 0 ]; then
+      echo "Harness is current — no PR needed"
+      return 0
+    fi
+
+    # Compute deterministic branch name from kit version
+    local kit_ver
+    kit_ver="$(cat "$CONJURE_HOME/VERSION" 2>/dev/null || echo unknown)"
+    local branch_hash
+    if command -v sha256sum >/dev/null 2>&1; then
+      branch_hash="$(printf '%s' "$kit_ver" | sha256sum | awk '{print $1}')"
+    else
+      branch_hash="$(printf '%s' "$kit_ver" | shasum -a 256 | awk '{print $1}')"
+    fi
+    local branch="conjure/update-${branch_hash:0:7}"
+
+    # Idempotency check: if PR already open for this branch, print URL and exit
+    local existing
+    existing="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url' 2>/dev/null || true)"
+    if [ -n "$existing" ]; then
+      echo "▸ PR already exists: $existing"
+      return 0
+    fi
+
+    # Build PR body from porcelain drift output
+    local drift_lines
+    drift_lines="$(CONJURE_HOME="$CONJURE_HOME" bash "$CONJURE_HOME/cli/conjure" check --porcelain "$target" 2>/dev/null || true)"
+    local pr_body
+    pr_body="$(printf '%s\n' \
+      "## Harness drift detected by \`conjure check\`" \
+      "" \
+      "| Status | File |" \
+      "|--------|------|"
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      local s="${line%% *}"
+      local p="${line#* }"
+      printf '| %s | `%s` |\n' "$s" "$p"
+    done <<< "$drift_lines")"
+
+    # git operations
+    git -C "$target" checkout -b "$branch" \
+      || { echo "✗ git checkout -b failed"; return 1; }
+    CONJURE_HOME="$CONJURE_HOME" bash "$CONJURE_HOME/cli/conjure" update --apply "$target" \
+      || { echo "✗ conjure update --apply failed"; return 1; }
+    git -C "$target" add -A
+    git -C "$target" commit -m "conjure: update harness to v${CONJURE_VERSION}"
+    git -C "$target" push origin "$branch" \
+      || { echo "✗ git push failed"; return 1; }
+
+    # Open PR
+    local pr_url
+    pr_url="$(gh pr create \
+      --title "conjure: update harness to v${CONJURE_VERSION}" \
+      --body "$pr_body" \
+      --head "$branch")"
+    echo "▸ PR opened: $pr_url"
+    return 0
+  fi
+
+  # --cron: write GitHub Actions workflow template for weekly auto-update (AUTPR-02)
+  if [ "$action" = "--cron" ]; then
+    local workflow_dir="$target/.github/workflows"
+    mkdir -p "$workflow_dir"
+    local wf_file="$workflow_dir/conjure-update.yml"
+    cat > "$wf_file" <<'CRONEOF'
+name: Conjure harness auto-update
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch: {}
+jobs:
+  conjure-update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install conjure
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/mohandoz/conjure/main/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Check drift
+        id: drift
+        run: conjure check || echo "drift=1" >> "$GITHUB_OUTPUT"
+      - name: Open update PR
+        if: steps.drift.outputs.drift == '1'
+        run: conjure update --pr
+CRONEOF
+    echo "▸ Cron template written: $wf_file"
+    return 0
+  fi
 
   local pinned="unknown"
   [ -f "$target/.claude/.conjure-version" ] && pinned="$(cat "$target/.claude/.conjure-version")"
