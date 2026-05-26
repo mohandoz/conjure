@@ -19,6 +19,18 @@ harness with one trustworthy command — and keep it healthy over time. If
 everything else fails, `conjure init` + `conjure audit` must reliably produce
 and verify a correct, safe harness.
 
+## Current Milestone: v0.5.0 Auto-Update + Healthcheck
+
+**Goal:** Enable harnesses to stay current — detect drift from upstream, resolve conflicts interactively, and automate updates via PR.
+
+**Target features:**
+- `conjure check` — drift detection command (installed harness vs upstream kit, delta report)
+- `conjure update --pr` — open GitHub PR with harness update diff; optional GH Action cron template
+- `conjure resolve` — guided prompt walking through diff3 conflict sidecars interactively
+- `conjure.ps1` — native PowerShell entrypoint for Windows (no Git Bash required)
+- ci-gate empty-check guard (tech debt: fail CI on zero check-runs for tagged commits)
+- SKILL-04 positional arg refactor (tech debt: replace `TARGET_REPO` env with positional arg)
+
 ## Requirements
 
 ### Validated
@@ -47,12 +59,18 @@ and verify a correct, safe harness.
 
 ### Active
 
-<!-- Requirements for next milestone — hypotheses until shipped and validated. -->
+<!-- Requirements for v0.5.0 — hypotheses until shipped and validated. -->
 
-- [ ] Auto-update drift detector — detect when installed harness diverges from upstream kit
-- [ ] Auto-PR bot — open PR to apply harness updates automatically
-- [ ] ci-gate empty-check guard — fail when tagged commit has zero check-runs (tech debt from v0.4.0)
-- [ ] SKILL-04 positional arg refactor — replace `TARGET_REPO` env contract with positional arg (tech debt from v0.4.0)
+- [ ] **DRIFT-01**: User can run `conjure check` to see which installed harness files diverge from the upstream kit
+- [ ] **DRIFT-02**: Drift report shows file-level deltas (added/modified/removed) with actionable next step
+- [ ] **AUTPR-01**: User can run `conjure update --pr` to open a GitHub PR with harness update diff
+- [ ] **AUTPR-02**: Optional GitHub Action template ships for cron-based auto-PR automation
+- [ ] **RESOLVE-01**: User can run `conjure resolve` to walk through diff3 conflict sidecars interactively via guided prompt
+- [ ] **RESOLVE-02**: `conjure resolve` marks sidecars resolved and cleans them up after confirmation
+- [ ] **WIN-01**: `conjure.ps1` PowerShell entrypoint works on native Windows without Git Bash
+- [ ] **WIN-02**: CI matrix includes native PowerShell job (windows-latest, shell: pwsh)
+- [ ] **DEBT-01**: ci-gate fails when tagged commit has zero GitHub check-runs (empty-check guard)
+- [ ] **DEBT-02**: `conjure publish-skill` accepts positional arg for target repo (replaces `TARGET_REPO` env)
 
 ### Out of Scope
 
@@ -109,4 +127,4 @@ and verify a correct, safe harness.
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-05-26 after v0.4.0 milestone — Distribution + Ecosystem shipped*
+*Last updated: 2026-05-26 — v0.5.0 milestone started — Auto-Update + Healthcheck*
