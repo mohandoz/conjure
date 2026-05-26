@@ -63,7 +63,7 @@ Plans:
   4. A harness file with only user edits (not upstream changes) is not falsely reported as drifted
 **Plans**: 2 plans
 Plans:
-- [ ] 17-01-PLAN.md — Create scripts/check.sh worker (sha256 classifier, manifest builder, M/R/A output)
+- [x] 17-01-PLAN.md — Create scripts/check.sh worker (sha256 classifier, manifest builder, M/R/A output)
 - [ ] 17-02-PLAN.md — Wire cmd_check in cli/conjure + DRIFT regression tests in tests/run.sh
 
 ### Phase 18: Conflict Resolution
@@ -105,7 +105,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 16. Prerequisites | 2/2 | Complete   | 2026-05-26 |
-| 17. Drift Detection | 0/2 | Not started | - |
+| 17. Drift Detection | 1/2 | In Progress|  |
 | 18. Conflict Resolution | 0/TBD | Not started | - |
 | 19. Auto-PR | 0/TBD | Not started | - |
 | 20. Windows + CI Gate | 0/TBD | Not started | - |

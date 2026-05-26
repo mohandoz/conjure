@@ -9,10 +9,10 @@ conflicts interactively, and automate updates via PR.
 
 ### Drift Detection
 
-- [ ] **DRIFT-01**: User can run `conjure check` to compare the installed harness
+- [x] **DRIFT-01**: User can run `conjure check` to compare the installed harness
   against the upstream kit snapshot and see a file-level delta report (added /
   modified / removed files)
-- [ ] **DRIFT-02**: `conjure check` exits 0 when harness is current and exits 1
+- [x] **DRIFT-02**: `conjure check` exits 0 when harness is current and exits 1
   when drift is detected; supports `--porcelain` flag for machine-readable output
   in CI pipelines
 
