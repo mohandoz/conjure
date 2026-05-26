@@ -4,8 +4,8 @@
 # then prints the gh pr create command (or manual URL + checklist) for the user to run.
 #
 # Usage:
-#   bash scripts/publish-skill.sh <skill-name> [--to <org/repo>] [--dry-run]
-#   TARGET_REPO=org/repo DRY_RUN=1 bash scripts/publish-skill.sh my-skill
+#   bash scripts/publish-skill.sh <skill-name> <org/repo> [--dry-run]
+#   TARGET_REPO=org/repo DRY_RUN=1 bash scripts/publish-skill.sh my-skill  (deprecated)
 #
 # Exit codes:
 #   0 = success
@@ -19,10 +19,19 @@ source "$CONJURE_HOME/lib/mutate.sh"
 
 # Env defaults — both env var and flag paths work
 DRY_RUN="${DRY_RUN:-0}"
-TARGET_REPO="${TARGET_REPO:-mohandoz/conjure}"
+TARGET_REPO_ENV="${TARGET_REPO:-}"
+TARGET_REPO="$TARGET_REPO_ENV"
 
 SKILL_NAME="${1:-}"
 shift || true
+
+# Positional $2: consume as org/repo if present and not a flag (DEBT-02)
+REPO_FROM_POS=0
+if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
+  TARGET_REPO="$1"
+  REPO_FROM_POS=1
+  shift || true
+fi
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -30,7 +39,7 @@ while [ $# -gt 0 ]; do
     --to=*)     TARGET_REPO="${1#--to=}" ;;
     --dry-run)  DRY_RUN=1 ;;
     -h|--help)
-      echo "Usage: conjure publish-skill <name> [--to <org/repo>] [--dry-run]"
+      echo "Usage: conjure publish-skill <name> <org/repo> [--dry-run]"
       exit 0
       ;;
     *)
@@ -41,7 +50,18 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-[ -z "$SKILL_NAME" ] && { echo "Usage: conjure publish-skill <name> [--to <org/repo>] [--dry-run]" >&2; exit 1; }
+# Deprecation warning: TARGET_REPO env used without positional $2 (DEBT-02)
+if [ "$REPO_FROM_POS" = "0" ] && [ -n "$TARGET_REPO_ENV" ]; then
+  echo "WARN: TARGET_REPO env var is deprecated; use 'conjure publish-skill <name> <org/repo>' instead" >&2
+fi
+
+# Missing both positional $2 and TARGET_REPO env → hard prerequisite failure
+if [ -z "$TARGET_REPO" ]; then
+  echo "Usage: conjure publish-skill <name> <org/repo> [--dry-run]" >&2
+  exit 2
+fi
+
+[ -z "$SKILL_NAME" ] && { echo "Usage: conjure publish-skill <name> <org/repo> [--dry-run]" >&2; exit 1; }
 
 if ! printf '%s' "$TARGET_REPO" | grep -qE '^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$'; then
   echo "Invalid --to format: use owner/repo" >&2
