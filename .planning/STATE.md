@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v0.5.0
 milestone_name: Auto-Update + Healthcheck
 status: planning
-last_updated: "2026-05-26T00:00:00.000Z"
-last_activity: 2026-05-26
+last_updated: "2026-05-26T02:50:49.645Z"
+last_activity: 2026-05-26 — Roadmap created for v0.5.0 (5 phases, 11 requirements mapped)
 progress:
   total_phases: 5
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
   percent: 0
 ---
 
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-05-26)
 ## Current Position
 
 Phase: 16 of 20 (Prerequisites)
-Plan: —
-Status: Ready to plan
-Last activity: 2026-05-26 — Roadmap created for v0.5.0 (5 phases, 11 requirements mapped)
+Plan: 01 of 02 complete
+Status: In Progress — Plan 16-01 complete, Plan 16-02 pending
+Last activity: 2026-05-26 — Plan 16-01 complete: mutate_rm added to lib/mutate.sh (INFRA-01)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress: [░░░░░░░░░░] 0%
 |-------|-------|-------|----------|
 | v0.3.0 phases 01–07 | 22 | - | - |
 | v0.4.0 phases 08–15.1 | 23 | - | - |
+| Phase 16-prerequisites P01 | 8 min | 2 tasks / 2 files | — |
 
 **Recent Trend:**
 
@@ -60,6 +61,7 @@ Progress: [░░░░░░░░░░] 0%
 - [v0.5.0 ordering]: Conflict resolution (Phase 18) before Auto-PR (Phase 19) — complete user story: apply → resolve → PR
 - [v0.4.0 Docker]: debian:bookworm-slim base; separate Homebrew tap repo
 - [v0.4.0 release]: 4-job release.yml — ci-gate → release → docker + homebrew (parallel)
+- [Phase ?]: INFRA-01 mutate_rm: no -r flag; callers (Phase 18) control recursive logic for individual sidecar file deletion
 
 ### Pending Todos
 
@@ -84,6 +86,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-26
-Stopped at: v0.5.0 roadmap created — 5 phases (16-20), 11 requirements mapped
+Last session: 2026-05-26T02:50:46.067Z
+Stopped at: 16-01-PLAN.md complete — mutate_rm in lib/mutate.sh + 4 regression tests passing
 Resume file: None

@@ -49,7 +49,7 @@ Enable harnesses to stay current: detect drift from upstream, resolve conflicts 
   4. Existing `mutate_cp` / `mutate_write` regression tests still pass; new `mutate_rm` regression test added
 **Plans**: 2 plans
 Plans:
-- [ ] 16-01-PLAN.md — Add mutate_rm to lib/mutate.sh + regression test (INFRA-01)
+- [x] 16-01-PLAN.md — Add mutate_rm to lib/mutate.sh + regression test (INFRA-01)
 - [ ] 16-02-PLAN.md — publish-skill positional $2 refactor + SKILL-05 test (DEBT-02)
 
 ### Phase 17: Drift Detection
@@ -101,7 +101,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 16. Prerequisites | 0/2 | Not started | - |
+| 16. Prerequisites | 1/2 | In Progress|  |
 | 17. Drift Detection | 0/TBD | Not started | - |
 | 18. Conflict Resolution | 0/TBD | Not started | - |
 | 19. Auto-PR | 0/TBD | Not started | - |

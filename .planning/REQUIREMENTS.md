@@ -54,7 +54,7 @@ conflicts interactively, and automate updates via PR.
 
 ### Infrastructure (non-user-facing prerequisite)
 
-- [ ] **INFRA-01**: `lib/mutate.sh` gains a `mutate_rm` function (dry-run safe,
+- [x] **INFRA-01**: `lib/mutate.sh` gains a `mutate_rm` function (dry-run safe,
   consistent with existing `mutate_cp` / `mutate_write` primitives) required by
   RESOLVE-02
 
