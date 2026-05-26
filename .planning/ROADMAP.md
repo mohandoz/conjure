@@ -164,7 +164,16 @@ Plans:
   4. Image supports `linux/amd64` and `linux/arm64` architectures and baseline image size is ≤200 MB
   5. All existing CI tests pass with a `windows-latest` matrix entry using `shell: bash` for CLI paths and `shell: pwsh` for `.mjs` hooks
 
-**UI hint**: no
+**Plans**: 3 plans
+
+**Wave 1**
+
+- [ ] 14-01-PLAN.md — Dockerfile (multi-arch, non-root, Node.js 22 via NodeSource) + .dockerignore (DOCK-02, DOCK-04)
+
+**Wave 2** *(parallel — both blocked on Wave 1 completion)*
+
+- [ ] 14-02-PLAN.md — .github/workflows/docker.yml (workflow_dispatch, containerd snapshotter, multi-arch build, smoke tests, size assertion) (DOCK-01, DOCK-04)
+- [ ] 14-03-PLAN.md — windows-test job in ci.yml + README Docker section + 14-VALIDATION.md (TECH-03, DOCK-05)
 
 ### Phase 15: Release Pipeline
 
@@ -188,7 +197,7 @@ Plans:
 | 11. Skill Publishing | v0.4.0 | 2/2 | Complete    | 2026-05-25 |
 | 12. Org Overlay | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
 | 13. Homebrew Tap | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
-| 14. Docker + Windows CI | v0.4.0 | 0/TBD | Not started | - |
+| 14. Docker + Windows CI | v0.4.0 | 0/3 | Planning    | - |
 | 15. Release Pipeline | v0.4.0 | 0/TBD | Not started | - |
 
 ## Backlog

@@ -674,7 +674,7 @@ docker run --rm -v %CD%:/work ghcr.io/mohandoz/conjure:v0.4.0 audit .
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Node 22 vs Node 24 for Docker**
    - Node 22 is in LTS maintenance (EOL April 2027). Node 24 is the active LTS.
