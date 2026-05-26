@@ -87,8 +87,11 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. `conjure update --pr` pushes a harness-update branch and opens a GitHub PR with the drift diff as the PR body
   2. Running `conjure update --pr` a second time when a PR already exists for the same branch prints the existing PR URL and exits 0 (idempotent)
-  3. An optional `.github/workflows/conjure-update.yml` cron template is written by `conjure init` (or on demand) enabling automated weekly drift checks
-**Plans**: TBD
+  3. An optional `.github/workflows/conjure-update.yml` cron template is written by `conjure update --cron` enabling automated weekly drift checks
+**Plans**: 2 plans
+Plans:
+- [ ] 19-01-PLAN.md — Add --pr and --cron branches to cmd_update in cli/conjure (AUTPR-01, AUTPR-02)
+- [ ] 19-02-PLAN.md — Add AUTPR regression tests to tests/run.sh (AUTPR-01, AUTPR-02)
 
 ### Phase 20: Windows + CI Gate
 **Goal**: Native Windows users can invoke `conjure` without Git Bash, and CI correctly rejects tagged releases that lack check-run evidence
@@ -110,7 +113,7 @@ Plans:
 | 16. Prerequisites | 2/2 | Complete   | 2026-05-26 |
 | 17. Drift Detection | 2/2 | Complete   | 2026-05-26 |
 | 18. Conflict Resolution | 2/2 | Complete   | 2026-05-26 |
-| 19. Auto-PR | 0/TBD | Not started | - |
+| 19. Auto-PR | 0/2 | Not started | - |
 | 20. Windows + CI Gate | 0/TBD | Not started | - |
 
 ## Backlog
