@@ -18,10 +18,10 @@ conflicts interactively, and automate updates via PR.
 
 ### Auto-PR
 
-- [ ] **AUTPR-01**: User can run `conjure update --pr` to push a harness-update
+- [x] **AUTPR-01**: User can run `conjure update --pr` to push a harness-update
   branch and open a GitHub PR with the diff; command is idempotent (checks for an
   existing PR on the same branch before calling `gh pr create`)
-- [ ] **AUTPR-02**: An optional `.github/workflows/conjure-update.yml` cron
+- [x] **AUTPR-02**: An optional `.github/workflows/conjure-update.yml` cron
   template ships (via `conjure init` or standalone) so teams can automate
   weekly drift checks and PR creation without manual intervention
 

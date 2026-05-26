@@ -90,7 +90,7 @@ Plans:
   3. An optional `.github/workflows/conjure-update.yml` cron template is written by `conjure update --cron` enabling automated weekly drift checks
 **Plans**: 2 plans
 Plans:
-- [ ] 19-01-PLAN.md — Add --pr and --cron branches to cmd_update in cli/conjure (AUTPR-01, AUTPR-02)
+- [x] 19-01-PLAN.md — Add --pr and --cron branches to cmd_update in cli/conjure (AUTPR-01, AUTPR-02)
 - [ ] 19-02-PLAN.md — Add AUTPR regression tests to tests/run.sh (AUTPR-01, AUTPR-02)
 
 ### Phase 20: Windows + CI Gate
@@ -113,7 +113,7 @@ Plans:
 | 16. Prerequisites | 2/2 | Complete   | 2026-05-26 |
 | 17. Drift Detection | 2/2 | Complete   | 2026-05-26 |
 | 18. Conflict Resolution | 2/2 | Complete   | 2026-05-26 |
-| 19. Auto-PR | 0/2 | Not started | - |
+| 19. Auto-PR | 1/2 | In Progress|  |
 | 20. Windows + CI Gate | 0/TBD | Not started | - |
 
 ## Backlog
