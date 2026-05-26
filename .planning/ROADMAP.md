@@ -18,7 +18,7 @@ Make Conjure installable and shareable through every standard channel while clea
 - [x] **Phase 11: Skill Publishing** - Add `conjure publish-skill` command with egress scan + PR flow (completed 2026-05-25)
 - [x] **Phase 12: Org Overlay** - Implement `conjure init --overlay` + `conjure refresh-overlay` system (completed 2026-05-25)
 - [x] **Phase 13: Homebrew Tap** - Publish `mohandoz/homebrew-conjure` formula and auto-bump action (completed 2026-05-25)
-- [ ] **Phase 14: Docker + Windows CI** - Multi-arch Docker image and `windows-latest` CI matrix entry
+- [x] **Phase 14: Docker + Windows CI** - Multi-arch Docker image and `windows-latest` CI matrix entry (completed 2026-05-26)
 - [ ] **Phase 15: Release Pipeline** - Single `release.yml` wires all distribution targets under one gate
 
 ## Phase Details
@@ -168,12 +168,12 @@ Plans:
 
 **Wave 1**
 
-- [ ] 14-01-PLAN.md — Dockerfile (multi-arch, non-root, Node.js 22 via NodeSource) + .dockerignore (DOCK-02, DOCK-04)
+- [x] 14-01-PLAN.md — Dockerfile (multi-arch, non-root, Node.js 22 via NodeSource) + .dockerignore (DOCK-02, DOCK-04)
 
 **Wave 2** *(parallel — both blocked on Wave 1 completion)*
 
-- [ ] 14-02-PLAN.md — .github/workflows/docker.yml (workflow_dispatch, containerd snapshotter, multi-arch build, smoke tests, size assertion) (DOCK-01, DOCK-04)
-- [ ] 14-03-PLAN.md — windows-test job in ci.yml + README Docker section + 14-VALIDATION.md (TECH-03, DOCK-05)
+- [x] 14-02-PLAN.md — .github/workflows/docker.yml (workflow_dispatch, containerd snapshotter, multi-arch build, smoke tests, size assertion) (DOCK-01, DOCK-04)
+- [x] 14-03-PLAN.md — windows-test job in ci.yml + README Docker section + 14-VALIDATION.md (TECH-03, DOCK-05)
 
 ### Phase 15: Release Pipeline
 
@@ -185,7 +185,11 @@ Plans:
   1. Pushing a version tag triggers a single `release.yml` workflow that fires: Homebrew SHA bump via `bump-homebrew-formula-action`, Docker multi-arch build + push to `ghcr.io`, and `marketplace.json` version consistency check
   2. No distribution artifact (Homebrew SHA, Docker image, marketplace version) is published unless all tests, shellcheck, and audit pass green first
 
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+
+- [ ] 15-01-PLAN.md — Extend release.yml with ci-gate job + Docker build/push + marketplace check (REL-01, REL-02, DOCK-03)
 
 ## Progress
 
@@ -197,8 +201,8 @@ Plans:
 | 11. Skill Publishing | v0.4.0 | 2/2 | Complete    | 2026-05-25 |
 | 12. Org Overlay | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
 | 13. Homebrew Tap | v0.4.0 | 3/3 | Complete    | 2026-05-25 |
-| 14. Docker + Windows CI | v0.4.0 | 0/3 | Planning    | - |
-| 15. Release Pipeline | v0.4.0 | 0/TBD | Not started | - |
+| 14. Docker + Windows CI | v0.4.0 | 3/3 | Complete    | 2026-05-26 |
+| 15. Release Pipeline | v0.4.0 | 0/1 | Not started | - |
 
 ## Backlog
 
