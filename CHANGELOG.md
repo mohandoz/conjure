@@ -3,14 +3,65 @@
 All notable changes to Conjure. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] — 2026-05-26
 
-### Added
+### Added — Auto-Update + Healthcheck (v0.5.0)
+- `conjure check` — reads 35-file kit manifest, sha256-compares every file,
+  exits 0 (current) or 1 (drift detected); `--porcelain` emits `A/M/R <path>`
+  machine-readable lines for scripting.
+- `conjure resolve` — interactive sidecar walker; prompts `[k]eep / [a]pply /
+  [e]dit / [s]kip` per `.conjure-conflict-*` file; exits 2 on non-TTY stdin;
+  prints "No conflicts remain" when all sidecars are cleared.
+- `conjure update --pr` — idempotent GitHub PR creation; deterministic branch
+  `conjure/update-<7-char-sha256>`; PR body is a drift diff table from
+  `conjure check --porcelain`; exits 0 if PR already exists (prints URL).
+- `conjure update --cron` — writes `.github/workflows/conjure-update.yml`
+  cron template (weekly Monday 09:00 UTC) to the target repo; idempotent.
+- `conjure.ps1` — 24-line PowerShell shim for native Windows; discovers Git
+  Bash at `$env:ProgramFiles\Git`; falls back to WSL with `/mnt/<drive>` path
+  conversion; `$ErrorActionPreference = 'Continue'` + `exit $LASTEXITCODE`
+  throughout; exits 2 if neither Git Bash nor WSL found.
+- `lib/mutate.sh` gains `mutate_rm` — dry-run-safe file deletion consistent
+  with existing `mutate_cp` / `mutate_write` primitives.
+- `windows-ps1-shim` CI job (`ci.yml`) — `shell: pwsh`; smoke-tests
+  `conjure.ps1 --version` exits 0 and `conjure.ps1 init` propagates exit 2.
+
+### Changed — Auto-Update + Healthcheck (v0.5.0)
+- `conjure publish-skill` accepts positional `<org/repo>` as `$2`; `TARGET_REPO`
+  env kept as deprecated fallback emitting `WARN:` on stderr.
+- `release.yml` ci-gate: 5-attempt retry loop (15s sleep) before failure check;
+  explicit FAIL message when zero check-runs found after all retries.
+
+### Added — Distribution + Ecosystem (v0.4.0)
+- `conjure update --apply` — 3-way merge via `lib/merge.sh`; writes
+  `.conjure-conflict-*` sidecars on conflicts; backup-before-mutate throughout.
+- Claude Code Marketplace plugin manifest (`.claude-plugin/`); validated by
+  `claude plugin validate`.
+- `conjure publish-skill` — egress-scans skills, opens PR to target repo;
+  GitHub Actions publish pipeline.
+- `conjure init --overlay` and `conjure refresh-overlay` — org overlay system
+  for team-wide CLAUDE.md / hook enforcement.
+- Homebrew tap `mohandoz/homebrew-conjure`; auto-bump action in `release.yml`.
+- Multi-arch Docker image (`linux/amd64`, `linux/arm64`) on
+  `ghcr.io/mohandoz/conjure`; `release.yml` Docker job.
+- `release.yml` — single gate: ci-gate → release → docker + homebrew (parallel).
+- VALIDATION.md files for phases 01–07 (Nyquist compliance backfill).
+
+### Added — Testing + Telemetry (v0.3.0)
+- Fixture-driven regression test suite (`tests/run.sh`); covers all CLI
+  commands, merge/conflict paths, and dry-run invariants.
+- Skill-firing telemetry via `PreToolUse(Skill)` + `InstructionsLoaded` hooks;
+  append-only JSONL; local-only, no service.
+- Cost estimator: chars/4 heuristic × dated price table baked into `conjure`;
+  `--exact` opt-in.
+- Cross-platform preflight: `command -v` table (bash) + mirrored `.mjs` probe;
+  OS-detected install hints.
+- `lib/` directory for shared bash logic (`mutate.sh`, `merge.sh`).
+
+### Added — Brand
 - Logo at `.github/assets/logo.svg` — binding-circle sigil with four
-  inscriptions (CLAUDE.md / Skills / Subagents / Hooks) and a chained
-  central `C`. Embedded in README hero.
-- Brand voice: *"Bind the daemon. Ship the code."* — occult/harness
-  metaphor for the four-layer binding model.
+  inscriptions (CLAUDE.md / Skills / Subagents / Hooks) and a chained `C`.
+- Brand voice: *"Bind the daemon. Ship the code."*
 
 ## [0.2.1] — 2026-05-24
 
@@ -76,6 +127,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Scripts: init-project.sh, audit-setup.sh, refresh-graph.sh, install-mcp-stack.sh.
 - Checklists: NEW-PROJECT, EXISTING-PROJECT, AUDIT, ONBOARDING.
 
-[Unreleased]: https://github.com/mohandoz/conjure/compare/v0.2.0...HEAD
+[0.5.0]: https://github.com/mohandoz/conjure/compare/v0.2.1...v0.5.0
+[0.2.1]: https://github.com/mohandoz/conjure/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mohandoz/conjure/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mohandoz/conjure/releases/tag/v0.1.0
