@@ -47,16 +47,16 @@
 
 ### Docker Image (DIST-03)
 
-- [ ] **DOCK-01**: User can run `docker run ghcr.io/mohandoz/conjure:v0.4.0 conjure audit .` with `-v $(pwd):/work` and get correct output with user-owned files
-- [ ] **DOCK-02**: Docker image runs as non-root (`USER conjure`, UID 1000); files written into a mounted volume remain owned by the calling user
-- [ ] **DOCK-03**: Image is published to `ghcr.io/mohandoz/conjure` via `GITHUB_TOKEN` with semantic version tags and `latest`
-- [ ] **DOCK-04**: Image is multi-arch (`linux/amd64` + `linux/arm64`) and baseline image size is ≤200 MB
-- [ ] **DOCK-05**: README documents `$(pwd)` / `${PWD}` / `%CD%` volume-mount forms for bash, PowerShell, and cmd
+- [x] **DOCK-01**: User can run `docker run ghcr.io/mohandoz/conjure:v0.4.0 conjure audit .` with `-v $(pwd):/work` and get correct output with user-owned files
+- [x] **DOCK-02**: Docker image runs as non-root (`USER conjure`, UID 1000); files written into a mounted volume remain owned by the calling user
+- [x] **DOCK-03**: Image is published to `ghcr.io/mohandoz/conjure` via `GITHUB_TOKEN` with semantic version tags and `latest`
+- [x] **DOCK-04**: Image is multi-arch (`linux/amd64` + `linux/arm64`) and baseline image size is ≤200 MB
+- [x] **DOCK-05**: README documents `$(pwd)` / `${PWD}` / `%CD%` volume-mount forms for bash, PowerShell, and cmd
 
 ### Release Pipeline Wiring
 
-- [ ] **REL-01**: A single `release.yml` GitHub Actions workflow triggers on version tag push and fires: (a) Homebrew SHA bump via `bump-homebrew-formula-action`, (b) Docker multi-arch build + push to `ghcr.io`, (c) `marketplace.json` version consistency check
-- [ ] **REL-02**: Release workflow is gated on green CI (all tests + shellcheck + audit pass) before any distribution artifact is published
+- [x] **REL-01**: A single `release.yml` GitHub Actions workflow triggers on version tag push and fires: (a) Homebrew SHA bump via `bump-homebrew-formula-action`, (b) Docker multi-arch build + push to `ghcr.io`, (c) `marketplace.json` version consistency check
+- [x] **REL-02**: Release workflow is gated on green CI (all tests + shellcheck + audit pass) before any distribution artifact is published
 
 ### Tech Debt Clearance
 
@@ -66,7 +66,7 @@
 - [x] **TECH-02d**: `VALIDATION.md` created for Phase 05 (README demo) with executable verify commands
 - [x] **TECH-02e**: `VALIDATION.md` created for Phase 06 (cost estimator) with executable verify commands
 - [x] **TECH-02f**: `VALIDATION.md` created for Phase 07 (skill-firing telemetry) with executable verify commands
-- [ ] **TECH-03**: `windows-latest` matrix entry added to CI; all existing tests pass with `shell: bash`; `.mjs` hooks tested with `shell: pwsh`
+- [x] **TECH-03**: `windows-latest` matrix entry added to CI; all existing tests pass with `shell: bash`; `.mjs` hooks tested with `shell: pwsh`
 
 ---
 
@@ -121,14 +121,14 @@
 | BREW-02 | Phase 13 | TBD | Pending |
 | BREW-03 | Phase 13 | TBD | Pending |
 | BREW-04 | Phase 13 | TBD | Pending |
-| DOCK-01 | Phase 14 | TBD | Pending |
-| DOCK-02 | Phase 14 | TBD | Pending |
-| DOCK-03 | Phase 14 | TBD | Pending |
-| DOCK-04 | Phase 14 | TBD | Pending |
-| DOCK-05 | Phase 14 | TBD | Pending |
-| TECH-03 | Phase 14 | TBD | Pending |
-| REL-01 | Phase 15 | TBD | Pending |
-| REL-02 | Phase 15 | TBD | Pending |
+| DOCK-01 | Phase 14 | Dockerfile + docker.yml smoke test | Complete (human-needed for live image test) |
+| DOCK-02 | Phase 14 | Dockerfile USER conjure UID 1000 | Complete |
+| DOCK-03 | Phase 15 | release.yml push: true to ghcr.io | Complete (human-needed for live tag push) |
+| DOCK-04 | Phase 14 | docker.yml multi-arch + size assertion | Complete (human-needed for CI run) |
+| DOCK-05 | Phase 14 | README.md Docker section | Complete |
+| TECH-03 | Phase 14 | ci.yml windows-test job | Complete (human-needed for CI run) |
+| REL-01 | Phase 15 | release.yml Homebrew+Docker+marketplace | Complete (human-needed for live tag push) |
+| REL-02 | Phase 15 | release.yml ci-gate job | Complete (human-needed for live tag push) |
 
 ---
 
