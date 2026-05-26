@@ -61,7 +61,10 @@ Plans:
   2. `conjure check` exits 0 when the harness is fully current and exits 1 when drift is detected
   3. `conjure check --porcelain` emits machine-readable lines consumable by scripts without text parsing
   4. A harness file with only user edits (not upstream changes) is not falsely reported as drifted
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 17-01-PLAN.md — Create scripts/check.sh worker (sha256 classifier, manifest builder, M/R/A output)
+- [ ] 17-02-PLAN.md — Wire cmd_check in cli/conjure + DRIFT regression tests in tests/run.sh
 
 ### Phase 18: Conflict Resolution
 **Goal**: Users can interactively resolve all diff3 conflict sidecars left by `conjure update --apply` without manually editing files
@@ -102,7 +105,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 16. Prerequisites | 2/2 | Complete   | 2026-05-26 |
-| 17. Drift Detection | 0/TBD | Not started | - |
+| 17. Drift Detection | 0/2 | Not started | - |
 | 18. Conflict Resolution | 0/TBD | Not started | - |
 | 19. Auto-PR | 0/TBD | Not started | - |
 | 20. Windows + CI Gate | 0/TBD | Not started | - |
