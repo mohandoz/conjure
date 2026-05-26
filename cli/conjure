@@ -36,6 +36,7 @@ Usage:
   conjure audit [target]
   conjure update [--check|--apply] [target]
   conjure check [--porcelain] [target]
+  conjure resolve [--dry-run] [target]
   conjure refresh-graph [target] [--full|--update]
   conjure refresh-overlay [target]
   conjure install-mcp
@@ -170,6 +171,22 @@ cmd_check() {
   done
   CONJURE_HOME="$CONJURE_HOME" CONJURE_PORCELAIN="$porcelain" \
     bash "$CONJURE_HOME/scripts/check.sh" "$target"
+}
+
+cmd_resolve() {
+  local target dryrun
+  target="$(pwd)"
+  dryrun=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run)   dryrun=1 ;;
+      --help|-h)   echo "Usage: conjure resolve [--dry-run] [target]"; return 0 ;;
+      *)           target="$1" ;;
+    esac
+    shift
+  done
+  CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" \
+    bash "$CONJURE_HOME/scripts/resolve.sh" "$target"
 }
 
 cmd_update() {
@@ -342,6 +359,7 @@ case "${1:-help}" in
   audit)           shift; cmd_audit "$@"           ;;
   update)          shift; cmd_update "$@"          ;;
   check)           shift; cmd_check "$@"           ;;
+  resolve)         shift; cmd_resolve "$@"         ;;
   refresh-graph)   shift; cmd_refresh_graph "$@"   ;;
   refresh-overlay) shift; cmd_refresh_overlay "$@" ;;
   install-mcp)     shift; cmd_install_mcp "$@"     ;;
