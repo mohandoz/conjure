@@ -32,7 +32,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,6 +55,30 @@ jobs:
           [ "$plg_ver"  = "$ver" ] || { echo "FAIL: plugin.json version ($plg_ver) != VERSION ($ver)"; rc=1; }
           [ "$rc" -eq 0 ] && echo "OK: all version fields match $ver"
           exit "$rc"
+
+      - name: Extract CHANGELOG entry
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          awk -v ver="$tag" '
+            $0 ~ "^## \\[" ver "\\]" { capture=1; next }
+            capture && /^## \[/      { exit }
+            capture                  { print }
+          ' CHANGELOG.md > release-notes.md
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+
+  docker:
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Set up Docker daemon (containerd snapshotter)
         uses: docker/setup-docker-action@v4
@@ -90,24 +113,23 @@ jobs:
             ghcr.io/mohandoz/conjure:${{ github.ref_name }}
             ghcr.io/mohandoz/conjure:latest
 
-      - name: Extract CHANGELOG entry
-        id: cl
+  homebrew:
+    needs: [release]
+    runs-on: ubuntu-latest
+    env:
+      COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+    steps:
+      - name: Preflight — verify HOMEBREW_TAP_GITHUB_TOKEN is set
         run: |
-          tag="${GITHUB_REF#refs/tags/v}"
-          awk -v ver="$tag" '
-            $0 ~ "^## \\[" ver "\\]" { capture=1; next }
-            capture && /^## \[/      { exit }
-            capture                  { print }
-          ' CHANGELOG.md > release-notes.md
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          body_path: release-notes.md
-          draft: false
-          prerelease: false
+          if [ -z "$COMMITTER_TOKEN" ]; then
+            echo "SKIP: HOMEBREW_TAP_GITHUB_TOKEN secret not configured"
+            echo "Set the secret to enable automatic Homebrew formula bumps"
+            exit 0
+          fi
+          echo "OK: HOMEBREW_TAP_GITHUB_TOKEN present"
 
       - name: Bump Homebrew formula
+        if: ${{ env.COMMITTER_TOKEN != '' }}
         uses: mislav/bump-homebrew-formula-action@v3
         with:
           formula-name: conjure

@@ -20,6 +20,7 @@ Make Conjure installable and shareable through every standard channel while clea
 - [x] **Phase 13: Homebrew Tap** - Publish `mohandoz/homebrew-conjure` formula and auto-bump action (completed 2026-05-25)
 - [x] **Phase 14: Docker + Windows CI** - Multi-arch Docker image and `windows-latest` CI matrix entry (completed 2026-05-26)
 - [x] **Phase 15: Release Pipeline** - Single `release.yml` wires all distribution targets under one gate (completed 2026-05-26)
+- [x] **Phase 15.1: Fix release.yml Docker+Homebrew coupling** - Decouple Docker and Homebrew into independent jobs; add HOMEBREW_TAP_GITHUB_TOKEN preflight (completed 2026-05-26)
 
 ## Phase Details
 
@@ -213,10 +214,10 @@ Plans:
 
 ### Phase 15.1: Fix release.yml Docker+Homebrew coupling (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
+**Goal:** Decouple Docker push and Homebrew bump into independent jobs so failure in one does not silently skip the other; add preflight check for HOMEBREW_TAP_GITHUB_TOKEN.
+**Requirements**: REL-01 (tech debt), DOCK-03 (tech debt)
 **Depends on:** Phase 15
-**Plans:** 0 plans
+**Plans:** 1 plan
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 15.1 to break down)
+- [x] 15.1-01-PLAN.md — Split release job into release + docker + homebrew; add token preflight

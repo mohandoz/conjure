@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.4.0
 milestone_name: Distribution + Ecosystem
-status: planning
-last_updated: "2026-05-26T01:06:48.467Z"
-last_activity: 2026-05-25
+status: complete
+last_updated: "2026-05-26T04:30:00.000Z"
+last_activity: 2026-05-26
 progress:
   total_phases: 9
-  completed_phases: 8
-  total_plans: 22
-  completed_plans: 22
-  percent: 89
+  completed_phases: 9
+  total_plans: 23
+  completed_plans: 23
+  percent: 100
 ---
 
 # Project State
@@ -20,13 +20,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-25)
 
 **Core value:** A developer can turn any repo into a production-grade, eval-backed Claude Code harness with one trustworthy command — and keep it healthy over time.
-**Current focus:** Phase 15.1 — Fix release.yml Docker+Homebrew coupling (URGENT)
+**Current focus:** v0.4.0 milestone complete — all 9 phases done
 
 ## Current Position
 
-Phase: 15.1
-Plan: Not started
-Status: Ready to plan
+Phase: 15.1 (complete)
+Plan: 15.1-01 (complete)
+Status: Milestone complete
 Last activity: 2026-05-26
 
 Progress: [██████████] 100%
