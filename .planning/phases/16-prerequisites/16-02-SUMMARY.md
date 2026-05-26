@@ -115,6 +115,17 @@ None - no external service configuration required.
 - All SKILL-01 through SKILL-05 pass; publish-skill.sh interface is clean and documented
 - No blockers
 
+## Self-Check: PASSED
+
+- scripts/publish-skill.sh: FOUND
+- tests/run.sh: FOUND
+- 16-02-SUMMARY.md: FOUND
+- Commit 60f3b28: FOUND
+- Commit a4da3f8: FOUND
+- No hardcoded mohandoz/conjure default: VERIFIED
+- SKILL-05 occurrences in tests/run.sh: 19 (>= 4 required)
+- REPO_FROM_POS occurrences in publish-skill.sh: 3 (>= 2 required)
+
 ---
 *Phase: 16-prerequisites*
 *Completed: 2026-05-26*
