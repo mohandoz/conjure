@@ -48,7 +48,7 @@ conflicts interactively, and automate updates via PR.
 - [ ] **DEBT-01**: `ci-gate` job in `release.yml` fails with an explicit error
   message when a tagged commit has zero GitHub check-runs (empty-check guard);
   includes a short retry loop to handle GitHub API propagation lag
-- [ ] **DEBT-02**: `conjure publish-skill` accepts a positional argument (`$2`)
+- [x] **DEBT-02**: `conjure publish-skill` accepts a positional argument (`$2`)
   for the target `org/repo`; `TARGET_REPO` environment variable is kept as a
   deprecated fallback and emits a `WARN:` message when used
 

@@ -30,7 +30,7 @@ Enable harnesses to stay current: detect drift from upstream, resolve conflicts 
 
 ### v0.5.0 Auto-Update + Healthcheck (Phases 16-20)
 
-- [ ] **Phase 16: Prerequisites** - Add `mutate_rm` to `lib/mutate.sh` and refactor `publish-skill` positional arg
+- [x] **Phase 16: Prerequisites** - Add `mutate_rm` to `lib/mutate.sh` and refactor `publish-skill` positional arg (completed 2026-05-26)
 - [ ] **Phase 17: Drift Detection** - Implement `conjure check` with 3-way drift classification and exit codes
 - [ ] **Phase 18: Conflict Resolution** - Implement `conjure resolve` interactive sidecar walk
 - [ ] **Phase 19: Auto-PR** - Implement `conjure update --pr` with idempotency guard and cron template
@@ -50,7 +50,7 @@ Enable harnesses to stay current: detect drift from upstream, resolve conflicts 
 **Plans**: 2 plans
 Plans:
 - [x] 16-01-PLAN.md — Add mutate_rm to lib/mutate.sh + regression test (INFRA-01)
-- [ ] 16-02-PLAN.md — publish-skill positional $2 refactor + SKILL-05 test (DEBT-02)
+- [x] 16-02-PLAN.md — publish-skill positional $2 refactor + SKILL-05 test (DEBT-02)
 
 ### Phase 17: Drift Detection
 **Goal**: Users can discover whether their installed harness has drifted from the upstream kit snapshot via a single read-only command
@@ -101,7 +101,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 16. Prerequisites | 1/2 | In Progress|  |
+| 16. Prerequisites | 2/2 | Complete   | 2026-05-26 |
 | 17. Drift Detection | 0/TBD | Not started | - |
 | 18. Conflict Resolution | 0/TBD | Not started | - |
 | 19. Auto-PR | 0/TBD | Not started | - |
