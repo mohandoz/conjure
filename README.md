@@ -71,6 +71,36 @@ foot-guns, cross-platform Node.js hooks.
 
 That's it. Run `conjure audit` anytime to verify health.
 
+## Docker
+
+Run Conjure without installing it locally:
+
+**bash / zsh:**
+```bash
+docker run --rm \
+  -v $(pwd):/work \
+  --user $(id -u):$(id -g) \
+  ghcr.io/mohandoz/conjure:v0.4.0 audit .
+```
+
+**PowerShell:**
+```powershell
+docker run --rm `
+  -v ${PWD}:/work `
+  --user "${env:UID}:${env:GID}" `
+  ghcr.io/mohandoz/conjure:v0.4.0 audit .
+```
+
+**Windows cmd:**
+```cmd
+docker run --rm -v %CD%:/work ghcr.io/mohandoz/conjure:v0.4.0 audit .
+```
+
+> **File ownership:** On Linux and macOS, pass `--user $(id -u):$(id -g)` so
+> files written into your mounted directory are owned by you, not root. On
+> Docker Desktop for Windows with the WSL2 backend, file ownership is handled
+> automatically — `--user` is optional.
+
 ## 🧰 Features
 
 <table>

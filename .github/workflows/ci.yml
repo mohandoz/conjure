@@ -79,6 +79,15 @@ jobs:
           bash "$GITHUB_WORKSPACE/scripts/audit-setup.sh" /tmp/fixture > /tmp/audit.log 2>&1 || true
           grep -q "PASS:" /tmp/audit.log
 
+  windows-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run kit test suite (Git Bash)
+        shell: bash
+        run: bash tests/run.sh
+
   windows-hook-wiring:
     runs-on: windows-latest
     steps:
