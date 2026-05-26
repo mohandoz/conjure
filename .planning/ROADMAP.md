@@ -47,7 +47,10 @@ Enable harnesses to stay current: detect drift from upstream, resolve conflicts 
   2. Using `TARGET_REPO` env still works but prints a `WARN:` deprecation message
   3. `mutate_rm <path>` exists in `lib/mutate.sh`, respects `DRY_RUN`, and increments `CONJURE_DRY_MUTATION_COUNT`
   4. Existing `mutate_cp` / `mutate_write` regression tests still pass; new `mutate_rm` regression test added
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 16-01-PLAN.md — Add mutate_rm to lib/mutate.sh + regression test (INFRA-01)
+- [ ] 16-02-PLAN.md — publish-skill positional $2 refactor + SKILL-05 test (DEBT-02)
 
 ### Phase 17: Drift Detection
 **Goal**: Users can discover whether their installed harness has drifted from the upstream kit snapshot via a single read-only command
@@ -98,7 +101,7 @@ Enable harnesses to stay current: detect drift from upstream, resolve conflicts 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 16. Prerequisites | 0/TBD | Not started | - |
+| 16. Prerequisites | 0/2 | Not started | - |
 | 17. Drift Detection | 0/TBD | Not started | - |
 | 18. Conflict Resolution | 0/TBD | Not started | - |
 | 19. Auto-PR | 0/TBD | Not started | - |
