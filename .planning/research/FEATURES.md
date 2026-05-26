@@ -1,402 +1,439 @@
-# Feature Research — v0.4.0 Distribution + Ecosystem
+# Feature Research — v0.5.0 Auto-Update + Healthcheck
 
-**Domain:** CLI tool distribution + ecosystem integration for Conjure (POSIX bash + Node.js .mjs)
-**Researched:** 2026-05-25
-**Milestone:** v0.4.0 — Distribution + Ecosystem
-**Confidence:** HIGH for Marketplace (official CC docs verified), HIGH for Homebrew (official docs + working examples), MEDIUM for Docker (standard patterns verified, Conjure-specific sizing estimated), MEDIUM for skill publishing (emerging standard), MEDIUM for org overlays (pattern clear, CC-specific docs not found), MEDIUM for 3-way merge (git-merge-file is standard, interactive UX is a design choice)
+**Domain:** CLI harness auto-update, drift detection, and cross-platform entrypoint for Conjure (POSIX bash + Node.js .mjs)
+**Researched:** 2026-05-26
+**Milestone:** v0.5.0 — Auto-Update + Healthcheck
+**Confidence:** HIGH for drift-detection and auto-PR patterns (chezmoi, mise, renovate verified); HIGH for PowerShell shim (official PS docs + cross-platform community); MEDIUM for interactive conflict resolution UX (design choice area); HIGH for SKILL-04 positional arg refactor (existing code verified directly)
 
 ---
 
-## Category 1: Marketplace Publish (DIST-01)
+## How Similar Tools Handle These Problems
+
+Before feature-by-feature analysis, the comparator tools reveal strong user expectations:
+
+**chezmoi (dotfiles manager):** Splits the concern into `chezmoi diff` (read-only drift report) and `chezmoi apply` (mutate). Users check before they commit. No surprises. The `chezmoi update` command combines pull + apply into one for the trusting user. The diff output shows file-level additions and removals with unified diff format. Conflict handling is delegated to git during rebase.
+
+**mise (version manager):** `mise outdated` shows a table: Plugin / Requested / Current / Latest. Clean, actionable, exits 0. Next step is unambiguous: `mise upgrade`. Exit code and output are designed for scripting. The `--json` flag exists for programmatic consumption.
+
+**Renovate (dependency update bot):** Creates one PR per dependency group, keeps it open, force-pushes to the same branch when newer versions arrive (does not spam). Has a Dependency Dashboard issue that lists all pending updates. PR body contains a structured diff with the version delta and links. If a PR is closed without merging, the dashboard marks it "ignored" — user must re-enable explicitly.
+
+**Dependabot:** Simpler model: creates individual PRs per dep, reopens if needed, can flood repos with many PRs. Users prefer Renovate's grouping and dedup behavior for this reason.
+
+**Key pattern from all four:** Read-only check → visible diff → explicit apply. Never mutate silently. Never flood with PRs. One source of truth for pending state.
+
+---
+
+## Feature 1: `conjure check` — Drift Detection (DRIFT-01, DRIFT-02)
 
 ### Context
 
-Conjure already has a `.claude-plugin/` directory with both `plugin.json` and `marketplace.json` (shipped in v0.2.0). The `marketplace.json` has the correct structure per current Claude Code docs. The gap is: the publish *workflow* is manual — no `conjure` command automates validating and submitting the marketplace entry.
+`conjure update --check` already exists and compares installed files against current upstream templates. The new `conjure check` command is a distinct, higher-level operation: compare the *installed harness* against what Conjure would install at the *current upstream version*. This answers "is my harness stale?" not "are my files different from the template?"
 
-The Claude Code marketplace works as follows (HIGH confidence — verified against official docs 2026-05-25):
-- Conjure hosts its own `marketplace.json` in its GitHub repo under `.claude-plugin/marketplace.json`
-- Users add it: `/plugin marketplace add mohandoz/conjure`
-- Anthropic runs a `claude-community` marketplace; submissions go to `claude.ai/settings/plugins/submit` or `platform.claude.com/plugins/submit`
-- `claude plugin validate` is the pre-submission validation command
-- Approved plugins are pinned to a commit SHA in `anthropics/claude-plugins-community`
+The distinction matters: `update --check` compares file contents. `conjure check` should also detect structural drift: missing files, extra files, version mismatch, schema version mismatch. It is the health dashboard for the harness.
 
 ### Table Stakes
 
 | Feature | Why Expected | Complexity | Dependencies |
 |---------|--------------|------------|--------------|
-| Valid `marketplace.json` with correct schema | CC requires it to pass `/plugin marketplace add`; schemastore.org already has the schema. Conjure's existing file has the right shape. | LOW — already exists, needs version bump to 0.3.0/0.4.0 and any field gaps closed | Existing `.claude-plugin/marketplace.json` (v0.2.0) |
-| Valid `plugin.json` with current version | The plugin namespace, skills, agents, and hooks entries must match what actually ships | LOW — exists, needs to reference v0.3.0 skills and hooks templates | Existing `.claude-plugin/plugin.json` |
-| `claude plugin validate` passes locally before CI | Standard gate: validate before submit. The CC CLI runs this check on every community submission anyway. | LOW — run `claude plugin validate` in CI as a step | CC ≥2.1.117 installed in CI |
-| README install instruction: `/plugin marketplace add mohandoz/conjure` | Users need the single-command install. The marketplace install command is the on-ramp. | LOW — doc edit only | None |
-| `conjure` version field stays in sync with git tags | CC pins plugins to commit SHA if no version field; explicit version means users only pull updates on intentional bumps. Conjure should own that bump. | LOW — add to release checklist | Semver tag in GitHub releases |
+| File-level delta: added / modified / removed relative to upstream | Users need to know which files need attention. Without this, "harness is stale" is not actionable. Mise's outdated table is the model: show what's different, not just "something changed." | LOW — extend existing `update --check` loop to also detect files present upstream but absent locally, and files present locally but not in upstream | Existing `cmd_update --check` in `cli/conjure` |
+| Version mismatch surfaced first | The `.conjure-version` pin vs current `CONJURE_VERSION` is the cheapest check. If they match, skip the diff entirely (fast exit). | LOW — already done in `cmd_update`; `conjure check` reuses this gate | `.claude/.conjure-version` |
+| Exit code 0 = healthy, 1 = drift detected | Scripts and CI need a machine-readable signal. `mise outdated` exits 0 (informational), but for Conjure `check` in CI the useful signal is: drift exists. | LOW — count deltas; exit 1 if any found, 0 if none | Standard POSIX exit code semantics |
+| Human-readable summary line: "N files differ. Run conjure update --apply to merge." | The next step must be printed explicitly. No dead-end output. chezmoi always follows diff with the apply command. | LOW — add a summary line | None |
+| `--json` flag for machine-readable output | CI scripts and integrations (e.g., the GH Action cron) need to parse drift results. `mise outdated --json` proves this is expected. | LOW — serialize delta list as JSONL/JSON to stdout | `jq` already a hard dep for reading output |
 
 ### Differentiators
 
 | Feature | Value Proposition | Complexity | Dependencies |
 |---------|-------------------|------------|--------------|
-| `conjure publish-check` command | Runs `claude plugin validate` + checks marketplace.json fields + confirms SHA-pinning is explicit. "Pre-submit checklist in one command." Makes the publish workflow repeatable and reviewable in PRs. | MEDIUM — bash wrapper around `claude plugin validate` + jq field checks | `claude plugin validate` availability in CI |
-| CI step that validates the plugin manifest on every PR | Keeps the manifest from drifting. The community submission pipeline runs the same check — pre-empting failures there with a local CI gate is a quality signal. | LOW — add one step to `.github/workflows/ci.yml` | `claude plugin validate` in CI runner |
-| Community marketplace submission (anthropics/claude-plugins-community) | Puts Conjure on the default-discoverable list every CC user sees. | LOW (process-work, not code) — submit via `claude.ai/settings/plugins/submit`; `claude plugin validate` must pass first | Valid plugin.json + marketplace.json + DIST-01 CI step |
+| Schema version check: detect when `.claude/settings.json` hook schema has changed upstream | Settings schema changes are a silent breakage vector (hooks stop firing). A check that detects schema version drift before it causes problems is uniquely valuable for Conjure. | MEDIUM — compare `schemaVersion` field in installed `.claude/settings.json` vs upstream template | Upstream template must carry a schemaVersion field |
+| Overlay drift detection: flag when installed overlay has drifted from the overlay repo HEAD | Orgs that use `conjure refresh-overlay` need to know when their overlay is stale too. | MEDIUM — read `.claude/.conjure-overlay` marker; `git ls-remote` to check current overlay HEAD vs pinned SHA | `conjure refresh-overlay` marker file; git |
+| `conjure check --ci` mode: structured output for dashboard PR body | The cron-triggered GH Action (AUTPR-02) needs check output formatted as a PR body section. `--ci` emits markdown-formatted table. | LOW — alternate output format when flag is present | None |
 
 ### Anti-Features
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| Using a reserved marketplace name (`claude-code-marketplace`, `anthropic-plugins`, etc.) | CC blocks these explicitly; would break `/plugin marketplace add` for all users | Use `conjure` as the marketplace name (already set in existing `marketplace.json`) |
-| `strict: false` for the marketplace entry | Handing control to the marketplace operator means Conjure's own plugin.json is ignored — not the intent for a first-party publish | Keep `strict: true` (default); Conjure's plugin.json is the authority |
-| Embedding raw file contents in marketplace.json | marketplace.json is a catalog, not a content store | All content stays in the plugin directories; marketplace.json references sources |
-| Shipping marketplace.json that points to `npm` source | npm requires a published package; adds an unnecessary publish step for a bash CLI | Use `github` source pointing to `mohandoz/conjure` — simpler, no npm account required |
-
----
-
-## Category 2: Homebrew Formula (DIST-02)
-
-### Context
-
-Homebrew tap = a GitHub repository named `homebrew-<tap>` containing `.rb` formula files. The Conjure formula needs no compilation — it installs a bash script and its templates via `bin.install` and supporting file copies. Pattern is verified and well-established (HIGH confidence).
-
-For a bash script CLI, the formula is minimal:
-```ruby
-class Conjure < Formula
-  desc "Production-grade Claude Code harness init kit"
-  homepage "https://github.com/mohandoz/conjure"
-  url "https://github.com/mohandoz/conjure/archive/refs/tags/v0.4.0.tar.gz"
-  sha256 "..."
-  license "MIT"
-
-  def install
-    bin.install "cli/conjure"
-    # ship templates, profiles, compliance, etc. into a share dir
-    share.install "templates", "profiles", "compliance", "scripts", "lib"
-  end
-
-  test do
-    assert_match "conjure", shell_output("#{bin}/conjure --version 2>&1")
-  end
-end
-```
-
-The tap repository would be `mohandoz/homebrew-conjure` (or `mohandoz/homebrew-tap` if sharing across tools). Users install with `brew install mohandoz/conjure/conjure` or, after `brew tap mohandoz/conjure`, simply `brew install conjure`.
-
-### Table Stakes
-
-| Feature | Why Expected | Complexity | Dependencies |
-|---------|--------------|------------|--------------|
-| `brew install mohandoz/conjure/conjure` works end-to-end | The primary install experience for macOS devs. Expected for any serious CLI tool targeting devs in 2026. | MEDIUM — create `homebrew-conjure` GitHub repo with a valid `.rb` formula, test locally with `brew install --build-from-source`, ensure `CONJURE_HOME` resolves correctly at runtime | GitHub release with a versioned tarball (`v0.4.0.tar.gz`) and its SHA256 |
-| Formula `test do` block that verifies `conjure --version` | Homebrew runs the test block after install; a failing test makes the formula invalid in CI. | LOW — one-liner using `shell_output` | `conjure --version` must output something greppable |
-| GitHub release tag (`v0.4.0`) with a tarball | The formula's `url` points to a tarball; Homebrew requires a stable URL with a SHA256. | LOW — tag + GitHub auto-generates the tarball | Semver release on GitHub |
-| `CONJURE_HOME` auto-resolves to the Homebrew prefix | The CLI uses `CONJURE_HOME` to locate templates/profiles/scripts. Homebrew installs to `$(brew --prefix)/share/conjure/` — must match. | MEDIUM — change `CONJURE_HOME` defaulting logic: detect if running from Homebrew prefix, fall back to `$(dirname "$0")/../share/conjure` | cli/conjure `CONJURE_HOME` resolution |
-| Formula pinned to explicit version (not HEAD) | HEAD formulae are harder to trust; versioned formulae + SHA256 are reproducible. | LOW — don't use `brew install --HEAD`; always release a tag | Semver tags |
-| GitHub Actions in the tap repo for formula testing | Homebrew supplies reusable actions (`Homebrew/actions/setup-homebrew`) to validate tap formulae in CI. | LOW — add `.github/workflows/tests.yml` to the tap repo | tap repo exists |
-
-### Differentiators
-
-| Feature | Value Proposition | Complexity | Dependencies |
-|---------|-------------------|------------|--------------|
-| Linux support via Homebrew on Linux (Linuxbrew) | Homebrew works on Linux; same tap formula installs on Ubuntu CI runners. Broadens the audience for the `brew install` line. | LOW — test with `brew install` on `ubuntu-latest` in GitHub Actions matrix; most bash CLIs work unchanged | Formula must not hardcode `/opt/homebrew` |
-| `brew upgrade conjure` just works | Users get new versions by bumping the formula's `url`+`sha256`+`version`. Standard Homebrew update flow. | LOW — part of the release process: update formula on new tag | Semver release + formula update |
-| `conjure` auto-detects Homebrew install and skips `CONJURE_HOME` prompt | DX improvement: no env-var setup needed for Homebrew users. Detection: `[ -n "${HOMEBREW_PREFIX}" ]` + existence of `$HOMEBREW_PREFIX/share/conjure`. | LOW | DIST-02 `CONJURE_HOME` fix |
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| Trying to get into Homebrew core (`homebrew/core`) | Core requires significant adoption criteria and a lengthy review; tap is faster and fully functional | Use a personal tap (`mohandoz/homebrew-conjure`) initially; submit to core when adoption warrants |
-| Hardcoding `/usr/local` or `/opt/homebrew` in scripts | Breaks cross-arch (Intel vs Apple Silicon) and Linux installs | Use `$(brew --prefix)` or the `${HOMEBREW_PREFIX}` env var |
-| Installing to `bin` only, leaving templates absent | Conjure is useless without its templates directory | Install to both `bin` and `share/conjure/` with proper `CONJURE_HOME` pointing at the share dir |
-| Formula with no `test do` block | Homebrew CI rejects formulae without tests | Add `conjure --version` test at minimum |
-| Maintaining the formula in the main conjure repo | Creates confusion between the tool repo and the tap repo | The tap is a separate repo: `mohandoz/homebrew-conjure` |
-
----
-
-## Category 3: Docker Image (DIST-03)
-
-### Context
-
-Conjure's value proposition for Docker is: provide a single image that has all optional power tools pre-installed (`graphify`, `ast-grep`, `gitleaks`, `repomix`, `jq`, `shellcheck`, Node.js, bash) so teams can run `conjure init` or `conjure audit` in a clean CI environment without a preflight setup step.
-
-The image does NOT need to ship Claude Code itself — Claude Code runs on the developer's machine. The container is a *tooling environment* for running Conjure commands, not a Claude runtime.
-
-Base image options: Alpine (~5MB base, musl libc — some tools may need glibc), Debian slim (~80MB, glibc — broader compatibility), or Ubuntu (~120MB, fully compatible). For a bash CLI with optional native-binary tools (`ast-grep`, `gitleaks`), **Debian slim** is the right choice — Alpine musl breaks several Go/Rust binaries' dynamic linking; Debian slim keeps the image reasonably small (~150-200MB final) without the musl compatibility minefield. (MEDIUM confidence — Alpine vs Debian tradeoff well-established; specific tool compatibility is environment-dependent.)
-
-### Table Stakes
-
-| Feature | Why Expected | Complexity | Dependencies |
-|---------|--------------|------------|--------------|
-| `docker run ghcr.io/mohandoz/conjure:latest conjure audit .` works | The primary Docker UX. Mount the project with `-v $(pwd):/workspace -w /workspace`. Expected from any CLI tool with a Docker image. | MEDIUM — write Dockerfile, publish to `ghcr.io` via GitHub Actions on release tags | Dockerfile + `.github/workflows/docker-publish.yml` |
-| Image published to `ghcr.io/mohandoz/conjure` (GitHub Container Registry) | ghcr.io is free for public repos, authenticated with `GITHUB_TOKEN` (no external secret needed), and has become the standard for OSS tool images. | LOW — standard GitHub Actions step using `docker/build-push-action` | GitHub Actions + GITHUB_TOKEN |
-| Multi-arch image (linux/amd64 + linux/arm64) | CI runners are mixed-arch; Apple Silicon dev machines use arm64. A single-arch image silently runs under emulation or fails. | MEDIUM — use `docker buildx` with `--platform linux/amd64,linux/arm64` in the Actions workflow | `docker/setup-qemu-action` + `docker/setup-buildx-action` |
-| Version-tagged images (`v0.4.0`) AND `latest` tag | Users need a reproducible tag for pinned CI environments. `latest` is convenient for "just try it." | LOW — `docker/metadata-action` extracts tags from the git tag automatically | GitHub release tags |
-| `jq`, `bash`, `shellcheck`, Node.js ≥18 pre-installed | Conjure's hard runtime deps. Missing any of these makes the image non-functional. | LOW — standard Dockerfile `RUN apt-get install` | Dockerfile |
-| Image SIZE documented in README | Users decide whether to pull based on size. A 2GB image for a bash CLI is a red flag. | LOW — add `docker pull` + `docker image inspect` to CI and print the size; note in README | CI step |
-
-### Differentiators
-
-| Feature | Value Proposition | Complexity | Dependencies |
-|---------|-------------------|------------|--------------|
-| Optional power tools included (`ast-grep`, `gitleaks`, `repomix`, `graphify`) | Users who want graph integration or secret scanning get them without any preflight. This is the main reason to have a Docker image at all — it eliminates the "install 5 tools before you start" friction. | MEDIUM — install each tool from GitHub releases or package managers in Dockerfile; pin versions; verify with `ast-grep --version` etc. | Must be pinned versions to prevent image drift |
-| `CONJURE_HOME` pre-set correctly in the image | No env-var configuration needed in CI. The image ships a production-ready `CONJURE_HOME`. | LOW — `ENV CONJURE_HOME=/usr/local/share/conjure` in Dockerfile | Dockerfile ENV |
-| GitHub Actions example snippet in README | Shows exactly how to use the image in a team's CI: `uses: docker://ghcr.io/mohandoz/conjure:latest`. | LOW — doc edit | Docker image published |
-| Non-root user in image | Security best practice; Docker images running as root are flagged by security scanners. | LOW — `RUN useradd -m conjure && USER conjure` | Dockerfile |
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| Alpine as the base image | musl libc breaks several pre-built Go/Rust binaries (`ast-grep`, `gitleaks`) that ship glibc-linked binaries; debugging musl compatibility issues is a time sink | Debian slim: ~80MB base, full glibc compatibility, much smaller than Ubuntu full |
-| Bundling Claude Code itself in the image | Claude Code authenticates against Anthropic's API; bundling it means managing credentials + a rapidly changing binary. Claude Code is the developer's tool, not the CI tooling. | Image provides only the tool environment; users install CC separately |
-| `curl | sh` install steps inside Dockerfile | Violates the kit's own no-curl-pipe safety rule; also produces non-reproducible images | Download from pinned release URLs with SHA256 verification |
-| Unbounded `latest` tag without version tags | `latest` mutates; pinned CI uses the version tag | Always publish both; document that pinned CI should use `v0.4.0` not `latest` |
-| Huge image (>500MB) | Discourages adoption; signals poor hygiene; slow CI pulls | Use Debian slim + multi-stage build if any compilation is needed; target <200MB |
-| Shipping the Docker image without a `--dry-run` test in CI | The image could silently fail if CONJURE_HOME is wrong | Add a CI step: `docker run ... conjure audit --dry-run /tmp/empty` exits 0 |
-
----
-
-## Category 4: `conjure publish-skill` (DIST-04)
-
-### Context
-
-`conjure publish-skill <name>` takes a skill from the current project's `.claude/skills/<name>/` and contributes it back to the public Conjure kit (by opening a PR or packaging it as a plugin entry). The emerging standard for this is the Agent Skills open standard (Anthropic-originated, now cross-platform: CC, Copilot, Cursor, Codex, Gemini CLI). The pattern: validate locally → format as a standard skill directory → push to a fork → open a PR via `gh pr create`.
-
-### Table Stakes
-
-| Feature | Why Expected | Complexity | Dependencies |
-|---------|--------------|------------|--------------|
-| Validates skill frontmatter (name, description, size cap) before publishing | If the skill doesn't pass Conjure's own audit, it shouldn't be submitted to the kit. This gate is the minimum quality check. | LOW — reuse existing frontmatter validation from `scripts/audit-setup.sh` | Existing audit frontmatter validator |
-| Checks skill size cap (≤200 lines per SKILL.md) | Enforces the kit's own constraint on contributed skills. Prevents bloat. | LOW — reuse size cap check | Existing size cap logic in `lib/` |
-| Prints a checklist before submitting | "Does this skill: have a description? stay under 200 lines? avoid PII? use trigger-action format?" A printed checklist makes the contribution decision explicit. | LOW — print and ask for y/n confirmation | None |
-| `--dry-run` support | Consistent with the rest of the CLI. Let users see what would happen without mutation. | LOW — honor `DRY_RUN` at the `lib/mutate.sh` level | lib/mutate.sh |
-
-### Differentiators
-
-| Feature | Value Proposition | Complexity | Dependencies |
-|---------|-------------------|------------|--------------|
-| Auto-opens a GitHub PR via `gh pr create` | Turns "copy files + write a PR" into one command. The `gh` CLI is already present on most dev machines. The PR body is auto-formatted with skill name, description, and test evidence. | MEDIUM — shell: fork check, branch creation, copy skill, `gh pr create` with template body | `gh` CLI available; user must have a fork |
-| Packages the skill as a standalone `.claude-plugin`-compatible plugin entry | The contributed skill can also be installed directly via `/plugin install`. Contributes to both the Conjure kit AND the CC plugin ecosystem. | MEDIUM — generate a minimal `plugin.json` wrapping just the skill | DIST-01 plugin format knowledge |
-| `conjure publish-skill --to <github-org/repo>` for org-private contribution | Teams with private forks can contribute to their internal overlay repo, not just the public kit. Composes with DIST-05 org overlays. | LOW — parameterize the target repo; default is `mohandoz/conjure` | DIST-05 org overlay concept |
-| Cross-platform skill compatibility note (Agent Skills standard) | Skills that follow the Agent Skills open standard work across Claude Code, Copilot, Cursor, and Codex. A publish command that notes this broadens the skill's value. | LOW — doc note in the CLI output and in the PR template | No code change needed |
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| Auto-merging contributed skills without review | Even with validation, a contributed skill needs human review — it ships to every user of the kit. | Always PR-based; never auto-merge |
-| Publishing skills containing project-specific paths, secrets, or PII | A common mistake when extracting project skills. | Add a PII/path check to the pre-publish validator: scan for email patterns, API key patterns, absolute paths |
-| Requiring the user to have a fork before publishing | Creates friction. Many users won't have forked the repo. | Check if a fork exists; offer to create one via `gh repo fork mohandoz/conjure --clone=false` |
-| Publishing a skill with `disable-model-invocation: true` without noting it | Skills with model invocation disabled are slash commands, not autonomous skills — fundamentally different use. | Detect this frontmatter field and note it in the PR description so reviewers know what they're getting |
-
----
-
-## Category 5: Org Overlay System (DIST-05)
-
-### Context
-
-The org overlay pattern: a "base kit" (Conjure's public templates) plus a "private overlay repo" that extends or overrides specific files without forking the entire kit. Standard pattern in config management (Kustomize base+overlay, Drupal config overlay, CircleCI orb overrides). For Conjure, this means: `conjure init --overlay https://github.com/myorg/conjure-overlay` applies the base kit first, then applies the org's private overrides on top.
-
-The overlay repo structure would mirror the base kit's structure under a `patches/` or `overlay/` directory, or simply ship a parallel `.claude/` tree that is merged on top of the base.
-
-### Table Stakes
-
-| Feature | Why Expected | Complexity | Dependencies |
-|---------|--------------|------------|--------------|
-| `conjure init --overlay <git-url>` applies base kit then overlays org-specific files | The entry point for org overlay use. Without it, teams have to fork Conjure and hand-maintain diverged copies — the common pain point this solves. | HIGH — requires git clone of overlay repo, a merge strategy (overlay wins on conflict), and lib/mutate.sh routing | lib/mutate.sh; git available in preflight |
-| Overlay files win over base files (overlay takes precedence) | Standard convention: base provides defaults, overlay provides org-specific overrides. Matches Kustomize semantics that developers already understand. | MEDIUM — merge order: base first, overlay second, overlay wins on conflict | DIST-05 merge strategy |
-| `conjure audit` checks for overlay presence and notes it in the report | Teams need to know which overlays are active. Audit transparency is a Conjure core value. | LOW — check for `.claude/.conjure-overlay` marker file and print in audit output | Existing audit-setup.sh |
-| Overlay repo can be private | Orgs keep their HIPAA/PCI-specific rules private. The overlay git clone must work with SSH keys or GITHUB_TOKEN. | LOW — `git clone` already supports SSH and HTTPS with token auth; document the pattern | No code change; documentation only |
-| `conjure refresh-overlay` re-pulls and re-applies the overlay | Keeps the org overlay fresh as the overlay repo evolves. Follows the same backup-before-mutate pattern. | MEDIUM — re-clone overlay, re-apply files, honor DRY_RUN | lib/mutate.sh; backup logic |
-
-### Differentiators
-
-| Feature | Value Proposition | Complexity | Dependencies |
-|---------|-------------------|------------|--------------|
-| `.claude/.conjure-overlay` marker file recording the overlay URL + pinned SHA | Makes the applied overlay auditable and reproducible. Teams can see exactly which overlay version is in use. Re-running `conjure refresh-overlay` from the marker is deterministic. | LOW — write the marker during `init --overlay`; read it in `refresh-overlay` and `audit` | lib/mutate.sh |
-| Overlay can reference any git ref (`--overlay-ref v1.2.0`) | Teams pin to a tested overlay version, not just `main`. Follows the same philosophy as per-project `.conjure-version` pinning. | LOW — pass `--depth 1 --branch <ref>` to `git clone` | DIST-05 init flag |
-| `conjure publish-skill --to <overlay-repo>` integration | Skills extracted from a project can be contributed to the org overlay, not just the public kit. Closes the contribution loop for private orgs. | LOW — DIST-04's `--to` flag; no new code | DIST-04 |
-| Overlay-aware compliance overlays | An org's private overlay can extend a compliance overlay (e.g., HIPAA base from Conjure + org-specific addendum from the overlay repo). | MEDIUM — overlay files are deep-merged, not just top-level replaced; compliance files require append, not clobber semantics | Merge strategy must distinguish append vs replace |
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| Forking Conjure as the "overlay" strategy | Teams that fork must hand-maintain divergence. This is the problem the overlay system solves. | Document: fork = maintenance burden; overlay = stay on upstream + customize |
-| Overlay silently clobbers user modifications | If the user has edited a base file post-init, a naive `refresh-overlay` destroys their work | Use the same backup-before-mutate + 3-way merge strategy as TECH-01 for overlay refreshes |
-| Requiring the overlay repo to mirror Conjure's entire structure | If the overlay must replicate every directory, small orgs won't adopt it | Overlay only needs to include files it wants to change; missing files fall through to the base |
-| Auto-pulling overlays on every `conjure audit` | Silent mutations during audit break the "audit is read-only" contract | Overlay re-application is only triggered by explicit `conjure refresh-overlay` or `init --overlay` |
-| Global overlay config (affects all projects on the machine) | Global state = non-reproducible environments | Overlay config is per-project, stored in `.claude/.conjure-overlay` |
-
----
-
-## Category 6: 3-Way Merge for `cmd_update --apply` (TECH-01)
-
-### Context
-
-`conjure update --check` already works (shows which template files have diverged). The `--apply` stub at `cli/conjure:174` prints "not yet implemented." The production implementation needs a 3-way merge: `git merge-file <current-project-file> <original-template-at-pinned-version> <new-template>`. This preserves user modifications to project files while applying upstream template changes — the canonical merge algorithm.
-
-`git merge-file` is a standard POSIX-available command (comes with git, no extra install). It writes conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) for unresolvable conflicts, which the user then resolves manually. Exit code 0 = clean merge; exit code > 0 = conflicts present. (HIGH confidence — standard git command, well-documented.)
-
-The key challenge: Conjure must have access to the template file at the *pinned version* (the "common ancestor"). This means storing a snapshot of the original templates at init/update time, or using git history.
-
-### Table Stakes
-
-| Feature | Why Expected | Complexity | Dependencies |
-|---------|--------------|------------|--------------|
-| `conjure update --apply` actually runs a merge instead of printing "not yet implemented" | This is an active stub (cli/conjure:174). Any user running `conjure update --apply` today gets a TODO message. It must be replaced with a real implementation. | HIGH — implement the full 3-way merge loop for each changed file | git available (preflight dep) |
-| Preserves user modifications to project files | The fundamental promise of 3-way merge: if the user edited a SKILL.md and the template also changed, both edits should survive if they touch different lines. A simple file copy destroys user work. | HIGH — requires the "base" snapshot (original template at pinned version); git merge-file handles the actual merge math | Base snapshot availability (see below) |
-| Backup-before-mutate before any merge write | Consistent with every other Conjure mutation. If the merge result is wrong, the user can restore from backup. | LOW — call `lib/mutate.sh` backup helper before writing the merged file | lib/mutate.sh |
-| Conflict markers left in place for manual resolution | `git merge-file` outputs conflict markers on unresolvable conflicts (exit > 0). These should be left in the file for the user to resolve, not silently discarded or auto-resolved. | LOW — check `git merge-file` exit code; if > 0, print "conflicts in <file>, resolve manually" | git merge-file behavior |
-| `--dry-run` shows which files would be merged without writing | Consistent with the rest of the CLI. Users should be able to preview the merge plan. | LOW — honor `DRY_RUN` | lib/mutate.sh |
-| Base snapshot stored at `.claude/.conjure-templates-<version>/` | The 3-way merge requires the original template as the "common ancestor." The cleanest solution: when `conjure init` or a previous `conjure update --apply` runs, snapshot the applied templates into `.claude/.conjure-templates-<version>/`. | HIGH — this is the architectural decision that unblocks 3-way merge; without the base snapshot, the merge degrades to a 2-way diff (which loses user modifications) | Design choice: snapshot at init time |
-
-### Differentiators
-
-| Feature | Value Proposition | Complexity | Dependencies |
-|---------|-------------------|------------|--------------|
-| Per-file merge report: "clean / conflicted / skipped" | Users see exactly what happened to each file after `--apply`. Clean merges are applied silently; conflicts are listed with file paths. | LOW — collect git merge-file exit codes per file; print a summary table | TECH-01 implementation |
-| `conjure update --apply --file <name>` to merge one file at a time | For large harnesses with many conflicts, users may want to merge one file at a time rather than all at once. | LOW — add a `--file` flag to the loop in cmd_update | TECH-01 implementation |
-| Auto-resolve strategy for pure additions (new sections in template, file untouched by user) | If the user has not modified a file at all since init, no merge is needed — just copy the new template. This is the common case and should be handled without invoking merge-file. | LOW — `diff -q <project-file> <base-snapshot>` first; if identical, just copy new template | Snapshot comparison |
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| Using an interactive TUI merge tool (vimdiff, meld) | Not available in CI or Docker; breaks the "one command" principle; requires user to have a merge tool installed | `git merge-file` writes conflict markers in the file; user resolves with their editor of choice |
-| Auto-resolving conflicts by always taking "ours" or "theirs" | Silently discards either user work or upstream improvements | Leave conflict markers for manual resolution; auto-resolve only when one side is unmodified |
-| 2-way diff without a base snapshot | A simple diff between current project file and new template treats all user modifications as "conflicts" — every user edit is a conflict | 3-way merge requires a base; store the base snapshot at init time |
-| Pulling base snapshots from git history | Requires the kit to be a git repo and the project to track the kit's history — fragile, non-portable | Store base snapshots as literal files in `.claude/.conjure-templates-<version>/` at init time |
-| Running merge outside lib/mutate.sh | Any write that bypasses the chokepoint breaks DRY_RUN enforcement and the backup guarantee | Route the merged file write through `lib/mutate.sh` copy_into |
-
----
-
-## Category 7: Nyquist Compliance Pass (TECH-02)
-
-### Context
-
-"Nyquist compliance" in the GSD framework refers to a test coverage standard: every logical branch/function in phases 01, 02, 04, 05, 06, 07 must have corresponding test coverage in `tests/run.sh`. The name draws from the Nyquist sampling theorem — sample at twice the rate to reconstruct the signal faithfully. In practice: at least one test per distinct code path. This is a code-quality debt clearance task, not a new feature.
-
-### Table Stakes
-
-| Feature | Why Expected | Complexity | Dependencies |
-|---------|--------------|------------|--------------|
-| All code paths in phases 01, 02, 04, 05, 06, 07 have at least one test assertion | The v0.3.0 milestone shipped 200 assertions but did not achieve full coverage of earlier phases. TECH-02 closes that gap. | HIGH — requires auditing each phase script for untested paths, then adding assertions | 200-assertion test suite from v0.3.0 |
-| CI gate fails if a covered path loses its test | New tests for previously uncovered paths must be protected from accidental deletion | MEDIUM — no special infra needed if tests are in `tests/run.sh`; CI already runs it | Existing CI |
-
-### Differentiators
-
-| Feature | Value Proposition | Complexity | Dependencies |
-|---------|-------------------|------------|--------------|
-| Coverage map comment in `tests/run.sh` | A short comment block listing which CLI functions are tested enables future contributors to find gaps | LOW — doc edit | None |
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| 100% line coverage as the goal | Chasing line coverage metrics leads to testing implementation details, not behavior | Cover logical branches (happy path + each error path); stop at "can a regression hide from this suite?" |
-| Adding a coverage tool (bashcov, kcov) | These have CI setup overhead and may not be worth it for a bash CLI at this scale | Hand-audit the scripts; write targeted regression assertions; the existing `pass`/`fail` helpers are sufficient |
-
----
-
-## Category 8: Windows CI Confirmation (TECH-03)
-
-### Context
-
-Conjure's Node.js `.mjs` hooks are the Windows story (bash CLI requires git-bash/WSL on Windows). TECH-03 is about confirming that the CI matrix actually exercises the `.mjs` hook path on `windows-latest` GitHub Actions runners. On Windows runners, bash is Git Bash (bundled with Git for Windows) — NOT WSL. WSL requires additional setup on GitHub-hosted runners and is not natively available. (HIGH confidence — verified against GitHub Actions documentation and community discussions.)
-
-### Table Stakes
-
-| Feature | Why Expected | Complexity | Dependencies |
-|---------|--------------|------------|--------------|
-| GitHub Actions matrix includes `windows-latest` | The v0.3.0 STACK.md called for a Windows matrix entry; TECH-03 confirms it actually exists and passes. | LOW — add `windows-latest` to the OS matrix in `.github/workflows/ci.yml` | CI YAML |
-| `.mjs` hook smoke test passes on `windows-latest` | A single `node hook.mjs < test-input.json` assertion on Windows confirms the hook's cross-platform claim. | LOW — add one test in `tests/run.sh` that invokes the hook via `node` on all platforms | `.mjs` hooks in templates/ |
-| README documents Windows requirements (git-bash or WSL for bash CLI; native Node for hooks) | Users on Windows need to know what to install. | LOW — doc edit | None |
-
-### Differentiators
-
-None. TECH-03 is a validation task, not a feature. Get it green and document it; move on.
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| WSL in GitHub Actions CI | GitHub-hosted runners don't support WSL natively; requires the `ubuntu/wsl-actions-example` setup which adds ~3-5 min to CI | Test on `ubuntu-latest` for Linux; `windows-latest` with Git Bash for the Windows + git-bash scenario |
-| Testing bash CLI on native Windows PowerShell | The bash CLI doesn't run under PowerShell without git-bash. Don't claim it does. | Document the git-bash/WSL requirement; test only the `.mjs` hooks on native Windows |
-
----
-
-## Feature Dependencies (Cross-Category)
+| Mutating anything during `conjure check` | Violates the "check is read-only" contract. Users trust check to be safe to run at any time, including in CI audits. | Keep check pure read; all mutation goes through `update --apply` |
+| Checking only version string, not file contents | Version match does not guarantee file content match (especially after manual edits). Must diff actual files. | Always do the file-level diff pass even when versions match; just optimize the order |
+| Printing a wall of diff hunks | Overwhelming output teaches users to ignore it. mise's columnar table is the right model: file path, status, one line each. | Print one line per file: `~ SKILL.md (upstream changed)`, `+ hooks/new-hook.mjs (missing locally)` |
+| Autorunning update when drift is found | Silent mutation is the opposite of what trust-first means. | Always stop at the report; require explicit `conjure update --apply` |
+
+### Expected UX
 
 ```
-[GitHub release with semver tag]
-    └──required-by──> [DIST-02 Homebrew formula url + sha256]
-    └──required-by──> [DIST-03 Docker image version tag]
-    └──required-by──> [DIST-01 plugin.json version bump]
+$ conjure check
+Project:        v0.4.0  →  Current kit: v0.5.0
 
-[Valid plugin.json + marketplace.json (DIST-01)]
-    └──required-by──> [DIST-04 publish-skill creates a plugin entry]
-    └──enables──────> [Claude community marketplace submission]
+  ~ skills/GSD-EXECUTE/SKILL.md   (upstream updated)
+  + skills/GSD-NEW-SKILL/SKILL.md (missing locally — added in v0.5.0)
+  ~ .claude/settings.json         (schema version changed)
 
-[lib/mutate.sh + DRY_RUN (v0.3.0)]
-    └──required-by──> [TECH-01 3-way merge writes through the chokepoint]
-    └──required-by──> [DIST-05 overlay apply/refresh writes through the chokepoint]
+3 file(s) differ. Run 'conjure update --apply' to merge.
+```
 
-[Base snapshot at .claude/.conjure-templates-<version>/]
-    └──required-by──> [TECH-01 3-way merge "common ancestor"]
-    └──written-by───> [conjure init] (store snapshot at init time)
-    └──written-by───> [conjure update --apply] (update snapshot after apply)
+Exit code 1. In CI: same output, exit 1 fails the check job cleanly.
 
-[DIST-04 conjure publish-skill --to flag]
-    └──composes-with──> [DIST-05 org overlay: contribute skill to private overlay repo]
+---
 
-[TECH-02 Nyquist coverage pass]
-    └──validates───> [DIST-05 overlay logic]
-    └──validates───> [TECH-01 merge logic]
-    └──validates───> [DIST-04 publish-skill validation]
+## Feature 2: `conjure update --pr` — Auto-PR (AUTPR-01, AUTPR-02)
 
-[TECH-03 Windows CI confirmation]
-    └──confirms────> [DIST-03 Docker multi-arch image includes arm64]
-    └──confirms────> [.mjs hooks work cross-platform]
+### Context
+
+This turns the drift detection + merge into a GitHub PR, enabling async review of harness updates before they land. The workflow: detect drift → create a branch → apply the 3-way merge on that branch → open a PR via `gh pr create`. The optional GH Action cron template makes this fully automated.
+
+Renovate is the model: one open PR per harness update, force-updated if a newer kit ships before the first PR is merged. Never open a second PR if one is already open.
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Dependencies |
+|---------|--------------|------------|--------------|
+| Creates a branch `conjure/update-v<N>`, applies merge, opens PR via `gh pr create` | The core action. Without it, the feature doesn't exist. `gh` is already a soft dep (used in `publish-skill`). | MEDIUM — branch creation + `git commit` + `gh pr create`; all git primitives already in use | `gh` CLI (soft dep; print instructions if absent); `git` (hard dep) |
+| Deduplication: if a `conjure/update-*` PR is already open, skip (or force-update the branch) | Renovate's most important behavior. Opening a second PR when one is already open creates confusion and merge conflicts. | MEDIUM — `gh pr list --head conjure/update-*` to check before creating; if found, `git push --force-with-lease` to update branch | `gh` CLI |
+| PR body includes: version delta, file list, link to CHANGELOG | Users reviewing the PR need context. Without the file list and version delta in the body, the PR is opaque. Renovate always puts the update context in the PR body. | LOW — format PR body as markdown in the `gh pr create --body "..."` call | `conjure check --ci` output |
+| `--base <branch>` flag to target a non-default branch | Teams that maintain `develop` or `release` branches as the merge target need this. | LOW — pass through to `gh pr create --base` | None |
+| `--dry-run` shows the PR body + branch name without pushing | Consistent with all other Conjure mutations. | LOW — honor `DRY_RUN`; print what would be pushed/opened | `lib/mutate.sh` |
+| Meaningful PR title: "chore(conjure): update harness v0.4.0 → v0.5.0" | PR titles visible in dashboards must be immediately identifiable. Renovate-style titles are the norm. | LOW — template the title with version numbers | `CONJURE_VERSION` and pinned version |
+
+### Differentiators
+
+| Feature | Value Proposition | Complexity | Dependencies |
+|---------|-------------------|------------|--------------|
+| GH Action cron template (AUTPR-02): ships as `templates/github/conjure-auto-update.yml` | Teams get automated harness maintenance by copying one file. The template uses the weekly Monday 9AM cron pattern established by Renovate. | LOW — write the template; no runtime code change | `conjure update --pr` working (AUTPR-01) |
+| PR labels: `conjure`, `maintenance` auto-applied | PR categorization and automation (e.g., auto-merge if CI passes + label matches) requires labels. | LOW — `gh pr create --label conjure,maintenance` | Labels must exist in the target repo; document how to create them |
+| Conflict annotation in PR body: if merge had conflicts, list the sidecar files and explain resolution | PR reviewer needs to know that `conjure resolve` is the next step before merging. | LOW — collect `CONJURE_MERGE_CONFLICT_COUNT`; add a "Conflicts requiring resolution" section to PR body if > 0 | `lib/merge.sh` sidecar tracking |
+| `--reviewer <handle>` passthrough to `gh pr create` | Teams have designated harness maintainers. Auto-requesting their review reduces triage overhead. | LOW — pass through to `gh pr create --reviewer` | None |
+
+### Anti-Features
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| Opening a PR per changed file | N files = N PRs. This is the Dependabot flood pattern that users hate. Renovate fixed this by grouping. Conjure should group the entire harness update in one PR. | One PR covers all changed files in the update |
+| Auto-merging the PR | Even if CI passes and no conflicts exist, auto-merging removes the human review gate. The harness is the foundation for all Claude Code behavior — it must be reviewed. | Print "merge when ready" in the PR body; never auto-merge from within conjure |
+| Pushing to the default branch directly | Any push to main/master without a PR bypasses review. The PR model exists for a reason. | Always create a branch; always open a PR; never push to default branch |
+| Requiring a `conjure publish` flow for the PR | Auto-PR is a local-repo operation, not a marketplace operation. These concerns must not be conflated. | `update --pr` only touches the target project repo; `publish` is for the kit itself |
+| Hard failing when `gh` is absent | Not all users have `gh` installed. The same "print, don't auto-run" principle from publish-skill applies. | Print the equivalent manual steps (branch, commit, PR URL pattern) when `gh` is absent |
+
+### Expected UX
+
+```
+$ conjure update --pr
+▸ Checking for existing update PR…
+  No open conjure/update-* PR found.
+▸ Applying 3-way merge: v0.4.0 → v0.5.0
+  ✓ skills/GSD-EXECUTE/SKILL.md merged cleanly
+  ✓ skills/GSD-NEW-SKILL/SKILL.md added
+  ! .claude/settings.json — 1 conflict → .conjure-conflict-_claude_settings.json
+▸ Committing to branch conjure/update-v0.5.0
+▸ Opening PR…
+  https://github.com/org/repo/pull/42
+
+  PR body includes: version delta, file list, conflict resolution instructions.
+```
+
+---
+
+## Feature 3: `conjure resolve` — Guided Interactive Conflict Resolution (RESOLVE-01, RESOLVE-02)
+
+### Context
+
+When `conjure update --apply` or `--pr` produces conflicts, it leaves `.conjure-conflict-*` sidecar files next to the originals. Currently, the user must find these files manually, understand the diff3 markers, resolve them, delete the sidecars, and manually stamp the version. `conjure resolve` wraps this into a guided walk.
+
+The model is `git mergetool`: it iterates conflict files one by one, opens the user's editor (or a simple CLI prompt for each), and tracks completion. Unlike `git mergetool`, Conjure's conflicts are in named sidecar files, not the live files — so the workflow is: view sidecar → decide → write resolution → confirm → move to next.
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Dependencies |
+|---------|--------------|------------|--------------|
+| Lists all `.conjure-conflict-*` sidecars in the project | The user must know what needs resolving. A summary list before starting is the minimum. chezmoi always shows what will be touched before touching it. | LOW — `find .claude -name '.conjure-conflict-*'` | Existing sidecar naming convention from `lib/merge.sh` |
+| Opens each sidecar in `$VISUAL` or `$EDITOR` (or falls back to `cat`) | The actual resolution happens in the user's editor. Conjure should not attempt to build a TUI — that would exclude CI and non-interactive shells. The git mergetool model (open editor, wait, continue) is the right approach. | LOW — `${VISUAL:-${EDITOR:-cat}} "$sidecar"` per file; wait for editor to exit | Standard POSIX env var chain |
+| After each edit, confirm with y/n: "Resolved? [y/n]" | Prevents accidental advancement to the next file before resolution is complete. | LOW — read from stdin; default to 'n' (safe default) | None |
+| On confirmation, copy sidecar content to the live file and delete the sidecar | The resolution is committed: overwrite the original file with the resolved sidecar, then clean up. All writes through `lib/mutate.sh`. | LOW — `mutate_cp sidecar live_file && rm sidecar` | `lib/mutate.sh` |
+| After all sidecars resolved, prompt to stamp the new version | The version stamp is the final gate. If the user walks away mid-session, the stamp is not written — they can resume. | LOW — check `CONJURE_MERGE_CONFLICT_COUNT` equivalent; if zero sidecars remain, offer to write `.conjure-version` | `.claude/.conjure-version` |
+| `--dry-run` lists sidecars without opening editor or writing | Consistent with rest of CLI. | LOW — honor `DRY_RUN` | `lib/mutate.sh` |
+
+### Differentiators
+
+| Feature | Value Proposition | Complexity | Dependencies |
+|---------|-------------------|------------|--------------|
+| Prints the conflict context summary before opening editor: original file path, version delta, number of conflict hunks | Users need context to make an informed resolution choice. Printing "3 conflict hunks between your version and v0.5.0 upstream in SKILL.md" is more actionable than just opening a file cold. | LOW — grep `<<<<<<<` count in sidecar before opening | None |
+| `--file <name>` to resolve a single sidecar (not the full walk) | Users who want to resolve one file at a time (e.g., after consulting a colleague about a specific conflict) need this escape hatch. | LOW — filter sidecar list by name prefix | None |
+| Skip option per file: press 's' to defer this sidecar | Not every conflict must be resolved in one session. Skip lets the user defer a hard decision without losing the work done on easier files. | LOW — add 's' to the y/n prompt; leave the sidecar in place | None |
+| Summary at end: "3 resolved, 1 skipped. Run 'conjure resolve' again to finish." | Closes the loop. Users know the session's outcome. | LOW — track resolved/skipped counts; print summary | None |
+
+### Anti-Features
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| Building a TUI (curses, dialog, fzf) | Breaks non-interactive CI; adds a runtime dep; excludes users without those tools. The editor is already the standard conflict resolution UX. | `$VISUAL/$EDITOR` with blocking wait; fall back to `cat` for viewing in CI |
+| Auto-resolving conflicts (always-ours or always-theirs) | Silently discards either user work or upstream improvements. This is the worst possible default for a harness that governs AI behavior. | Never auto-resolve; always require explicit human confirmation |
+| Resolving conflicts in-place on the live file (no sidecar model) | The existing sidecar model is the right design: the live file is untouched until resolution is confirmed. Changing this would require a migration of the existing conflict contract. | Keep the sidecar model; `conjure resolve` works with it, not against it |
+| Requiring a specific merge tool installed (vimdiff, meld, etc.) | Not available in all environments. The `$EDITOR` chain is universal. | `${VISUAL:-${EDITOR:-cat}}`; document mergetool as an option in help text |
+| Deleting sidecars before user confirms resolution | Data loss. If the editor crashes or the user hits ctrl-C, the resolved content must not be lost before it's been confirmed. | Write to a temp file first; only delete sidecar on explicit 'y' confirmation |
+
+### Expected UX
+
+```
+$ conjure resolve
+Found 2 conflict sidecar(s):
+  1. .claude/.conjure-conflict-_claude_CLAUDE.md
+  2. .claude/skills/GSD-EXECUTE/.conjure-conflict-skills_GSD-EXECUTE_SKILL.md
+
+[1/2] CLAUDE.md — 2 conflict hunk(s) between your version and v0.5.0
+Opening in $EDITOR...
+[editor closes]
+Resolved? [y/n/s(kip)]: y
+  ✓ CLAUDE.md resolved and updated.
+
+[2/2] skills/GSD-EXECUTE/SKILL.md — 1 conflict hunk(s) between your version and v0.5.0
+Opening in $EDITOR...
+Resolved? [y/n/s(kip)]: s
+  ↷ Skipped. Sidecar left in place.
+
+Summary: 1 resolved, 1 skipped.
+Run 'conjure resolve' again to finish the remaining sidecar.
+```
+
+---
+
+## Feature 4: `conjure.ps1` — Native PowerShell Entrypoint (WIN-01, WIN-02)
+
+### Context
+
+Conjure's current Windows story is: use Git Bash or WSL for the bash CLI; use Node.js `.mjs` hooks for native Windows hooks. The gap is that Windows developers who open a PowerShell (or pwsh) terminal cannot run `conjure` — they must know to switch to Git Bash. `conjure.ps1` is a thin PowerShell shim that detects whether Git Bash is available, and if so, delegates to the bash entrypoint; if not, prints a clear error and install hint.
+
+The shim model is established: it is how tools like `npm.cmd`, `yarn.cmd`, and language version managers (asdf on Windows, mise Windows wrapper) handle the "bash tool on Windows" problem. The shim does not reimplement the tool in PowerShell — it bridges to bash.
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Dependencies |
+|---------|--------------|------------|--------------|
+| `conjure.ps1` locates the bash entrypoint and delegates via Git Bash | The minimum viable shim: `& "C:\Program Files\Git\bin\bash.exe" "$PSScriptRoot\cli\conjure" @args`. All arguments pass through unchanged. | LOW — standard PS shim pattern; 10-20 lines | `cli/conjure` must be on a path accessible from Git Bash |
+| Falls back to WSL `bash` if Git Bash is not found at the standard path | WSL2 is installed on many modern Windows machines. Using it as a fallback broadens coverage without requiring Git Bash. | LOW — `wsl bash "$PSScriptRoot/cli/conjure" @args` if git-bash.exe absent | WSL2 installed |
+| Prints a clear error and install hint when neither Git Bash nor WSL is found | No cryptic failure. The "print, don't auto-run" principle: tell the user what to install. | LOW — `Write-Error` + link to Git for Windows download | None |
+| Passthrough of all arguments and exit codes | The shim must be transparent. `conjure check --json` piped into `jq` must work from PowerShell. Exit codes must propagate correctly from bash to PowerShell (`$LASTEXITCODE`). | LOW — `@args` passthrough + `exit $LASTEXITCODE` | None |
+| CI job: `windows-latest` with `shell: pwsh` that calls `conjure.ps1` | WIN-02 proves the shim works in CI. The existing Windows CI job uses `shell: bash` (Git Bash). Adding a `pwsh` job proves native PowerShell. | LOW — add a matrix entry to `.github/workflows/ci.yml` | `conjure.ps1` shipped; GITHUB_TOKEN |
+
+### Differentiators
+
+| Feature | Value Proposition | Complexity | Dependencies |
+|---------|-------------------|------------|--------------|
+| `conjure.ps1` auto-detects git-bash.exe via registry (`HKLM:\SOFTWARE\GitForWindows`) if not at standard path | Git for Windows can be installed at non-default paths (e.g., Scoop installs it under `~\scoop\apps\git`). Registry-based detection is more robust. | MEDIUM — PowerShell registry access is simple (`Get-ItemProperty`); adds ~5 lines | None (registry access is a PS built-in) |
+| `conjure.ps1` hints at `winget install Git.Git` when Git Bash is absent | Winget is the Windows package manager standard; it is pre-installed on Windows 11. The hint is the same "print, don't run" pattern, now Windows-idiomatic. | LOW — add `winget install Git.Git` to the error message | None |
+| Document the `conjure.ps1` flow in README Windows section | Without documentation, Windows users won't know the shim exists. | LOW — doc edit | `conjure.ps1` shipped |
+
+### Anti-Features
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| Reimplementing the bash CLI in PowerShell | Massive maintenance burden; two surfaces to keep in sync; inevitable divergence. The shim model exists precisely to avoid this. | Thin shim that delegates to bash; `.mjs` for the parts that must be native on Windows (hooks) |
+| Silently shadowing failures from bash in the shim | If `cli/conjure` exits 1, `conjure.ps1` must exit 1. PowerShell has `$LASTEXITCODE` for this. | Always `exit $LASTEXITCODE` after invoking bash |
+| Using PowerShell 5.1 (Windows PowerShell) as the only target | PS 5.1 is pre-installed but shows its age; PS 7 (pwsh) is the cross-platform version and is what `shell: pwsh` uses in GitHub Actions. | Target PS 7 (`pwsh`) for CI; document PS 5.1 as "untested but likely works" |
+| Invoking `wsl` without checking if it is enabled | WSL2 may be installed but the distro not configured, causing a long timeout. | Check `wsl --list --quiet` exit code before using WSL as a fallback; timeout quickly if it fails |
+
+### Expected UX
+
+```powershell
+PS C:\myrepo> conjure.ps1 check
+Project:        v0.4.0  →  Current kit: v0.5.0
+
+  ~ skills/GSD-EXECUTE/SKILL.md   (upstream updated)
+
+1 file(s) differ. Run 'conjure update --apply' to merge.
+```
+
+From a CI perspective (`shell: pwsh`), `$LASTEXITCODE` is 1 and the job fails cleanly.
+
+---
+
+## Feature 5: ci-gate Empty-Check Guard (DEBT-01)
+
+### Context
+
+The ci-gate job in `release.yml` runs CI checks before allowing a release. The current gap: if a tagged commit has zero GitHub check-runs (e.g., a tag pushed directly without a preceding CI run), ci-gate passes vacuously — it sees no failures because there are no checks. This is a safety hole: a broken release could ship if tagged without a preceding CI run.
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Dependencies |
+|---------|--------------|------------|--------------|
+| ci-gate fails if it finds zero check-runs for the tagged commit SHA | A gate that passes vacuously is not a gate. This is a correctness fix, not a new feature. | LOW — add `gh api repos/{owner}/{repo}/commits/{sha}/check-runs --jq '.total_count'`; fail if 0 | `gh` CLI in CI runner; `GH_TOKEN` |
+| Outputs the check-run count to logs for auditability | Future debuggers need to see why the gate passed or failed. | LOW — `echo "Check runs found: $count"` | None |
+
+### Differentiators
+
+None. This is a correctness fix. Ship it and move on.
+
+### Anti-Features
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| Waiting for check-runs to appear (polling loop) | Releases should not block indefinitely on CI. The gate must read state, not drive state. | Fail immediately if zero checks found; the release workflow must be triggered only after CI runs complete |
+| Checking only "success" status without checking count | An empty result returns no failures — same vacuous-pass problem. | Check `total_count > 0` first, then check for failures |
+
+### Expected UX (CI log)
+
+```
+Check runs for abc1234: 12 found
+All 12 check-runs passed. Gate open.
+```
+
+Or on failure:
+```
+Check runs for abc1234: 0 found
+✗ Tagged commit has no check-runs — this tag was not preceded by a CI run.
+```
+
+---
+
+## Feature 6: SKILL-04 Positional Arg Refactor (DEBT-02)
+
+### Context
+
+`conjure publish-skill` currently accepts `--to <org/repo>` as a flag but also reads `TARGET_REPO` from the environment. The env var path was noted in PROJECT.md as "fragile" tech debt. The correct UX is: `conjure publish-skill <name> [<org/repo>]` where `<org/repo>` is a positional arg with a default of `mohandoz/conjure`. The `--to` flag can remain as an alias for backward compatibility.
+
+This is a refactor, not a new capability. The current `scripts/publish-skill.sh` already has `SKILL_NAME` as a positional and the `--to` flag implemented. The gap is: `TARGET_REPO` env var as the primary interface is fragile because env vars leak across processes and make scripts non-deterministic.
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Dependencies |
+|---------|--------------|------------|--------------|
+| `conjure publish-skill <name> <org/repo>` works as a positional | Standard CLI convention. Positional args are explicit and non-leaky. | LOW — move positional parsing to position 2 in the arg loop | `scripts/publish-skill.sh` |
+| `--to <org/repo>` remains as a named alias | Backward compatibility for any scripts that already use `--to`. | LOW — already implemented; keep it | None |
+| `TARGET_REPO` env var still accepted as fallback (lowest priority) | Existing CI scripts may use it. Deprecate with a warning, not removal. | LOW — add deprecation warning when `TARGET_REPO` is set but positional is used | None |
+| Update help text to reflect positional usage | `conjure publish-skill --help` must show the positional arg. | LOW — doc edit in `scripts/publish-skill.sh` | None |
+| Update `cmd_publish_skill` in `cli/conjure` to pass the positional | The CLI dispatcher must thread the positional arg through to the script. | LOW — check `cli/conjure`'s `cmd_publish_skill` dispatch for arg forwarding | `cli/conjure` |
+
+### Differentiators
+
+None. This is a cleanup task. Clean, correct, consistent.
+
+### Anti-Features
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| Removing `TARGET_REPO` env support immediately | Breaking change for any CI that sets it. Deprecate first; remove in v0.6.0. | Print a warning when `TARGET_REPO` is used; document removal in CHANGELOG |
+| Making the target repo a required positional (no default) | Adds friction for the common case (publishing to the official conjure repo). | Default to `mohandoz/conjure` when no positional and no `--to` provided |
+
+### Expected UX (before vs after)
+
+```bash
+# Before (fragile env var):
+TARGET_REPO=myorg/conjure conjure publish-skill my-skill
+
+# After (explicit positional):
+conjure publish-skill my-skill myorg/conjure
+
+# After (flag alias — backward compat):
+conjure publish-skill my-skill --to myorg/conjure
+```
+
+---
+
+## Feature Dependencies (Cross-Feature)
+
+```
+[conjure check (DRIFT-01, DRIFT-02)]
+    └──enables──> [conjure update --pr (AUTPR-01)]   # --pr uses check output for PR body
+    └──reuses───> [cmd_update --check logic in cli/conjure]
+
+[conjure update --apply (v0.4.0 TECH-01 — already shipped)]
+    └──required-by──> [conjure update --pr (AUTPR-01)]  # --pr applies the merge before pushing
+    └──required-by──> [conjure resolve (RESOLVE-01)]    # resolve walks the conflict sidecars
+
+[lib/merge.sh write_merge_sidecar (v0.4.0 — already shipped)]
+    └──required-by──> [conjure resolve (RESOLVE-01)]    # resolve reads .conjure-conflict-* files
+
+[lib/mutate.sh (v0.3.0 — already shipped)]
+    └──required-by──> [conjure resolve writes through mutate_cp]
+    └──required-by──> [conjure check --dry-run honors DRY_RUN]
+
+[conjure update --pr (AUTPR-01)]
+    └──enables──> [GH Action cron template (AUTPR-02)]  # template just calls conjure update --pr
+
+[gh CLI (soft dep — already used in publish-skill)]
+    └──required-by──> [conjure update --pr]
+    └──required-by──> [ci-gate empty-check guard (DEBT-01)]
+
+[cli/conjure cmd_publish_skill dispatch]
+    └──required-by──> [SKILL-04 positional arg refactor (DEBT-02)]
+    └──exists-at──>   [cli/conjure — verified in session]
+
+[conjure.ps1 shim (WIN-01)]
+    └──enables──> [CI pwsh matrix job (WIN-02)]
+    └──delegates-to──> [cli/conjure bash entrypoint via git-bash.exe]
 ```
 
 ---
 
 ## MVP Definition
 
-The minimum v0.4.0 that satisfies "installable and shareable through every standard channel" while clearing tech debt:
+### Must Ship (v0.5.0)
 
-### Must Ship (v0.4.0)
+1. **conjure check (DRIFT-01, DRIFT-02)** — table stakes; the entry point for the entire auto-update story. Without it, `update --pr` has no diff signal to put in the PR body. Low complexity; high user value.
+2. **conjure resolve (RESOLVE-01, RESOLVE-02)** — direct completion of v0.4.0's 3-way merge. Conflicts exist; no guided resolution exists. This closes the loop on what was shipped.
+3. **conjure update --pr (AUTPR-01)** — the automated maintenance story. Medium complexity but depends only on already-shipped primitives (update --apply, gh CLI, lib/merge.sh sidecars).
+4. **conjure.ps1 (WIN-01)** — low complexity; unblocks a meaningful segment of users; the CI proof (WIN-02) can ship simultaneously.
+5. **ci-gate empty-check guard (DEBT-01)** — correctness fix; negligible complexity; must ship before any release is cut.
+6. **SKILL-04 positional arg refactor (DEBT-02)** — low complexity; fixes a fragile interface before it propagates to more callers.
 
-1. **DIST-01 table stakes** — valid marketplace.json + plugin.json at v0.4.0 version, `claude plugin validate` in CI. The plugin manifest already exists; this is a version bump + CI step + community submission.
-2. **DIST-02 Homebrew tap** — `brew install mohandoz/conjure/conjure` works. A separate `homebrew-conjure` repo with a minimal formula. Requires `CONJURE_HOME` fix and a GitHub release tarball.
-3. **DIST-03 Docker image** — `docker run ghcr.io/mohandoz/conjure:latest conjure audit .` works. Debian slim base, multi-arch, all tools pre-installed, published to ghcr.io on release.
-4. **TECH-01 3-way merge** — `conjure update --apply` does a real merge instead of the stub. Requires base snapshot design + `git merge-file` loop. The highest-complexity item; unblocks "keep harness healthy" core value.
-5. **TECH-03 Windows CI** — `windows-latest` matrix entry + `.mjs` hook smoke test. Low-effort, closes the cross-platform claim.
+### Can Defer to v0.5.x
 
-### Should Ship (v0.4.0, if capacity allows)
+- **GH Action cron template (AUTPR-02)** — add-on to AUTPR-01; useful but not blocking. Template file is a documentation artifact with zero runtime code. Can ship in the same release or as a fast follow.
+- **Schema version drift detection in `conjure check`** — differentiator; requires the settings.json template to carry a schemaVersion field (small change); can be added when that field stabilizes.
+- **PowerShell registry-based git-bash detection** — standard path coverage handles 90% of users; registry fallback is a polish item.
 
-6. **DIST-04 `conjure publish-skill`** — validate + checklist + optional `gh pr create`. Medium complexity. Valuable for ecosystem flywheel.
-7. **DIST-05 `conjure init --overlay`** — base + overlay merge on init, `.conjure-overlay` marker, `refresh-overlay`. High value for enterprise teams.
+### Defer to v0.6.0
 
-### Can Defer (v0.4.x or v0.5.0)
+- Workspace / cross-repo graph orchestration (already out of scope in PROJECT.md)
+- IDE extensions or web dashboard for drift visibility
+- `conjure resolve` TUI (curses/dialog) — the `$EDITOR` model is correct for now
 
-- TECH-02 Nyquist pass — quality debt; important but not user-facing. Can be a v0.4.x followup.
-- `conjure publish-check` CI command — nice-to-have; CI already runs `claude plugin validate`.
-- Community marketplace submission — process work; can happen asynchronously after DIST-01 ships.
+---
+
+## Feature Prioritization Matrix
+
+| Feature | User Value | Implementation Cost | Priority |
+|---------|------------|---------------------|----------|
+| conjure check | HIGH | LOW | P1 |
+| conjure resolve | HIGH | LOW | P1 |
+| ci-gate empty-check guard | HIGH (correctness) | LOW | P1 |
+| conjure update --pr | HIGH | MEDIUM | P1 |
+| conjure.ps1 shim + CI job | MEDIUM | LOW | P1 |
+| SKILL-04 positional arg refactor | MEDIUM | LOW | P1 |
+| GH Action cron template | MEDIUM | LOW | P2 |
+| Schema version check in conjure check | MEDIUM | MEDIUM | P2 |
+| conjure check --json | LOW-MEDIUM | LOW | P2 |
+| Registry-based git-bash detection | LOW | MEDIUM | P3 |
+
+---
+
+## Competitor Feature Analysis
+
+| Feature | chezmoi | mise | Renovate | Conjure v0.5.0 |
+|---------|---------|------|----------|----------------|
+| Drift detection | `chezmoi diff` (file-level, unified diff) | `mise outdated` (columnar table, --json) | Built into PR creation | `conjure check` (file-level, columnar + exit code) |
+| Update command | `chezmoi update` (pull + apply) | `mise upgrade` | Automated PR | `conjure update --apply` (already shipped) |
+| Auto-PR | No | No | Yes — one per dep group | `conjure update --pr` |
+| Cron automation | Via `chezmoi update` in cron | No | Yes — native GH App | GH Action template (AUTPR-02) |
+| Conflict handling | Delegated to git rebase | N/A | Skips conflicting files, flags in PR | `conjure resolve` (sidecar walk) |
+| Windows native | PS 7 script included | Native binary | Native (Node.js) | `conjure.ps1` shim (Git Bash delegation) |
+| Machine-readable output | `--json` everywhere | `--json` everywhere | Webhook/API | `conjure check --json` (differentiator) |
+| PR deduplication | N/A | N/A | Yes (force-update existing branch) | Check for existing `conjure/update-*` PR before creating |
 
 ---
 
 ## Sources
 
-- [Claude Code — Create and distribute a plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces) — HIGH. Official docs, verified 2026-05-25. Full schema for marketplace.json, plugin sources, strict mode, community submission workflow.
-- [Claude Code — Create plugins](https://code.claude.com/docs/en/plugins) — HIGH. Official docs. plugin.json schema, directory structure, `claude plugin validate`, `--plugin-dir`, community submission via `claude.ai/settings/plugins/submit`.
-- [Homebrew — How to Create and Maintain a Tap](https://docs.brew.sh/How-to-Create-and-Maintain-a-Tap) — HIGH. Official docs. Tap creation, `brew tap-new`, formula structure, GitHub Actions integration.
-- [Homebrew formula for bash script — orgs/Homebrew/discussions/5388](https://github.com/orgs/Homebrew/discussions/5388) — HIGH. Working example: `bin.install "scriptname"` for script-only tools. `test do` using `assert_match`.
-- [GitHub Docs — Publishing Docker images](https://docs.github.com/actions/guides/publishing-docker-images) — HIGH. GITHUB_TOKEN auth for ghcr.io, `docker/build-push-action`, version tagging.
-- [Alpine vs Distroless vs Scratch — Mathieu Benoit](https://medium.com/google-cloud/alpine-distroless-or-scratch-caac35250e0b) — MEDIUM. musl libc compatibility risks with Alpine for Go/Rust binaries.
-- [Git — git-merge-file documentation](https://git-scm.com/docs/git-merge-file) — HIGH. 3-way merge algorithm, exit codes, conflict markers, `-L` labels, `-p` stdout output.
-- [Kustomize base and overlay inheritance patterns](https://oneuptime.com/blog/post/2026-02-09-kustomize-base-overlay-inheritance/view) — MEDIUM. Base+overlay pattern, overlay wins on conflict, flat hierarchy recommendation.
-- [GitHub — runkids/skillshare](https://github.com/runkids/skillshare) — MEDIUM. Cross-tool skill sharing pattern, one-command sync.
-- [GitHub Actions on Windows — community discussion](https://github.com/orgs/community/discussions/25038) — HIGH. Bash on Windows runners is Git Bash (not WSL); WSL requires separate setup.
-- Conjure internal: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `cli/conjure:132-178` (cmd_update stub), `planning/ROADMAP.md`, `.planning/PROJECT.md` — HIGH (read directly this session).
+- [chezmoi — Daily operations](https://www.chezmoi.io/user-guide/daily-operations/) — HIGH. `chezmoi diff` / `chezmoi apply` split; `chezmoi update` combined pull+apply; blocking wait-for-editor pattern.
+- [mise — mise outdated](https://mise.jdx.dev/cli/outdated.html) — HIGH. Columnar output: Plugin / Requested / Current / Latest; `--json` flag; `mise upgrade` as next step.
+- [Renovate Docs — Pull requests](https://docs.renovatebot.com/key-concepts/pull-requests/) — HIGH. One-PR-per-dep-group; force-update existing branch; PR body structure; dedup via `gh pr list`.
+- [Renovate Docs — Dependency Dashboard](https://docs.renovatebot.com/key-concepts/dashboard/) — HIGH. Dashboard issue tracks all pending updates; ignored PRs require explicit re-enable.
+- [Using GitHub CLI in workflows](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/using-github-cli-in-workflows) — HIGH. `gh pr create` in Actions; `GH_TOKEN` required; `permissions: pull-requests: write`.
+- [Flux GH Actions auto-PR](https://fluxcd.io/flux/use-cases/gh-actions-auto-pr/) — MEDIUM. Cron-triggered auto-PR pattern; branch naming conventions; dedup by checking existing open PRs.
+- [git-mergetool documentation](https://git-scm.com/docs/git-mergetool) — HIGH. One-file-at-a-time conflict walk; `$VISUAL/$EDITOR` delegation; skip with `--no-commit`; the model for `conjure resolve`.
+- [PowerShell cross-platform guide](https://medium.com/@josephsims1/powershell-beyond-windows-a-cross-platform-guide-2f6d6de473dd) — MEDIUM. `$PSScriptRoot` for script self-location; `@args` passthrough; `$LASTEXITCODE` propagation.
+- [Build a cross-platform shell script CLI runner](https://wadehuang36.medium.com/build-a-cross-platform-shell-script-cli-runner-d6075b8fb682) — MEDIUM. Shim pattern: detect platform, delegate to bash.exe on Windows.
+- Conjure internal: `cli/conjure` (cmd_update, cmd_publish_skill), `lib/merge.sh` (write_merge_sidecar, merge_file_3way), `scripts/publish-skill.sh`, `.planning/PROJECT.md` — HIGH (read directly this session).
 
 ---
-*Feature research for: Conjure v0.4.0 Distribution + Ecosystem*
-*Researched: 2026-05-25*
+*Feature research for: Conjure v0.5.0 Auto-Update + Healthcheck*
+*Researched: 2026-05-26*
