@@ -58,7 +58,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 21-03-PLAN.md — Wave 2: lib/snapshot.sh + lib/inventory.sh (6-bucket classifier + manifest emitter)
+- [x] 21-03-PLAN.md — Wave 2: lib/snapshot.sh + lib/inventory.sh (6-bucket classifier + manifest emitter)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -119,7 +119,7 @@ Plans:
 | 18. Conflict Resolution | v0.5.0 | 2/2 | Complete | 2026-05-26 |
 | 19. Auto-PR | v0.5.0 | 2/2 | Complete | 2026-05-26 |
 | 20. Windows + CI Gate | v0.5.0 | 2/2 | Complete | 2026-05-28 |
-| 21. Foundation Libs + Inventory | v0.6.0 | 2/4 | In Progress|  |
+| 21. Foundation Libs + Inventory | v0.6.0 | 3/4 | In Progress|  |
 | 22. `conjure adopt` CLI Core + Rollback | v0.6.0 | 0/TBD | Not started | - |
 | 23. Restructure Skill + Safety Gates | v0.6.0 | 0/TBD | Not started | - |
 | 24. Integration Tests + Argus Fixture | v0.6.0 | 0/TBD | Not started | - |
