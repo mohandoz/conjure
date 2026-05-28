@@ -46,7 +46,13 @@ Full phase details for shipped milestones live in their archives under `.plannin
   3. `lib/inventory.sh` scans a fixture repo, classifies every markdown file into one of the 6 harness buckets, skips symlinks/binary/vendored files, caps at 500 files by default, and emits a valid `adopt-manifest.json` with a `summary` block and per-file `cap_exceeded` flags
   4. `adopt-manifest.json` schema is finalized: `schema_version`, `summary.*`, `files[]`, `size_cap_violations[]`, `harness_missing_layers`, `restructure_steps[]`; a sample manifest validates against the schema
   5. `lib/caps.sh` exports `CLAUDE_MD_CAP=100`, `SKILL_MD_CAP=200`, `AGENT_MD_CAP=80`; stale files are archived (moved to `.conjure-archive-<ts>/`) via a `mutate_archive` primitive, never deleted
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 21-01-PLAN.md — Wave 0: brownfield-simple fixture + adopt-manifest.schema.json + Phase 21 test block scaffold
+- [ ] 21-02-PLAN.md — Wave 1: lib/caps.sh + lib/log.sh + mutate_archive in lib/mutate.sh
+- [ ] 21-03-PLAN.md — Wave 2: lib/snapshot.sh + lib/inventory.sh (6-bucket classifier + manifest emitter)
+- [ ] 21-04-PLAN.md — Wave 3: audit-setup.sh cap literal extraction + integration gate checkpoint
 
 ### Phase 22: `conjure adopt` CLI Core + Rollback
 **Goal**: Users can run `conjure adopt` on an existing repo to get a complete, audited, rollback-capable adoption pipeline with zero filesystem surprises
@@ -94,7 +100,7 @@ Full phase details for shipped milestones live in their archives under `.plannin
 | 18. Conflict Resolution | v0.5.0 | 2/2 | Complete | 2026-05-26 |
 | 19. Auto-PR | v0.5.0 | 2/2 | Complete | 2026-05-26 |
 | 20. Windows + CI Gate | v0.5.0 | 2/2 | Complete | 2026-05-28 |
-| 21. Foundation Libs + Inventory | v0.6.0 | 0/TBD | Not started | - |
+| 21. Foundation Libs + Inventory | v0.6.0 | 0/4 | Not started | - |
 | 22. `conjure adopt` CLI Core + Rollback | v0.6.0 | 0/TBD | Not started | - |
 | 23. Restructure Skill + Safety Gates | v0.6.0 | 0/TBD | Not started | - |
 | 24. Integration Tests + Argus Fixture | v0.6.0 | 0/TBD | Not started | - |
