@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v0.6.0
 milestone_name: Safe Brownfield Adoption
 status: executing
-last_updated: "2026-05-28T20:44:21.893Z"
+last_updated: "2026-05-28T21:06:55.314Z"
 last_activity: 2026-05-28
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 25
 ---
 
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-05-28)
 ## Current Position
 
 Phase: 22 (conjure-adopt-cli-core-rollback) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-05-28
 
-Progress: [███████░░░] 71%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [███████░░░] 71%
 - Trend: —
 
 | Phase 22 P22-01 | 18 | 3 tasks | 2 files |
+| Phase 22 P22-02 | 35 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,9 @@ Full decision log in PROJECT.md Key Decisions table. Key v0.6.0 design decisions
 - [Phase ?]: Phase 22 Wave 0: graceful-red test block in tests/run.sh gates every later verification before scripts/adopt.sh exists
 - [Phase ?]: _-prefixed fixture dirs are excluded from the generic tests/fixtures/[^_]*/ audit + golden-EXPECT loops
 - [Phase ?]: SIGKILL recovery test asserts the non-TTY exit-2 + last-completed form; interactive prompt deferred to manual verification
+- [Phase ?]: Phase 22 Wave 1: cmd_adopt thin dispatcher + scripts/adopt.sh 5-step forward pipeline
+- [Phase ?]: Pitfall 3 self-copy fixed by snapshotting into a temp root outside the target then relocating into .conjure-adopt-backups (no lib change)
+- [Phase ?]: .conjure-adopt-state directory-form (state.json + staging/); state written atomically (jq>tmp+mv) BEFORE each mutating step for SIGKILL durability (SAFE-04)
 
 ### Pending Todos
 
@@ -92,6 +96,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-05-28T20:43:54.725Z
+Last session: 2026-05-28T21:06:26.321Z
 Stopped at: Phase 22 context gathered
 Resume file: None
