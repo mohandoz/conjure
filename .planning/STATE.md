@@ -97,6 +97,7 @@ None.
 | verification_gap | Phase 13 VERIFICATION.md — human_needed (live brew install) | human_needed | v0.4.0 close |
 | verification_gap | Phase 14 VERIFICATION.md — human_needed (Docker + Windows CI) | human_needed | v0.4.0 close |
 | verification_gap | Phase 15 VERIFICATION.md — human_needed (live tag push) | human_needed | v0.4.0 close |
+| hardening | adopt `--rollback` fails-closed if SIGKILL lands in the snapshot_path-flush window (no snapshot recorded). Safe (refuse, no corruption); proper fix needs a snapshot-completion marker (touches Phase 21 snapshot contract). Manual UAT 2026-05-29 confirmed all 3 recovery branches otherwise work. | known_limitation | Phase 22 close → Phase 24 |
 
 ## Session Continuity
 
