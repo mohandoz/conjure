@@ -37,6 +37,7 @@ Usage:
   conjure update [--check|--apply|--pr|--cron] [target]
   conjure check [--porcelain] [target]
   conjure resolve [--dry-run] [target]
+  conjure adopt [--dry-run] [--force] [--rollback] [--resume] [--start-fresh] [--apply-step <id>] [--update-manifest] [--full-inventory] [target]
   conjure refresh-graph [target] [--full|--update]
   conjure refresh-overlay [target]
   conjure install-mcp
@@ -187,6 +188,36 @@ cmd_resolve() {
   done
   CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" \
     bash "$CONJURE_HOME/scripts/resolve.sh" "$target"
+}
+
+cmd_adopt() {
+  # Thin wrapper (mirror cmd_resolve/cmd_audit): parse flags → CONJURE_ADOPT_*
+  # env vars → exec scripts/adopt.sh. Zero business logic lives here.
+  local target dryrun force rollback resume start_fresh apply_step update_manifest full_inv
+  target="$(pwd)"; dryrun=0; force=0; rollback=0; resume=0; start_fresh=0
+  apply_step=""; update_manifest=0; full_inv=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run)         dryrun=1 ;;
+      --force)           force=1 ;;
+      --rollback)        rollback=1 ;;
+      --resume)          resume=1 ;;
+      --start-fresh)     start_fresh=1 ;;
+      --apply-step)      shift; apply_step="${1:-}" ;;
+      --update-manifest) update_manifest=1 ;;
+      --full-inventory)  full_inv=1 ;;
+      --help|-h)         echo "Usage: conjure adopt [--dry-run] [--force] [--rollback] [--resume] [--start-fresh] [--apply-step <id>] [--update-manifest] [--full-inventory] [target]"; return 0 ;;
+      *)                 target="$1" ;;
+    esac
+    shift
+  done
+  cmd_preflight || return 1
+  CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" \
+    CONJURE_ADOPT_FORCE="$force" CONJURE_ADOPT_ROLLBACK="$rollback" \
+    CONJURE_ADOPT_RESUME="$resume" CONJURE_ADOPT_START_FRESH="$start_fresh" \
+    CONJURE_ADOPT_APPLY_STEP="$apply_step" CONJURE_ADOPT_UPDATE_MANIFEST="$update_manifest" \
+    CONJURE_ADOPT_FULL_INVENTORY="$full_inv" \
+    bash "$CONJURE_HOME/scripts/adopt.sh" "$target"
 }
 
 cmd_update() {
@@ -464,6 +495,7 @@ case "${1:-help}" in
   update)          shift; cmd_update "$@"          ;;
   check)           shift; cmd_check "$@"           ;;
   resolve)         shift; cmd_resolve "$@"         ;;
+  adopt)           shift; cmd_adopt "$@"           ;;
   refresh-graph)   shift; cmd_refresh_graph "$@"   ;;
   refresh-overlay) shift; cmd_refresh_overlay "$@" ;;
   install-mcp)     shift; cmd_install_mcp "$@"     ;;
