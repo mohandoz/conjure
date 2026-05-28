@@ -533,22 +533,21 @@ report() {  # reads adopt-manifest.json + state; echo lines like cmd_audit
 
 **Note:** No external package or API claims are made in this research (zero new deps), so the assumptions above are all about local code/OS behavior, verifiable by the Phase 22 tests themselves.
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All three resolved during Phase 22 planning; each resolution is encoded in the plans (commit `c9a2565`). Recorded here for artifact-sync.
 
 1. **`.conjure-adopt-state`: single file or directory?**
    - What we know: D-07 needs a `staging/` subdir for proposed content; SAFE-04 needs step records + sha256; D-01 needs `created[]`/`mutated[]`.
-   - What's unclear: whether `.conjure-adopt-state` is a JSON *file* (with a sibling `.conjure-adopt-staging/` dir) or a *directory* (`.conjure-adopt-state/state.json` + `.conjure-adopt-state/staging/`).
-   - Recommendation: directory form (`.conjure-adopt-state/`) — keeps state + staging colocated, matches D-07's literal path `.conjure-adopt-state/staging/<file>`. Decide in planning; the schema sketch assumes file form for brevity but D-07's example path implies directory form. **Lean directory.**
+   - **RESOLVED — directory form `.conjure-adopt-state/`** with `state.json` + `staging/`. Keeps state + staging colocated and matches D-07's literal path `.conjure-adopt-state/staging/<file>`. See plan 22-02 Task 1 (`state_record`/schema).
 
 2. **Snapshot self-copy mitigation (Pitfall 3) — lib change or ordering guard?**
    - What we know: `snapshot_create` copies `target/.` including `.conjure-adopt-backups/`; D-12 reuses the snapshot on resume (so usually snapshot-once).
-   - What's unclear: whether to (a) add an exclusion to `snapshot_create` (touches Phase 21 file), (b) refuse re-snapshot when a backup already exists, or (c) rely on `--resume` reuse + first-run-is-clean.
-   - Recommendation: add a regression test first (two consecutive live adopts), then pick the minimal fix. Lean (b)+(c): the pipeline only snapshots when no `.conjure-adopt-state` exists; on a *second* full adopt (prior run completed, state deleted, backups remain), guard against nesting by excluding the backup dir at copy time.
+   - **RESOLVED — ordering guard (b)+(c), no lib change.** Pipeline only snapshots when no `.conjure-adopt-state` exists; on a second full adopt (prior run completed, state deleted, backups remain), exclude/move-aside `.conjure-adopt-backups` before the raw `cp`. Backed by a two-consecutive-adopts regression test. See plan 22-01 Task 3(d) (test) + 22-02 Task 2 (guard).
 
 3. **`--apply-step` validation depth (SUMMARY.md open question, partially resolved by D-08).**
    - What we know: D-08 + SUMMARY.md recommend `jq` parse + required-fields (`id`/`op`/`status`) check, full JSON Schema deferred.
-   - What's unclear: whether to also validate that `op` is one of the supported types and that `src`/`dest` paths are safe (no `..`, src under staging/).
-   - Recommendation: validate `op ∈ {write, archive, extract}` and that `src` (for write) resolves under the staging dir + `mutate_archive` already rejects `..`/relative. `exit 2` on any failure.
+   - **RESOLVED — op-allowlist + path containment.** Validate `op ∈ {write, archive, extract}`, required fields `{id, op, status}`, `src` (for write) resolves under the staging dir, reject `..`/relative escape (`mutate_archive` also rejects `..`). `exit 2` on any failure (never execute a malformed op). See plan 22-03 Task 2 (`apply_step` validation).
 
 ## Environment Availability
 
