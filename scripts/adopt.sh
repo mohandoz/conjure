@@ -605,8 +605,18 @@ run_pipeline() {
   # Step 0: preconditions (dirty-tree gate). Runs for real in dry-run too (D-10).
   # On exit-2 (dirty + no --force) no state has been written yet, so a refused
   # run leaves no .conjure-adopt-state to trigger a false recovery prompt.
+  # WR-02: SKIP the dirty-tree gate on resume. resume_pipeline sets
+  # CONJURE_ADOPT_REUSE_SNAPSHOT=1 and legitimately continues an already-snapshotted
+  # run — the snapshot already captured the (possibly dirty, possibly --force'd) tree,
+  # and scaffold has since added untracked files making it dirtier. Re-running the
+  # gate without the original --force would exit 2 and deadlock the very recovery
+  # resume exists to provide.
   echo "Step 1/5 preconditions"
-  precondition_git
+  if [ "${CONJURE_ADOPT_REUSE_SNAPSHOT:-0}" = "1" ]; then
+    echo "preconditions: [resume] dirty-tree gate skipped — continuing an already-snapshotted run"
+  else
+    precondition_git
+  fi
 
   # State (SAFE-04 crash durability) — only after the gate passes; dry-run writes
   # zero state (ADOPT-02 zero-writes-under-target). On resume, reuse the existing
