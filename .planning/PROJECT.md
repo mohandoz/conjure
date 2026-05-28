@@ -19,9 +19,20 @@ harness with one trustworthy command — and keep it healthy over time. If
 everything else fails, `conjure init` + `conjure audit` must reliably produce
 and verify a correct, safe harness.
 
-## Next Milestone: v0.6.0 (planning)
+## Current Milestone: v0.6.0 Safe Brownfield Adoption
 
-**Direction:** Workspace / cross-repo graph orchestration — apply and keep harnesses healthy across multiple repos, building on the now-complete single-repo lifecycle (init → audit → check → resolve → update --pr). Scope to be defined via `/gsd-new-milestone`.
+**Goal:** Let `conjure` safely fold an existing, grown-messy project (oversized
+CLAUDE.md, scattered docs, prior GSD `.planning/`) into a best-practice
+four-layer harness — losing nothing, backing up everything, reporting each change.
+
+**Target features:**
+- `conjure adopt` (deterministic CLI): full timestamped snapshot backup, inventory + classify every markdown file, scaffold missing harness layers, size-cap audit, safe mutate via `lib/mutate.sh`, per-step `RESTRUCTURE-LOG.md`, `--dry-run`, `--rollback`.
+- `restructure` skill (Claude in-session): reads CLI inventory + oversized CLAUDE.md + doc sprawl → proposes ≤100-line CLAUDE.md core, what extracts to skills/subagents, what stays linked reference, what is stale → archive. Approve each step; applies via CLI safe primitives.
+- Safety primitives: snapshot-backup mutate primitive, git-clean precondition (refuse dirty tree without `--force`), never-delete (archive instead), live per-step messaging + persisted log, rollback.
+
+**Approach:** Brownfield-only — cross-repo orchestration deferred to v0.7.0.
+Hybrid determinism: file operations deterministic + auditable; content judgment
+is LLM, human-gated and backup-guarded.
 
 ## Requirements
 
@@ -58,18 +69,19 @@ and verify a correct, safe harness.
 
 <!-- Requirements for the next milestone — defined fresh via /gsd-new-milestone. -->
 
-_None yet — v0.5.0 shipped. Fresh requirements created at next milestone start._
+_v0.6.0 "Safe Brownfield Adoption" requirements being defined via `/gsd-new-milestone` — see `.planning/REQUIREMENTS.md`._
 
 ### Out of Scope
 
 <!-- Explicit boundaries with reasoning. -->
 
-- Full TUI conflict resolution (side-by-side diff viewer) — `conjure resolve` ships a guided line-by-line prompt; ncurses UI deferred to v0.6.0
+- Full TUI conflict resolution (side-by-side diff viewer) — `conjure resolve` ships a guided line-by-line prompt; ncurses UI deferred to v0.7.0
 - `conjure update --pr` auto-merge on clean apply — never; conflicts always require human review
-- Workspace / cross-repo graph orchestration — v0.6.0; single-repo correctness first
+- Workspace / cross-repo graph orchestration — v0.7.0; safe single-repo brownfield adoption first (v0.6.0)
 - IDE extensions, web dashboard, skill marketplace UI — backlog; not core to the one-command value
 - Making a project *actually* compliant — overlays reduce non-compliant output only; real compliance needs people + process + audit
-- Pure PowerShell port of `conjure.ps1` (no Git Bash/WSL) — v0.6.0; the shim covers native Windows for now
+- Pure PowerShell port of `conjure.ps1` (no Git Bash/WSL) — v0.7.0; the shim covers native Windows for now
+- Fully autonomous (no-approval) restructure of an existing project — v0.6.0 `restructure` requires per-step human approval; unattended adoption is a non-goal (judgment + safety)
 - `conjure:full` Docker tag with optional Go/Rust tools — v0.4.x; baseline image is the priority
 
 ## Current State
@@ -119,4 +131,4 @@ _None yet — v0.5.0 shipped. Fresh requirements created at next milestone start
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-05-28 — after v0.5.0 milestone — Auto-Update + Healthcheck*
+*Last updated: 2026-05-28 — v0.6.0 milestone started — Safe Brownfield Adoption*
