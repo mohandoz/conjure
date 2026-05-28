@@ -1729,6 +1729,7 @@ else
   # DRY_RUN=1 test: output must contain "[dry-run] would write"
   P21_LOG_DRY_OUT="$(
     DRY_RUN=1 RESTRUCTURE_LOG_PATH="/tmp/conjure-p21-log-dryrun-$$" \
+    CONJURE_HOME="$CONJURE_HOME" \
     bash -c '
       source "$CONJURE_HOME/lib/mutate.sh"
       source "$CONJURE_HOME/lib/log.sh"
