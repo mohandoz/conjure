@@ -2,10 +2,9 @@
 gsd_state_version: 1.0
 milestone: v0.5.0
 milestone_name: Auto-Update + Healthcheck
-status: completed
-stopped_at: 16-01-PLAN.md complete — mutate_rm in lib/mutate.sh + 4 regression tests passing
-last_updated: "2026-05-26T04:07:13.039Z"
-last_activity: 2026-05-26 -- Phase 20 marked complete
+status: Awaiting next milestone
+last_updated: "2026-05-28T13:44:02.566Z"
+last_activity: 2026-05-28 — Milestone v0.5.0 completed and archived
 progress:
   total_phases: 5
   completed_phases: 5
@@ -18,19 +17,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-26)
+See: .planning/PROJECT.md (updated 2026-05-28)
 
 **Core value:** A developer can turn any repo into a production-grade, eval-backed Claude Code harness with one trustworthy command — and keep it healthy over time.
-**Current focus:** v0.5.0 — Phase 16 ready to plan
+**Current focus:** Planning next milestone (v0.6.0) — run `/gsd-new-milestone`
 
 ## Current Position
 
-Phase: 20 — COMPLETE (ALL PHASES DONE)
-Plan: 2 of 02 complete
-Status: Phase 20 complete — milestone v0.5.0 all phases executed
-Last activity: 2026-05-26 -- Phase 20 marked complete
-
-Progress: [██████████] 100%
+Phase: Milestone v0.5.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-28 — Milestone v0.5.0 completed and archived
 
 ## Performance Metrics
 
@@ -61,24 +58,15 @@ Progress: [██████████] 100%
 
 ### Decisions
 
-- [v0.5.0 ordering]: Prerequisites (INFRA-01 + DEBT-02) first — unblock mutate_rm before any resolve script is written
-- [v0.5.0 ordering]: Drift detection (Phase 17) before Auto-PR (Phase 19) — AUTPR-01 consumes --porcelain output
-- [v0.5.0 ordering]: Conflict resolution (Phase 18) before Auto-PR (Phase 19) — complete user story: apply → resolve → PR
-- [v0.4.0 Docker]: debian:bookworm-slim base; separate Homebrew tap repo
-- [v0.4.0 release]: 4-job release.yml — ci-gate → release → docker + homebrew (parallel)
-- [Phase ?]: INFRA-01 mutate_rm: no -r flag; callers (Phase 18) control recursive logic for individual sidecar file deletion
-- [Phase ?]: cmd_resolve mirrors cmd_check: env-forwarded bash exec to scripts/resolve.sh
-- [Phase 19-auto-pr]: early --pr/--cron dispatch before version-comparison block bypasses version early-exit
-- [Phase 19-auto-pr]: deterministic branch name: sha256 first 7 chars of kit version string
+Full v0.5.0 decision log in PROJECT.md (Key Decisions). All v0.5.0 ordering and design decisions resolved at milestone close.
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-- [Phase 17]: `check_file_drift` function design (3-way classification without running `git merge-file`) is design-intensive — prototype and test before implementation
-- [Phase 19]: Integration between `lib/merge.sh merge_user_files` and the new branch/commit/push flow needs a concrete integration test before phase is marked complete
+None — both v0.5.0 design blockers (Phase 17 drift classifier, Phase 19 merge↔push integration) resolved during execution. Cross-platform test hygiene flagged in PROJECT.md Key Decisions as a watch item.
 
 ## Deferred Items
 
@@ -97,3 +85,7 @@ None yet.
 Last session: 2026-05-26T04:03:53.273Z
 Stopped at: 16-01-PLAN.md complete — mutate_rm in lib/mutate.sh + 4 regression tests passing
 Resume file: None
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

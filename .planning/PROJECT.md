@@ -19,17 +19,9 @@ harness with one trustworthy command — and keep it healthy over time. If
 everything else fails, `conjure init` + `conjure audit` must reliably produce
 and verify a correct, safe harness.
 
-## Current Milestone: v0.5.0 Auto-Update + Healthcheck
+## Next Milestone: v0.6.0 (planning)
 
-**Goal:** Enable harnesses to stay current — detect drift from upstream, resolve conflicts interactively, and automate updates via PR.
-
-**Target features:**
-- `conjure check` — drift detection command (installed harness vs upstream kit, delta report)
-- `conjure update --pr` — open GitHub PR with harness update diff; optional GH Action cron template
-- `conjure resolve` — guided prompt walking through diff3 conflict sidecars interactively
-- `conjure.ps1` — native PowerShell entrypoint for Windows (no Git Bash required)
-- ci-gate empty-check guard (tech debt: fail CI on zero check-runs for tagged commits)
-- SKILL-04 positional arg refactor (tech debt: replace `TARGET_REPO` env with positional arg)
+**Direction:** Workspace / cross-repo graph orchestration — apply and keep harnesses healthy across multiple repos, building on the now-complete single-repo lifecycle (init → audit → check → resolve → update --pr). Scope to be defined via `/gsd-new-milestone`.
 
 ## Requirements
 
@@ -56,48 +48,43 @@ and verify a correct, safe harness.
 - ✓ Homebrew formula + auto-bump-action on release (BREW-01–04) — v0.4.0
 - ✓ Multi-arch Docker image (linux/amd64 + linux/arm64, non-root, ≤200 MB) + windows-test CI job (DOCK-01–05, TECH-03) — v0.4.0
 - ✓ 4-job release.yml: ci-gate → release → docker + homebrew parallel (REL-01–02) — v0.4.0
+- ✓ `conjure check` drift detection — 3-way sha256 classifier, `--porcelain`, exit 0/1 (DRIFT-01–02) — v0.5.0
+- ✓ `conjure resolve` interactive diff3 sidecar walker — TTY-guarded (exit 2), mutate_rm cleanup (RESOLVE-01–02) — v0.5.0
+- ✓ `conjure update --pr` + `--cron` — idempotent auto-PR + weekly workflow template (AUTPR-01–02) — v0.5.0
+- ✓ `conjure.ps1` native Windows entrypoint + windows-ps1-shim pwsh CI job (WIN-01–02) — v0.5.0
+- ✓ `mutate_rm` deletion primitive, publish-skill positional arg, ci-gate empty-check guard (INFRA-01, DEBT-01–02) — v0.5.0
 
 ### Active
 
-<!-- Requirements for v0.5.0 — hypotheses until shipped and validated. -->
+<!-- Requirements for the next milestone — defined fresh via /gsd-new-milestone. -->
 
-- [ ] **DRIFT-01**: User can run `conjure check` to see which installed harness files diverge from the upstream kit
-- [ ] **DRIFT-02**: Drift report shows file-level deltas (added/modified/removed) with actionable next step
-- [ ] **AUTPR-01**: User can run `conjure update --pr` to open a GitHub PR with harness update diff
-- [ ] **AUTPR-02**: Optional GitHub Action template ships for cron-based auto-PR automation
-- [ ] **RESOLVE-01**: User can run `conjure resolve` to walk through diff3 conflict sidecars interactively via guided prompt
-- [ ] **RESOLVE-02**: `conjure resolve` marks sidecars resolved and cleans them up after confirmation
-- [ ] **WIN-01**: `conjure.ps1` PowerShell entrypoint works on native Windows without Git Bash
-- [ ] **WIN-02**: CI matrix includes native PowerShell job (windows-latest, shell: pwsh)
-- [ ] **DEBT-01**: ci-gate fails when tagged commit has zero GitHub check-runs (empty-check guard)
-- [ ] **DEBT-02**: `conjure publish-skill` accepts positional arg for target repo (replaces `TARGET_REPO` env)
+_None yet — v0.5.0 shipped. Fresh requirements created at next milestone start._
 
 ### Out of Scope
 
 <!-- Explicit boundaries with reasoning. -->
 
-- Auto-update 3-way merge conflict resolution UI — conflicts surfaced as sidecar files; interactive resolution is v0.5.0
+- Full TUI conflict resolution (side-by-side diff viewer) — `conjure resolve` ships a guided line-by-line prompt; ncurses UI deferred to v0.6.0
+- `conjure update --pr` auto-merge on clean apply — never; conflicts always require human review
 - Workspace / cross-repo graph orchestration — v0.6.0; single-repo correctness first
 - IDE extensions, web dashboard, skill marketplace UI — backlog; not core to the one-command value
 - Making a project *actually* compliant — overlays reduce non-compliant output only; real compliance needs people + process + audit
-- PowerShell `conjure.ps1` entrypoint for native Windows — v0.5.0; Git Bash works for now
+- Pure PowerShell port of `conjure.ps1` (no Git Bash/WSL) — v0.6.0; the shim covers native Windows for now
 - `conjure:full` Docker tag with optional Go/Rust tools — v0.4.x; baseline image is the priority
 
 ## Current State
 
-**Shipped:** v0.4.0 — "Distribution + Ecosystem" (2026-05-26)
+**Shipped:** v0.5.0 — "Auto-Update + Healthcheck" (2026-05-28)
 
-- 29/29 requirements satisfied across 9 phases, 23 plans
-- `conjure update --apply` uses real 3-way merge (git merge-file --diff3)
-- `conjure publish` + `conjure publish-skill` wired and regression-tested
-- Org overlay system (init + refresh + audit drift detection)
-- Homebrew formula + release pipeline: ci-gate → GH release → Docker + Homebrew
-- Multi-arch Docker image (linux/amd64 + linux/arm64, debian:bookworm-slim, non-root)
-- Windows CI job (windows-latest, shell: bash)
-- 261+ test assertions, all green
-- Pre-release checklist items remain (tap repo setup, live tag push, HOMEBREW_TAP_GITHUB_TOKEN secret)
+- 11/11 requirements satisfied across 5 phases, 10 plans
+- Harness lifecycle loop closed: `conjure check` (drift) → `conjure resolve` (conflicts) → `conjure update --pr/--cron` (automated PRs)
+- `conjure.ps1` native Windows entrypoint (Git Bash → WSL → exit 2) with exit-code propagation
+- `release.yml` ci-gate hardened: empty-check guard + API-propagation retry loop
+- 302 test assertions, all green; CI green on all 5 jobs (ubuntu + 4 Windows/audit jobs)
+- v0.5.0 tagged and released; Homebrew formula pinned to v0.5.0 tarball sha256
+- Post-close hardening: cross-platform test suite repaired (gh-isolation under usrmerge, Git Bash sandbox PATH, telemetry cwd via cygpath, pwsh exit propagation)
 
-**Previous:** v0.3.0 — "Testing + Telemetry" (2026-05-25) — 7 phases, 22 plans
+**Previous:** v0.4.0 — "Distribution + Ecosystem" (2026-05-26) — 9 phases, 23 plans
 
 ## Constraints
 
@@ -120,11 +107,16 @@ and verify a correct, safe harness.
 | Docker base: debian:bookworm-slim (not Alpine) | musl libc breaks optional Go/Rust tools | v0.4.0 Phase 14 |
 | Homebrew: separate `mohandoz/homebrew-conjure` tap repo | Standard tap pattern; formula pinned to tagged tarball SHA256 only | v0.4.0 Phase 13 |
 | release.yml: 4-job structure (ci-gate → release → docker + homebrew parallel) | Docker failure must not block Homebrew and vice versa | v0.4.0 Phase 15.1 |
-| `--to <org/repo>` for publish-skill uses TARGET_REPO env (fragile) | Positional arg refactor deferred; functional for v0.4.0 | Tech debt, v0.5.0 |
+| `--to <org/repo>` for publish-skill uses TARGET_REPO env (fragile) | Positional arg refactor deferred; functional for v0.4.0 | ✓ Resolved — positional `$2`, TARGET_REPO deprecated (DEBT-02, v0.5.0) |
+| `conjure check`: sha256 3-way classifier, no `git merge-file` at detection time | Read-only drift detection must be cheap and side-effect-free | ✓ Good — DRIFT-01/02, v0.5.0 |
+| `conjure resolve`: guided line-by-line prompt, fd-3 stdin isolation, non-TTY → exit 2 | TUI deferred; exit-2 (not 1) matches hook convention for non-interactive | ✓ Good — RESOLVE-01/02, v0.5.0 |
+| `conjure update --pr`: deterministic branch (sha256 of kit version), idempotent via `gh pr list` | Re-runs must not open duplicate PRs | ✓ Good — AUTPR-01, v0.5.0 |
+| `conjure.ps1` is a shim (Git Bash → WSL → exit 2), not a PowerShell port | No subcommand logic duplicated; one source of truth | ✓ Good — WIN-01, v0.5.0 |
+| Test sandbox resets PATH but must resolve git/jq/python3 dirs dynamically | Hardcoded /usr/bin drops tools on Git Bash (usrmerge, /mingw64) | ⚠️ Revisit — fixed post-close; cross-platform test hygiene needs ongoing care |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-05-26 — v0.5.0 milestone started — Auto-Update + Healthcheck*
+*Last updated: 2026-05-28 — after v0.5.0 milestone — Auto-Update + Healthcheck*
