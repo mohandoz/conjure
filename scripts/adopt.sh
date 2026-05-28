@@ -429,8 +429,13 @@ update_manifest() {
     exit 2
   fi
   # Parse-check + required-fields {id, op, status} (RESEARCH Open Q3 validation depth).
-  if ! printf '%s' "$step_json" | jq -e 'type == "object" and has("id") and has("op") and has("status")' >/dev/null 2>&1; then
-    echo "✗ adopt.sh: --update-manifest: malformed step — requires object with id, op, status (rejected, not executed)" >&2
+  # WR-05: also assert op ∈ {write, archive, extract} at write time (defense in depth
+  # on the inbound half — apply_step enforces it again on the outbound half, but a
+  # persisted invalid op is a latent confusion for the Phase 23 skill + schema checks).
+  if ! printf '%s' "$step_json" | jq -e '
+      type == "object" and has("id") and has("op") and has("status")
+      and (.op == "write" or .op == "archive" or .op == "extract")' >/dev/null 2>&1; then
+    echo "✗ adopt.sh: --update-manifest: malformed step — requires {id, op∈{write,archive,extract}, status} (rejected, not executed)" >&2
     exit 2
   fi
   manifest_write_atomic '.restructure_steps += [$step]' --argjson step "$step_json"
