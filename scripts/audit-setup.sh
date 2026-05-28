@@ -5,6 +5,10 @@
 
 set -uo pipefail
 
+: "${CONJURE_HOME:="$(cd "$(dirname "$0")/.." && pwd)"}"
+# shellcheck source=lib/caps.sh
+source "${CONJURE_HOME}/lib/caps.sh"
+
 TARGET="${1:-$(pwd)}"
 cd "$TARGET" || { echo "✗ Cannot cd to target: $TARGET"; exit 2; }
 
@@ -23,8 +27,8 @@ echo
 # CLAUDE.md exists and within budget
 if [ -f CLAUDE.md ]; then
   LINES=$(wc -l < CLAUDE.md | tr -d ' ')
-  if [ "$LINES" -le 100 ]; then ok "CLAUDE.md: $LINES lines (≤100)"
-  elif [ "$LINES" -le 200 ]; then warn "CLAUDE.md: $LINES lines (within hard cap but over practical limit)"
+  if [ "$LINES" -le "${CLAUDE_MD_CAP}" ]; then ok "CLAUDE.md: $LINES lines (≤${CLAUDE_MD_CAP})"
+  elif [ "$LINES" -le "${SKILL_MD_CAP}" ]; then warn "CLAUDE.md: $LINES lines (within hard cap but over practical limit)"
   else err "CLAUDE.md: $LINES lines (HARD CAP exceeded — trim)"
   fi
 
@@ -51,7 +55,7 @@ if [ -d .claude/skills ]; then
   while IFS= read -r skill; do
     name=$(basename "$(dirname "$skill")")
     LINES=$(wc -l < "$skill" | tr -d ' ')
-    if [ "$LINES" -gt 200 ]; then warn "Skill '$name': $LINES lines (>200)"; fi
+    if [ "$LINES" -gt "${SKILL_MD_CAP}" ]; then warn "Skill '$name': $LINES lines (>${SKILL_MD_CAP})"; fi
 
     # Check frontmatter
     if ! head -10 "$skill" | grep -q '^name:'; then
@@ -75,7 +79,7 @@ if [ -d .claude/agents ]; then
   while IFS= read -r agent; do
     name=$(basename "$agent" .md)
     LINES=$(wc -l < "$agent" | tr -d ' ')
-    if [ "$LINES" -gt 80 ]; then warn "Agent '$name': $LINES lines (>80)"; fi
+    if [ "$LINES" -gt "${AGENT_MD_CAP}" ]; then warn "Agent '$name': $LINES lines (>${AGENT_MD_CAP})"; fi
   done < <(find .claude/agents -maxdepth 1 -name '*.md')
 else
   warn ".claude/agents/ missing"
