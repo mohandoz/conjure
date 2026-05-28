@@ -86,6 +86,11 @@ _v0.6.0 "Safe Brownfield Adoption" requirements being defined via `/gsd-new-mile
 
 ## Current State
 
+**In progress:** v0.6.0 — "Safe Brownfield Adoption"
+
+- Phase 21 (Foundation Libs + Inventory) complete (2026-05-28) — `lib/caps.sh`, `lib/log.sh`, `lib/snapshot.sh`, `lib/inventory.sh` (6-bucket classifier + `adopt-manifest.json` emitter), `mutate_archive` (copy→sha256-verify→rm→ledger), finalized `adopt-manifest.schema.json` (draft-07); INV-01..04, SAFE-03, ADOPT-03 verified (15/15 must-haves); 359 test assertions green
+- Next: Phase 22 — `conjure adopt` CLI core + rollback
+
 **Shipped:** v0.5.0 — "Auto-Update + Healthcheck" (2026-05-28)
 
 - 11/11 requirements satisfied across 5 phases, 10 plans
@@ -131,4 +136,4 @@ _v0.6.0 "Safe Brownfield Adoption" requirements being defined via `/gsd-new-mile
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-05-28 — v0.6.0 milestone started — Safe Brownfield Adoption*
+*Last updated: 2026-05-28 — Phase 21 complete (Foundation Libs + Inventory) — v0.6.0 Safe Brownfield Adoption*
