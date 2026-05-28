@@ -2774,6 +2774,25 @@ else
   else
     fail "apply-step: write op did not change CLAUDE.md (D-05/D-08)"
   fi
+  # CR-01: the applied dest must BYTE-MATCH the staged source (trailing newline and
+  # all). The old mutate_write "$(cat src)" stripped the trailing newline, so the
+  # dest never byte-matched the staging content — a check on "sha changed" alone
+  # (above) passes despite that corruption. cmp -s catches the regression.
+  if cmp -s "$P22_AS_TARGET/.conjure-adopt-state/staging/CLAUDE.md" "$P22_AS_TARGET/CLAUDE.md"; then
+    pass "apply-step: write op dest byte-matches staged source (trailing newline preserved) (CR-01/D-07)"
+  else
+    fail "apply-step: write op dest does NOT byte-match staged source — content corrupted (CR-01/D-07)"
+  fi
+  # CR-01: the recorded mutated[].after sha must equal the actual on-disk dest hash
+  # (a corrupted write would record the hash of the corrupted file vs the staged src).
+  P22_AS_STATE="$P22_AS_TARGET/.conjure-adopt-state/state.json"
+  P22_AS_REC_AFTER="$(jq -r '.mutated[] | select(.path=="CLAUDE.md") | .after' "$P22_AS_STATE" 2>/dev/null | tail -1)"
+  P22_AS_REAL_AFTER="$(p22_sha "$P22_AS_TARGET/CLAUDE.md" 2>/dev/null || echo NA)"
+  if [ -n "$P22_AS_REC_AFTER" ] && [ "$P22_AS_REC_AFTER" = "$P22_AS_REAL_AFTER" ]; then
+    pass "apply-step: recorded mutated[].after sha == on-disk dest sha (CR-01/SAFE-04)"
+  else
+    fail "apply-step: recorded after-sha '$P22_AS_REC_AFTER' != on-disk '$P22_AS_REAL_AFTER' (CR-01/SAFE-04)"
+  fi
   if jq -e '.restructure_steps[] | select(.id=="step-1") | .status == "applied"' \
        "$P22_AS_TARGET/adopt-manifest.json" >/dev/null 2>&1; then
     pass "apply-step: step-1 marked status: applied in manifest (D-05/D-08)"
@@ -2785,6 +2804,60 @@ else
   else
     fail "apply-step: no RESTRUCTURE entry in RESTRUCTURE-LOG.md (D-05/SAFE-07)"
   fi
+
+  # IN-03 / CR-02: the `extract` op = write-NEW + archive-OLD composed. It must (a)
+  # archive the OLD dest content into .conjure-archive-*/, (b) write the NEW staging
+  # content at dest, and (c) consume the staging file correctly (write copies, so the
+  # staging source survives). Use an isolated sub-target with an inline extract step so
+  # the assertions do not depend on the shared fixture manifest (which has only
+  # write/archive steps). Before CR-02 the op archived the NEW staging source (and
+  # mutate_archive deleted it), silently losing the original dest content.
+  P22_EX_TARGET="$(mktemp -d)"
+  mkdir -p "$P22_EX_TARGET/.conjure-adopt-state/staging"
+  printf 'OLD-DEST-ORIGINAL-CONTENT\n' > "$P22_EX_TARGET/README.md"
+  P22_EX_OLD_SHA="$(p22_sha "$P22_EX_TARGET/README.md" 2>/dev/null || echo NA-old)"
+  printf 'NEW-CONDENSED-CONTENT\n' > "$P22_EX_TARGET/.conjure-adopt-state/staging/README.md"
+  P22_EX_STAGE_SHA="$(p22_sha "$P22_EX_TARGET/.conjure-adopt-state/staging/README.md" 2>/dev/null || echo NA-stage)"
+  printf '%s\n' '{"schema_version":"1","restructure_steps":[{"id":"step-extract","op":"extract","dest":"README.md","src":".conjure-adopt-state/staging/README.md","status":"proposed"}]}' \
+    > "$P22_EX_TARGET/adopt-manifest.json"
+  DRY_RUN=0 CONJURE_ADOPT_APPLY_STEP=step-extract CONJURE_HOME="$CONJURE_HOME" \
+    bash "$P22_ADOPT_SH" --apply-step step-extract "$P22_EX_TARGET" >/dev/null 2>&1
+  # (b) NEW staging content landed at dest.
+  P22_EX_DEST_SHA="$(p22_sha "$P22_EX_TARGET/README.md" 2>/dev/null || echo NA-dest)"
+  if [ "$P22_EX_DEST_SHA" = "$P22_EX_STAGE_SHA" ]; then
+    pass "apply-step extract: NEW staging content written to dest (byte-match) (IN-03/CR-02/D-08)"
+  else
+    fail "apply-step extract: dest does not match staged NEW content ($P22_EX_DEST_SHA != $P22_EX_STAGE_SHA) (IN-03/CR-02/D-08)"
+  fi
+  # (a) OLD dest content landed in .conjure-archive-*/ (NOT the new staging content).
+  P22_EX_ARCHIVED="$(find "$P22_EX_TARGET" -path '*/.conjure-archive-*' -type f -name 'README.md' 2>/dev/null | head -1)"
+  P22_EX_ARCH_SHA="$(p22_sha "$P22_EX_ARCHIVED" 2>/dev/null || echo NA-arch)"
+  if [ -n "$P22_EX_ARCHIVED" ] && [ "$P22_EX_ARCH_SHA" = "$P22_EX_OLD_SHA" ]; then
+    pass "apply-step extract: OLD dest content preserved in .conjure-archive-*/ (IN-03/CR-02/D-08)"
+  else
+    fail "apply-step extract: OLD dest content NOT archived (found '$P22_EX_ARCHIVED' sha $P22_EX_ARCH_SHA != old $P22_EX_OLD_SHA) (IN-03/CR-02/D-08)"
+  fi
+  # (a-neg) the archive must NOT contain the new staging content (the pre-CR-02 bug).
+  if [ "$P22_EX_ARCH_SHA" != "$P22_EX_STAGE_SHA" ]; then
+    pass "apply-step extract: archive holds the OLD content, NOT the new staging source (IN-03/CR-02)"
+  else
+    fail "apply-step extract: archive wrongly holds the NEW staging content — original lost (IN-03/CR-02)"
+  fi
+  # (c) staging source survives (write copies, never moves/deletes the staging file).
+  if [ -f "$P22_EX_TARGET/.conjure-adopt-state/staging/README.md" ]; then
+    pass "apply-step extract: staging source consumed by copy (still present) (IN-03/CR-02/D-07)"
+  else
+    fail "apply-step extract: staging source was destroyed by extract (IN-03/CR-02/D-07)"
+  fi
+  # extract step marked applied.
+  if jq -e '.restructure_steps[] | select(.id=="step-extract") | .status == "applied"' \
+       "$P22_EX_TARGET/adopt-manifest.json" >/dev/null 2>&1; then
+    pass "apply-step extract: step-extract marked status: applied (IN-03/D-05)"
+  else
+    fail "apply-step extract: step-extract status not set to applied (IN-03/D-05)"
+  fi
+  rm -rf "$P22_EX_TARGET"
+
   # --update-manifest: append a valid step, then reject a malformed one ({}) with exit 2.
   P22_UM_VALID='{"id":"step-3","op":"archive","src":"docs/OLD.md","status":"proposed"}'
   printf '%s\n' "$P22_UM_VALID" | \
