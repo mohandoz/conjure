@@ -1,0 +1,62 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-05-28T14:23:00Z",
+  "conjure_version": "0.6.0",
+  "target": "/abs/path/to/repo",
+  "snapshot_path": "",
+  "summary": {
+    "total_files": 2,
+    "scan_capped": false,
+    "total_found": 2,
+    "core": 1,
+    "skill": 0,
+    "agent": 0,
+    "planning-doc": 0,
+    "reference-doc": 1,
+    "unknown": 1
+  },
+  "files": [
+    {
+      "path": "CLAUDE.md",
+      "classification": "core",
+      "line_count": 142,
+      "size_bytes": 6400,
+      "size_cap_exceeded": true,
+      "size_cap_limit": 100,
+      "linked_from": []
+    },
+    {
+      "path": "docs/OLD.md",
+      "classification": "reference-doc",
+      "line_count": 30,
+      "size_bytes": 900,
+      "size_cap_exceeded": false,
+      "size_cap_limit": null,
+      "linked_from": []
+    }
+  ],
+  "size_cap_violations": [
+    {
+      "path": "CLAUDE.md",
+      "line_count": 142,
+      "cap": 100,
+      "overage": 42
+    }
+  ],
+  "harness_missing_layers": [],
+  "restructure_steps": [
+    {
+      "id": "step-1",
+      "op": "write",
+      "dest": "CLAUDE.md",
+      "src": ".conjure-adopt-state/staging/CLAUDE.md",
+      "status": "proposed"
+    },
+    {
+      "id": "step-2",
+      "op": "archive",
+      "src": "docs/OLD.md",
+      "status": "proposed"
+    }
+  ]
+}
