@@ -1960,9 +1960,10 @@ else
   trap - EXIT
 
   # INV-03: symlink skip — symlink-target.md must NOT appear in files[]
+  # cp -a preserves symlinks (cp -r dereferences them, losing the test invariant)
   P21_INV_WORK="$(mktemp -d)"
   trap 'rm -rf "$P21_INV_WORK"' EXIT
-  cp -r "$BF_FIXTURE/." "$P21_INV_WORK/target/" 2>/dev/null || true
+  cp -a "$BF_FIXTURE/." "$P21_INV_WORK/target/" 2>/dev/null || cp -r "$BF_FIXTURE/." "$P21_INV_WORK/target/" 2>/dev/null || true
   P21_MANIFEST="$P21_INV_WORK/adopt-manifest.json"
   (
     source "$CONJURE_HOME/lib/mutate.sh"
