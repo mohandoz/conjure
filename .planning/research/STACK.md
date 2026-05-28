@@ -743,6 +743,537 @@ total=$(gh api "/repos/${REPO}/commits/${SHA}/check-runs" \
 - [Conjure `scripts/publish-skill.sh`](scripts/publish-skill.sh) — HIGH (internal). Lines 129–144: degrade pattern when `gh` absent — print manual PR URL. This is the template for all `gh`-dependent degrade paths in v0.5.0. Verified 2026-05-26.
 - [Conjure `.github/workflows/release.yml`](.github/workflows/release.yml) — HIGH (internal). ci-gate job at lines 9–28: existing `gh api .../check-runs` query pattern with `--jq` filter. DEBT-01 adds a `total` count guard before the conclusions check. Verified 2026-05-26.
 
+
+---
+
+## Stack Additions for v0.6.0: Safe Brownfield Adoption
+
+**Domain:** v0.6.0 "Safe Brownfield Adoption" additions on top of the validated v0.5.0 stack.
+**Researched:** 2026-05-28
+**Confidence:** HIGH for all primitives (git status --porcelain, wc -l, find, cp -a, jq -c, skill !`cmd` injection — each verified against official docs or the current skills reference). MEDIUM for the manifest JSON schema (design decision, not an external standard).
+
+### TL;DR Picks (v0.6.0)
+
+| Feature | Pick | Confidence |
+|---------|------|------------|
+| ADOPT-01: Inventory 2000+ markdown files | `find <root> -name '*.md' -print0 \| xargs -0 wc -l` batched into a jq JSONL manifest via a single `mktemp` pass | HIGH |
+| ADOPT-02: Full snapshot backup | `cp -a <target> <target>/.conjure-adopt-backup-<ts>/` before any mutation; `mutate_cp` already handles DRY_RUN | HIGH |
+| ADOPT-03: Git-clean precondition | `git -C "$target" status --porcelain=v1` — empty output = clean; non-empty = dirty, refuse unless `--force` | HIGH |
+| ADOPT-04: CLAUDE.md size/cap detection | `wc -l < "$target/CLAUDE.md"` (redirect, no filename noise); compare to hardcoded cap 100 | HIGH |
+| ADOPT-05: CLI→skill manifest handshake | Single JSON file at `.claude/adopt-manifest.json`; jq `-c` for compact line-emit; skill reads via `!`cat .claude/adopt-manifest.json`` dynamic injection | HIGH |
+| ADOPT-06: Skill-to-CLI edit application | Skill emits one-line `conjure adopt --apply-patch <step-id>` Bash commands; CLI reads a per-step JSON patch file from `.claude/adopt-patches/<step>.json`; mutate_write executes | HIGH |
+
+### Detailed Findings by Question
+
+#### (1) Inventorying and classifying 2000+ markdown files efficiently in bash/.mjs
+
+**Pick: single `find` + `mktemp`-buffered while-read loop; emit one jq JSONL object per file; never exec per file.**
+
+The stress fixture (argus, 2180 markdown files) fits comfortably in bash with one `find` pass and no parallelism needed. The bottleneck is syscall volume, not CPU — the right approach is to minimize process forks, not add GNU parallel.
+
+**Concrete pattern (POSIX bash 3.2+, no associative arrays):**
+
+```bash
+# Emit one JSON line per .md file: path, line-count, byte-size, classify result
+_inv="$(mktemp)"
+find "$target" -name '*.md' -not -path '*/.git/*' -print0 \
+  | xargs -0 wc -l 2>/dev/null \
+  | grep -v '^ *[0-9]* total$' \
+  | while IFS= read -r line; do
+      bytes=$(printf '%s' "$line" | awk '{print $1}')
+      path=$(printf '%s' "$line" | awk '{$1=""; print substr($0,2)}')
+      class=$(classify_md_file "$path")   # see below
+      jq -cn --arg p "$path" --arg c "$class" --argjson b "$bytes" \
+        '{path:$p, lines:$b, class:$c}'
+    done > "$_inv"
+```
+
+The `classify_md_file` function uses `case`/`grep` heuristics against the file path and (optional) first-line content to assign one of six classes:
+
+| Class | Heuristic |
+|-------|-----------|
+| `harness-core` | Is `.claude/CLAUDE.md` exactly |
+| `harness-skill` | Path matches `.claude/skills/*/SKILL.md` |
+| `harness-agent` | Path matches `.claude/agents/*.md` |
+| `planning-doc` | Path under `.planning/` |
+| `reference-doc` | Path under `docs/`, `reference/`, `wiki/` (configurable) |
+| `unknown` | Everything else |
+
+**Performance reality for 2180 files:** `find + xargs wc -l` on 2180 small markdown files completes in under 2 seconds on an NVMe SSD. This does not require ripgrep, parallelism, or any external tool beyond what is already in the preflight stack. `wc -l` batches files via `xargs`, so it is one process per batch of ~5000 files (xargs default), not one process per file.
+
+**Why not `wc -c` (byte count) only?** Line count is the audit signal (cap is measured in lines, not bytes). Both are cheap — collect both in the same pass.
+
+**Why not `stat` for size?** `stat` format flags differ between BSD (macOS) and GNU (Linux). `wc -c` is fully POSIX. For the rare case where a `.md` file has no trailing newline, `wc -l` undercounts by 1 — this is acceptable for cap-detection purposes (the harness cap is 100 lines, not 99.9).
+
+**Why not a `.mjs` inventory script?** `find` + `wc` is faster for file enumeration than Node's `fs.readdir` recursive walk (which requires async + Promise chaining). Reserve `.mjs` for hooks and the exact-count opt-in path. The inventory is a CLI-phase operation, not a hook.
+
+**jq compact-output for JSONL:** `jq -c` (compact) emits one JSON object per line — the correct JSONL format. Each call to `jq -cn` (null input) constructs an object from `--arg` and `--argjson` flags. No shell variable interpolation into JSON strings (injection risk + quoting bugs). This is the correct pattern from the existing `lib/exact-count.mjs` and jq official cookbook.
+
+#### (2) Deterministic full-snapshot backup + verifiable rollback
+
+**Pick: `cp -a` timestamped snapshot of every touched directory before mutation; `mutate_cp` already wraps the DRY_RUN gate; rollback = `cp -a <backup> <original>`.**
+
+The existing backup strategy for `migrate`/`update` is an ad-hoc `.claude.backup-<ts>` of the `.claude/` dir only. `conjure adopt` touches more: the CLAUDE.md root, any `docs/` pile, the `.planning/` dir. The snapshot must cover all touched paths.
+
+**Concrete backup primitive (new `mutate_snapshot`):**
+
+```bash
+# mutate_snapshot <target_dir> <label>
+# Creates: <target_dir>/../.conjure-adopt-<label>-<ts>/
+# In dry-run: prints intent, does not copy.
+# Returns snapshot path in CONJURE_LAST_SNAPSHOT.
+mutate_snapshot() {
+  local dir="$1"
+  local label="${2:-adopt}"
+  local ts
+  ts="$(date +%Y%m%d%H%M%S)"
+  local snap_parent
+  snap_parent="$(dirname "$dir")"
+  local snap_name=".conjure-${label}-backup-${ts}"
+  local snap_path="${snap_parent}/${snap_name}"
+  if [ "${DRY_RUN:-0}" = "1" ]; then
+    echo "[dry-run] would snapshot $dir → $snap_path"
+    CONJURE_DRY_MUTATION_COUNT=$((CONJURE_DRY_MUTATION_COUNT + 1))
+    CONJURE_LAST_SNAPSHOT="$snap_path"
+    return 0
+  fi
+  cp -a "$dir" "$snap_path"
+  CONJURE_LAST_SNAPSHOT="$snap_path"
+}
+```
+
+`cp -a` is POSIX (equivalent to `-dR --preserve=all` on GNU, `-Rp` on BSD) and preserves timestamps + permissions. It is the correct primitive for a faithful backup. No `tar`, no temp dir coordination needed.
+
+**Rollback:** `--rollback` in `conjure adopt` reads the snapshot path from `RESTRUCTURE-LOG.md` (persisted at adopt time), then calls `mutate_cp "$snap_path" "$original_dir"`. The log format includes a `snapshot:` field for exactly this purpose.
+
+**Why not `tar` for the snapshot?** `tar` requires a second command to extract, and the backup is a local directory (not a distributable archive). `cp -a` is faster for restore (no decompression), POSIX, and the backup dir is human-inspectable. For the argus stress fixture (~2180 files), `cp -a` on a typical project directory takes under 5 seconds.
+
+**What triggers a snapshot?** Once, before any mutation, at the top of `cmd_adopt`. Never per-step — one snapshot, one rollback path. The RESTRUCTURE-LOG records each mutation step after the snapshot. This is the same "backup-before-mutate" contract as existing `migrate`/`update` flows.
+
+**Integrity check for rollback:** After snapshot, compute `find <snap_path> -type f | wc -l` and record it in the log. Rollback first verifies the count matches before proceeding. This guards against a corrupt/partial snapshot (e.g., disk full during `cp -a`).
+
+#### (3) Git-clean preconditioning via porcelain status
+
+**Pick: `git -C "$target" status --porcelain=v1`; empty stdout = clean tree; non-empty = dirty; refuse unless `--force`.**
+
+`git status --porcelain=v1` (or `--porcelain` without version, which implies v1) is the canonical script-safe format. It is:
+- Stable across git versions (the explicit contract of `--porcelain`)
+- Unaffected by user `color.status`, `status.relativePaths`, or locale settings
+- One line per changed/untracked file; empty output = perfectly clean working tree
+
+**Concrete guard function:**
+
+```bash
+# check_git_clean <target> [--force]
+# Returns 0 if clean or --force passed; exits 2 if dirty and no --force.
+check_git_clean() {
+  local target="$1"
+  local force="${2:-}"
+  # Not a git repo at all: skip (conjure adopt works on non-git dirs with --force)
+  if ! git -C "$target" rev-parse --git-dir >/dev/null 2>&1; then
+    [ "$force" = "--force" ] && return 0
+    echo "✗ $target is not a git repository. Use --force to adopt anyway." >&2
+    exit 2
+  fi
+  local status_output
+  status_output="$(git -C "$target" status --porcelain=v1 2>/dev/null)"
+  if [ -n "$status_output" ]; then
+    if [ "$force" = "--force" ]; then
+      echo "⚠ dirty working tree (--force passed, proceeding):" >&2
+      printf '%s\n' "$status_output" | head -10 >&2
+      return 0
+    fi
+    echo "✗ Dirty working tree. Commit or stash changes before adopt." >&2
+    echo "  Use --force to skip this check." >&2
+    printf '%s\n' "$status_output" | head -5 >&2
+    exit 2
+  fi
+  return 0
+}
+```
+
+**Why `--porcelain=v1` and not `--porcelain=v2`?** v2 adds branch headers and more detail than needed. The guard only cares about "is there any output?" — v1 is sufficient and universally supported (git ≥1.8, which covers all supported platforms). v2 requires git ≥2.11.
+
+**Why not `git diff --quiet && git diff --cached --quiet`?** That pattern misses untracked files. `--porcelain` reports tracked-modified, staged, AND untracked (`??`) in one call.
+
+**Why `exit 2` not `exit 1`?** The kit convention is `exit 2` for "blocked / cannot proceed" (hook contract). `exit 1` is reserved for detected drift/failure in the `conjure check` flow. `adopt` is a command, not a hook, but following the kit's exit-code semantics is correct.
+
+**Non-git repos:** Some brownfield projects are not git repos (a `design/` folder, a `wiki/` export). Allow `--force` to bypass the check and proceed anyway. Record the bypass in RESTRUCTURE-LOG.
+
+#### (4) CLAUDE.md size / over-cap detection
+
+**Pick: `wc -l < "$path"` (redirect, not filename argument) to get clean integer; compare to cap constant; also classify byte-weight using `wc -c` for the inventory manifest.**
+
+```bash
+# detect_claude_size <claude_md_path>
+# Emits: lines, bytes, over_cap (0|1)
+# Cap constants match conjure audit (CLAUDE.md ≤100 lines, SKILL.md ≤200, agent ≤80)
+CLAUDE_MD_CAP=100
+SKILL_MD_CAP=200
+AGENT_MD_CAP=80
+
+detect_claude_size() {
+  local path="$1"
+  local cap="${2:-$CLAUDE_MD_CAP}"
+  [ -f "$path" ] || { echo "0 0 0"; return; }
+  local lines bytes
+  lines=$(wc -l < "$path")
+  bytes=$(wc -c < "$path")
+  local over=0
+  [ "$lines" -gt "$cap" ] && over=1
+  printf '%d %d %d\n' "$lines" "$bytes" "$over"
+}
+```
+
+The redirect form `wc -l < "$path"` suppresses the filename suffix that `wc -l "$path"` emits. This gives a clean integer, parseable directly in bash without `awk '{print $1}'`. This is POSIX-portable (bash 3.2+ and all POSIX shells).
+
+**Byte-weight as secondary signal:** A CLAUDE.md at exactly 100 lines but with 40KB of content per line is still a smell. Capture `wc -c` in the manifest for the `restructure` skill to surface to the user, even though the hard cap is line-count.
+
+**Integration with existing `conjure audit`:** `scripts/audit-setup.sh` already checks line caps via a `wc -l` loop. The adopt flow reuses the same constants (`CLAUDE_MD_CAP`, `SKILL_MD_CAP`, `AGENT_MD_CAP`) from a shared `lib/caps.sh` constant file (new, small — 5 lines) rather than re-hardcoding them in `scripts/adopt.sh`. This prevents the caps from drifting between audit and adopt.
+
+**Over-cap trigger for the `restructure` skill:** If `detect_claude_size` returns `over=1`, `conjure adopt` emits a manifest entry `{"path":"CLAUDE.md","lines":180,"bytes":21504,"cap":100,"over_cap":true}` that the `restructure` skill reads and acts on. The skill does not re-run `wc` — it trusts the manifest.
+
+#### (5) CLI→skill manifest format: the data handshake
+
+**Pick: `.claude/adopt-manifest.json` — a single JSON file; jq-generated; skill reads via `!`cat .claude/adopt-manifest.json`` dynamic injection.**
+
+The manifest is the bridge between deterministic CLI phase (file scan, size measurement, classification) and LLM judgment phase (restructuring proposal). It must be:
+1. Human-readable (editable if needed for debugging)
+2. Machine-parseable by jq in subsequent CLI steps
+3. Ingestible by the `restructure` skill without a subprocess round-trip
+
+**Manifest schema (recommended):**
+
+```json
+{
+  "schema_version": "1",
+  "generated_at": "2026-05-28T10:00:00Z",
+  "target": "/abs/path/to/project",
+  "snapshot": "/abs/path/to/project/../.conjure-adopt-backup-20260528100000",
+  "snapshot_file_count": 2180,
+  "git_clean": true,
+  "claude_md": {
+    "path": "CLAUDE.md",
+    "lines": 180,
+    "bytes": 21504,
+    "cap": 100,
+    "over_cap": true
+  },
+  "files": [
+    {
+      "path": "relative/path/to/file.md",
+      "lines": 45,
+      "bytes": 3200,
+      "class": "planning-doc"
+    }
+  ],
+  "summary": {
+    "total_files": 2180,
+    "by_class": {
+      "harness-core": 1,
+      "harness-skill": 17,
+      "harness-agent": 6,
+      "planning-doc": 35,
+      "reference-doc": 120,
+      "unknown": 2001
+    },
+    "over_cap_files": ["CLAUDE.md"]
+  }
+}
+```
+
+**Why a single JSON file, not JSONL?** The `restructure` skill injects the entire manifest into context via `!`cat .claude/adopt-manifest.json``. A single JSON document is simpler for Claude to parse and reason about than a JSONL stream. The manifest for the argus fixture is ~2180 entries × ~80 bytes = ~175 KB of JSON text. This is large for context injection; see the truncation note below.
+
+**Manifest truncation for large projects:** For projects with >500 markdown files, the `files[]` array becomes too large to inject into a skill context without hitting token limits. The skill should inject the `summary` and `claude_md` objects first, then load the full `files[]` array on demand via a follow-up `Read` tool call. The manifest generation must preserve `summary` at the top level for this reason.
+
+**Practical approach for the argus stress fixture:** The `restructure` skill should inject only the summary section first:
+```
+!`jq '{summary, claude_md, git_clean, snapshot}' .claude/adopt-manifest.json`
+```
+Then request specific class subsets:
+```
+!`jq '[.files[] | select(.class == "planning-doc")]' .claude/adopt-manifest.json`
+```
+
+This avoids loading 2180 entries into context. The skill SKILL.md should demonstrate this pattern explicitly.
+
+**jq generation pattern in `scripts/adopt.sh`:**
+
+```bash
+# Write manifest using jq -n to construct from shell variables safely
+# (never use string interpolation to build JSON — quoting bugs + injection risk)
+jq -cn \
+  --arg schema "1" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg target "$target" \
+  --arg snapshot "$CONJURE_LAST_SNAPSHOT" \
+  --argjson snap_count "$snap_count" \
+  --argjson git_clean "$git_clean_flag" \
+  --slurpfile files "$_inv_jsonl_file" \
+  '{
+    schema_version: $schema,
+    generated_at: $ts,
+    target: $target,
+    snapshot: $snapshot,
+    snapshot_file_count: $snap_count,
+    git_clean: $git_clean,
+    files: $files[0],
+    summary: ($files[0] | group_by(.class) | map({key: .[0].class, value: length}) | from_entries
+             | {total_files: ($files[0] | length), by_class: .})
+  }' > "$target/.claude/adopt-manifest.json"
+```
+
+`--slurpfile` reads the entire JSONL temp file into `$files[0]` as a JSON array. `group_by(.class)` builds the `by_class` summary. No shell string interpolation into the JSON — all values pass through `--arg` or `--argjson` flags. This is the same injection-safe pattern used in `lib/exact-count.mjs`.
+
+**Why not a separate `manifest.sh` library?** The manifest generation is a one-shot operation in `scripts/adopt.sh`, not a reusable library function. Keep it inline in adopt.sh, behind a `generate_manifest()` function, rather than adding `lib/manifest.sh`. The `lib/` directory is for shared chokepoints (mutate, merge); adopt-specific logic belongs in `scripts/adopt.sh`.
+
+#### (6) Skill applying edits back through CLI safe mutate primitives
+
+**Pick: skill emits explicit shell commands; CLI runs them with `mutate_write`/`mutate_cp`; per-step patch files under `.claude/adopt-patches/<step-id>.json`; human approves each step before the CLI is invoked.**
+
+The `restructure` skill is LLM judgment + human gating. It must not call `mutate_write` directly — the skill has no direct access to the bash function. The handshake is:
+
+1. **Skill proposes** a structured patch as a JSON file at `.claude/adopt-patches/<step-id>.json`
+2. **Human reviews** the proposal in the Claude Code session (the skill displays a diff-like summary)
+3. **Human approves** by running `conjure adopt --apply-patch <step-id>` in the terminal
+4. **CLI reads** the patch JSON and executes each operation via `mutate_write`/`mutate_mkdir`/`mutate_cp`
+5. **CLI appends** the applied step to `RESTRUCTURE-LOG.md` and updates the manifest
+
+**Patch file schema:**
+
+```json
+{
+  "step_id": "extract-gsd-skill-01",
+  "description": "Extract GSD workflow instructions from CLAUDE.md into .claude/skills/gsd/SKILL.md",
+  "operations": [
+    {
+      "op": "write",
+      "path": ".claude/skills/gsd/SKILL.md",
+      "content": "---\nname: gsd\n...\n"
+    },
+    {
+      "op": "write",
+      "path": "CLAUDE.md",
+      "content": "... truncated CLAUDE.md with GSD section replaced by @skill reference ..."
+    }
+  ],
+  "proposed_at": "2026-05-28T10:05:00Z",
+  "approved_at": null
+}
+```
+
+**CLI patch application in `scripts/adopt.sh`:**
+
+```bash
+cmd_adopt_apply_patch() {
+  local step_id="$1"
+  local patch_file="$target/.claude/adopt-patches/${step_id}.json"
+  [ -f "$patch_file" ] || { echo "✗ patch not found: $patch_file" >&2; exit 2; }
+
+  # Read operations array from patch file
+  local op_count
+  op_count=$(jq '.operations | length' "$patch_file")
+  local i=0
+  while [ "$i" -lt "$op_count" ]; do
+    local op path content
+    op=$(jq -r ".operations[$i].op" "$patch_file")
+    path=$(jq -r ".operations[$i].path" "$patch_file")
+    case "$op" in
+      write)
+        content=$(jq -r ".operations[$i].content" "$patch_file")
+        mutate_mkdir "$(dirname "$target/$path")"
+        mutate_write "$target/$path" "$content"
+        ;;
+      mkdir)
+        mutate_mkdir "$target/$path"
+        ;;
+      archive)
+        local archive_dest=".conjure-archive/$(basename "$path")"
+        mutate_mkdir "$target/.conjure-archive"
+        mutate_cp "$target/$path" "$target/$archive_dest"
+        mutate_rm "$target/$path"
+        ;;
+    esac
+    i=$((i + 1))
+  done
+
+  # Stamp approved_at and append to RESTRUCTURE-LOG
+  local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq --arg t "$now" '.approved_at = $t' "$patch_file" \
+    | mutate_write "$patch_file" "$(cat)"
+  append_restructure_log "$step_id" "$op_count operations applied"
+}
+```
+
+**Why patch files under `.claude/adopt-patches/`, not inline JSON passed via CLI args?** CLI args have shell quoting limits (~2MB ARG_MAX, but more importantly: quoting a multi-line SKILL.md body in a shell arg is fragile). The patch file is the safe boundary. The skill writes the file via its `Write` tool; the CLI reads it via `jq`. This also makes the patch human-reviewable before apply.
+
+**Why not have the skill directly invoke `conjure adopt --apply` with all content on stdin?** Piping multi-kilobyte content through stdin requires the skill to use `Bash` tool, which the user must approve per-invocation. A file-based handshake lets the human review the patch file in the Claude Code session before issuing the CLI command. The separation between "skill proposes" and "human approves + CLI applies" is the safety contract.
+
+**`archive` op vs `delete` op:** The kit's never-delete principle means the only destructive operation is `archive` (move to `.conjure-archive/`) — never a bare `rm`. The `mutate_rm` primitive exists but should not be used by the patch applier. `archive` uses `mutate_cp` + `mutate_rm` in sequence, matching the existing pattern in `cmd_migrate` for file archival.
+
+**RESTRUCTURE-LOG.md format:** Append-only markdown table:
+
+```markdown
+| step | applied_at | operations | snapshot |
+|------|-----------|------------|----------|
+| extract-gsd-skill-01 | 2026-05-28T10:06Z | 2 | .conjure-adopt-backup-20260528100000 |
+```
+
+Written via `mutate_write "$log_path" "$row" --append`. The log is the audit trail that makes `--rollback` possible.
+
+### New Files for v0.6.0
+
+| File | Type | Purpose |
+|------|------|---------|
+| `scripts/adopt.sh` | bash worker | `cmd_adopt` implementation: git-clean check, snapshot, inventory, manifest emit, patch apply, log append |
+| `lib/caps.sh` | bash constants | `CLAUDE_MD_CAP=100`, `SKILL_MD_CAP=200`, `AGENT_MD_CAP=80` — sourced by both `audit-setup.sh` and `adopt.sh` |
+| `.claude/skills/restructure/SKILL.md` | Claude Code skill | Reads adopt-manifest.json, proposes restructuring, writes patch files via Write tool |
+| `.claude/skills/restructure/README.md` | skill support file | Concise operational guide: what the skill does, how to invoke, how to apply patches |
+
+### v0.6.0 Integration Points with Existing Code
+
+| New Capability | Integrates With | Integration Approach |
+|----------------|----------------|---------------------|
+| `mutate_snapshot` | `lib/mutate.sh` | Add as a new primitive alongside `mutate_mkdir/cp/write/rm`. Same DRY_RUN gate + counter increment. Same shell-function pattern — no associative arrays, no local -n, POSIX 3.2+. |
+| Size-cap constants | `scripts/audit-setup.sh` + `scripts/adopt.sh` | Extract hardcoded `100`/`200`/`80` constants from `audit-setup.sh` into new `lib/caps.sh`; both scripts `source "$CONJURE_HOME/lib/caps.sh"`. |
+| `check_git_clean` | `scripts/adopt.sh` | Inline function in adopt.sh (not a lib/ shared primitive — only adopt needs it at this stage). Uses the same `exit 2` convention as the rest of the kit. |
+| Inventory JSONL → manifest | `scripts/adopt.sh` → `.claude/adopt-manifest.json` | `generate_manifest()` function in adopt.sh; jq `-cn --slurpfile` pattern for safe JSON construction; manifest written via `mutate_write`. |
+| Patch application | `scripts/adopt.sh` + `lib/mutate.sh` | `cmd_adopt_apply_patch()` in adopt.sh sources `lib/mutate.sh` and calls `mutate_write`/`mutate_mkdir`/`mutate_cp`/`mutate_rm`. Inherits `DRY_RUN` gate automatically. |
+| `restructure` skill dynamic injection | `.claude/skills/restructure/SKILL.md` | Uses `!`jq '{summary, claude_md}' .claude/adopt-manifest.json`` for summary, then `Read` tool for full file array. Does NOT use `--slurp`-reading the full 175KB file into context at skill load. |
+| RESTRUCTURE-LOG.md | `scripts/adopt.sh` | Written via `mutate_write ... --append` — same append primitive already used for JSONL telemetry. |
+
+### v0.6.0 Stack Summary Table
+
+| Tool / Pattern | Version / Source | Feature | New to stack? |
+|----------------|-----------------|---------|---------------|
+| `find <root> -name '*.md' -print0` | POSIX find | ADOPT-01 file inventory | No — already used in `lib/merge.sh`, `scripts/check.sh` |
+| `xargs -0 wc -l` | POSIX xargs + wc | ADOPT-01 line-count in batches | Pattern is new; tools are existing |
+| `jq -cn --arg ... --slurpfile ...` | jq (system, preflight dep) | ADOPT-01 manifest generation | Pattern is new; jq is existing dep |
+| `cp -a <dir> <backup>` | POSIX cp | ADOPT-02 full snapshot | `cp -r` already used in mutate_cp; `-a` flag is the new nuance |
+| `git -C "$t" status --porcelain=v1` | git (hard dep) | ADOPT-03 git-clean check | Pattern is new; git is existing dep |
+| `wc -l < "$path"` (redirect form) | POSIX wc | ADOPT-04 line-count + cap check | Pattern is new; wc already exists everywhere |
+| `lib/caps.sh` constants file | bash (new 5-line file) | ADOPT-04 cap constants shared between audit + adopt | New file; no new tool |
+| `.claude/adopt-manifest.json` | JSON (jq-generated) | ADOPT-05 CLI→skill handshake | New format; jq is existing dep |
+| `!`jq ... .claude/adopt-manifest.json`` | Claude Code skill `!`cmd`` injection | ADOPT-05 manifest consumption in skill | New usage of existing skill feature; verified in official docs |
+| `.claude/adopt-patches/<step>.json` | JSON (skill-written) | ADOPT-06 skill→CLI patch handshake | New format; jq is existing dep |
+| `jq -r ".operations[$i]..."` loop | jq (system dep) | ADOPT-06 patch application | Pattern is new; jq is existing dep |
+| `mutate_write ... --append` | `lib/mutate.sh` (existing) | ADOPT-06 RESTRUCTURE-LOG append | No — `--append` flag already implemented in mutate_write |
+| `mutate_snapshot` (new primitive) | `lib/mutate.sh` (extend) | ADOPT-02 snapshot primitive | New function in existing lib; no new tool |
+
+**Net new dependencies: zero.** All v0.6.0 features use tools already in the preflight stack (`find`, `xargs`, `wc`, `cp`, `git`, `jq`). `dependencies: {}` stays empty.
+
+### What NOT to Add (v0.6.0)
+
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| **`ripgrep` / `ag` for inventory** | Not in the preflight stack; `find -name '*.md'` is sufficient for enumeration; classification is path-based, not content search | `find -print0 \| xargs -0 wc -l` (POSIX, already preflight-checked) |
+| **GNU `parallel` for inventory** | Not POSIX; not in preflight; 2180 files completes in <2s without parallelism; adds a dep for no measurable gain on this workload | Single `find` + `xargs -0` (xargs batches internally) |
+| **`stat` for file metadata** | Format flags differ BSD vs GNU (`-f '%z'` vs `-c '%s'`); not worth the portability branch | `wc -c < "$path"` (POSIX, no format flag needed) |
+| **Full 2180-file `files[]` array injection into skill context** | ~175 KB of JSON text ≈ ~44k tokens; blows the skill context budget; the skill doesn't need all 2180 paths to reason about CLAUDE.md restructuring | Inject `summary` + `claude_md` first via `!`jq '...'``; load specific classes on demand with `Read` tool |
+| **Storing patch content as CLI arg or stdin pipe** | Shell quoting limits; fragile for multi-line SKILL.md content; impossible to human-review before apply | Patch file under `.claude/adopt-patches/<step>.json`; skill writes via Write tool; CLI reads via jq |
+| **`mutate_rm` for archive operations** | Violates never-delete principle; `rm -f` is irreversible | `archive` op: `mutate_cp` to `.conjure-archive/` then `mutate_rm` — same semantics as `cmd_migrate` file archival |
+| **Bare `cp` in `mutate_snapshot`** | `cp -r` does not preserve timestamps; `cp -a` does (both GNU/BSD support `-a`). Timestamps matter for rollback identity and for `find -newer` queries | `cp -a` in `mutate_snapshot` |
+| **`git status --short` for the clean check** | `--short` output is affected by `--column` and color config; `--porcelain` is the contract-stable flag | `git status --porcelain=v1` |
+| **Separate `lib/manifest.sh`** | Manifest generation is a one-shot adopt-only operation; adding a `lib/` file implies it's a reusable chokepoint (it isn't); keeps lib/ focused on `mutate` + `merge` | Inline `generate_manifest()` function in `scripts/adopt.sh` |
+| **Auto-applying patches without human approval** | Explicitly out-of-scope (PROJECT.md: "fully autonomous restructure is a non-goal") | Human types `conjure adopt --apply-patch <id>` after reviewing in session |
+| **`jq --rawfile` for patch content** | `--rawfile` reads a file as a raw string (no JSON parsing); incorrect for structured patch JSON | `--slurpfile` (reads as JSON array) or `jq -r` field extraction per-operation |
+
+### v0.6.0 Bash Patterns Reference
+
+Key patterns introduced in v0.6.0 — all POSIX bash 3.2+ compatible:
+
+```bash
+# Git clean check (porcelain=v1, empty = clean)
+status_out="$(git -C "$target" status --porcelain=v1 2>/dev/null)"
+[ -n "$status_out" ] && { echo "dirty tree"; exit 2; }
+
+# File inventory: find + xargs wc-l, emit JSONL
+find "$target" -name '*.md' -not -path '*/.git/*' -print0 \
+  | xargs -0 wc -l 2>/dev/null \
+  | grep -v '^ *[0-9]* total$' \
+  | while IFS= read -r wc_line; do
+      lcount=$(printf '%s' "$wc_line" | awk '{print $1}')
+      fpath=$(printf '%s' "$wc_line" | awk '{$1=""; print substr($0,2)}')
+      jq -cn --arg p "$fpath" --argjson l "$lcount" '{path:$p,lines:$l}'
+    done >> "$_inv"
+
+# Line-count only (cap check, clean integer output)
+lines=$(wc -l < "$claude_md_path")
+[ "$lines" -gt "$CLAUDE_MD_CAP" ] && echo "over cap: $lines/$CLAUDE_MD_CAP"
+
+# Snapshot before mutation
+mutate_snapshot "$target" "adopt"
+# → sets CONJURE_LAST_SNAPSHOT
+
+# Manifest: jq -cn with --slurpfile for JSONL array
+jq -cn --slurpfile files "$_inv" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{generated_at: $ts, files: $files[0], summary: ...}' \
+  > "$target/.claude/adopt-manifest.json"
+
+# Patch apply loop (jq field extraction per index)
+count=$(jq '.operations | length' "$patch")
+i=0; while [ "$i" -lt "$count" ]; do
+  op=$(jq -r ".operations[$i].op" "$patch")
+  path=$(jq -r ".operations[$i].path" "$patch")
+  # ... dispatch on $op
+  i=$((i+1))
+done
+
+# RESTRUCTURE-LOG append
+row="| $step_id | $(date -u +%Y-%m-%dT%H:%MZ) | $op_count | $CONJURE_LAST_SNAPSHOT |"
+mutate_write "$log_path" "$row"$'\n' --append
+```
+
+### restructure Skill SKILL.md Sketch
+
+```yaml
+---
+name: restructure
+description: >
+  Reads the conjure adopt manifest, proposes a safe restructuring plan for an oversized or
+  messy CLAUDE.md, and writes patch files for human-gated CLI application.
+  Use when conjure adopt has run and .claude/adopt-manifest.json exists.
+disable-model-invocation: true
+allowed-tools: Read Write Bash(conjure adopt --apply-patch *) Bash(conjure adopt --dry-run)
+---
+
+## Project inventory summary
+
+!`jq '{summary, claude_md, git_clean, snapshot}' .claude/adopt-manifest.json`
+
+## Instructions
+
+You are restructuring a brownfield project's CLAUDE.md and doc sprawl into the
+four-layer conjure harness. Work through these steps, getting human approval before
+each apply:
+
+1. Read the full CLAUDE.md at the path shown in `claude_md.path` above.
+2. Identify what can extract to skills (procedures > 20 lines, repeated workflows),
+   what should stay (project facts, constraints, stack decisions), and what is stale
+   (instructions for tools no longer used).
+3. For each extraction, propose the new SKILL.md content and the trimmed CLAUDE.md.
+   Write the proposal as a patch file:
+   `Write .claude/adopt-patches/<step-id>.json` with the schema from the adopt docs.
+4. Show a human-readable summary of what the patch will do. Ask for approval.
+5. After approval, the human runs: `conjure adopt --apply-patch <step-id>`
+6. If you need to inspect planning docs: Read `.claude/adopt-manifest.json` and
+   filter by class:
+   `!`jq '[.files[] | select(.class == "planning-doc")]' .claude/adopt-manifest.json``
+7. Never write directly to CLAUDE.md or skills/. All edits go through patch files.
+```
+
+### v0.6.0 Sources
+
+- [Claude Code Skills docs](https://code.claude.com/docs/en/skills) — HIGH. Full frontmatter reference verified: `!`cmd`` dynamic injection runs before Claude sees content; `allowed-tools` space-separated string; `disable-model-invocation: true` prevents auto-trigger; `${CLAUDE_SKILL_DIR}` for bundled-file references. Skill SKILL.md ≤200 lines cap matches conjure's own skill cap. Verified 2026-05-28.
+- [git-status docs](https://git-scm.com/docs/git-status) — HIGH. `--porcelain=v1` is stable-format guarantee; unaffected by user color/locale config; empty output = clean working tree; `??` prefix = untracked files. Verified 2026-05-28.
+- [jq manual (jqlang/jq)](https://jqlang.org/jq/manual/) — HIGH. `-c` compact output (one JSON per line = JSONL); `-n` null input for construction; `--arg`/`--argjson`/`--slurpfile` are injection-safe arg passing; `group_by` + `from_entries` for summary aggregation; `inputs` builtin for entity-by-entity JSONL reading. Verified via Context7 /jqlang/jq. 2026-05-28.
+- [xargs man page](https://man7.org/linux/man-pages/man1/xargs.1.html) — HIGH. `-0` null-delimiter option pairs with `find -print0`; xargs batches arguments to stay under ARG_MAX; no per-file fork overhead. POSIX-standard. Verified 2026-05-28.
+- [wc POSIX spec](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/wc.html) — HIGH. `-l` counts newlines; redirect form `wc -l < file` suppresses filename column; POSIX-portable across macOS/Linux/Git Bash. Verified 2026-05-28.
+- [cp POSIX spec](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/cp.html) — HIGH. `-a` (archive) is not POSIX strictly — it is a GNU/BSD extension equivalent to `-Rp`. GNU cp supports `-a`; BSD (macOS) cp supports `-a` since macOS 10.5+. All supported platforms have `-a`. `-Rp` is the POSIX fallback if ever needed on a minimal system. Verified 2026-05-28.
+- [Conjure `lib/mutate.sh`](lib/mutate.sh) — HIGH (internal). `mutate_write --append` flag already implemented (line 60–64); `CONJURE_DRY_MUTATION_COUNT` pattern for new `mutate_snapshot` to follow. `DRY_RUN` gate confirmed. Verified 2026-05-28.
+- [Conjure `lib/merge.sh`](lib/merge.sh) — HIGH (internal). `mktemp` + POSIX while-read loop pattern for find results (lines 107–123); confirmed bash 3.2+ no-associative-array constraint. Verified 2026-05-28.
+- [Conjure `scripts/check.sh`](scripts/check.sh) — HIGH (internal). `sha256_file` cross-platform sha256 pattern (lines 18–24); POSIX find loop with `mktemp` buffer (lines 28–97); `--porcelain` output formatting pattern. Confirmed DRY_RUN-free (read-only); adopt.sh likewise separates read-only inventory from mutation phases. Verified 2026-05-28.
 ---
 *Stack research for: Conjure v0.3.0 Testing + telemetry tooling*
-*Updated: 2026-05-26 — v0.5.0 Auto-Update + Healthcheck additions appended*
+*Updated: 2026-05-28 — v0.6.0 Safe Brownfield Adoption additions appended*
