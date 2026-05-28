@@ -2358,6 +2358,307 @@ fi
 # End Phase 21 test block
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Phase 22 — conjure adopt CLI core + rollback (Wave 0 test-first)
+# Mirrors the Phase 21 block style: `▸ Phase 22 — ...` headers, t/pass/fail
+# helpers, mktemp sandboxes with set/reset EXIT-trap discipline. Every adopt
+# invocation is guarded behind `[ -f scripts/adopt.sh ]` so the suite reports
+# these assertions as graceful RED (with a "Wave 1 must create scripts/adopt.sh
+# first" message) instead of crashing while the production code is absent.
+# Production code (scripts/adopt.sh, cmd_adopt) lands in Waves 1-2.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Presence guard shared by every Phase 22 section (mirror P21_CAPS_OK pattern).
+P22_ADOPT_SH="$CONJURE_HOME/scripts/adopt.sh"
+P22_ADOPT_OK=0
+[ -f "$P22_ADOPT_SH" ] && P22_ADOPT_OK=1
+# Brownfield fixture all Phase 22 sandboxes copy from (21-line CLAUDE.md,
+# pre-existing .claude/skills/git/SKILL.md for the idempotency byte-check).
+P22_FIXTURE="$CONJURE_HOME/tests/fixtures/brownfield-simple"
+
+# p22_adopt — invoke scripts/adopt.sh with the cmd_adopt env-var contract.
+# Echoes nothing and returns 127 when adopt.sh is absent (callers gate on
+# P22_ADOPT_OK first, so this is only a defensive backstop).
+p22_adopt() {
+  [ "$P22_ADOPT_OK" -eq 1 ] || return 127
+  CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$@"
+}
+
+# p22_sha — cross-platform sha256 of a single file (mirror lib/mutate.sh 113-123).
+p22_sha() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+echo
+echo "▸ Phase 22 — adopt.sh dry-run (ADOPT-02 / criterion 1)"
+
+if [ "$P22_ADOPT_OK" -ne 1 ]; then
+  fail "scripts/adopt.sh not found — Wave 1 must create scripts/adopt.sh first (ADOPT-02/criterion 1)"
+else
+  P22_DRY_TARGET="$(mktemp -d)"
+  trap 'rm -rf "$P22_DRY_TARGET"' EXIT
+  cp -r "$P22_FIXTURE/." "$P22_DRY_TARGET/"
+  P22_DRY_OUT="$(
+    DRY_RUN=1 CONJURE_HOME="$CONJURE_HOME" \
+      bash "$P22_ADOPT_SH" "$P22_DRY_TARGET" 2>&1
+  )"
+  # Zero writes under the target: git status clean (sandbox is not a git repo,
+  # so fall back to "no new adopt artifacts") AND no manifest landed in target.
+  P22_DRY_PORCELAIN="$(git -C "$P22_DRY_TARGET" status --porcelain 2>/dev/null || true)"
+  P22_DRY_MANIFEST_COUNT="$(find "$P22_DRY_TARGET" -name adopt-manifest.json 2>/dev/null | wc -l | tr -d ' ')"
+  P22_DRY_STATE_COUNT="$(find "$P22_DRY_TARGET" -name '.conjure-adopt-state' 2>/dev/null | wc -l | tr -d ' ')"
+  if [ -z "$P22_DRY_PORCELAIN" ]; then
+    pass "adopt.sh dry-run: git status --porcelain clean — zero writes (ADOPT-02/criterion 1)"
+  else
+    fail "adopt.sh dry-run: working tree dirty after dry-run — got: $P22_DRY_PORCELAIN (ADOPT-02/criterion 1)"
+  fi
+  if [ "${P22_DRY_MANIFEST_COUNT:-1}" -eq 0 ]; then
+    pass "adopt.sh dry-run: no adopt-manifest.json under target (Pitfall 1) (ADOPT-02/criterion 1)"
+  else
+    fail "adopt.sh dry-run: adopt-manifest.json leaked into target — Pitfall 1 (ADOPT-02/criterion 1)"
+  fi
+  if [ "${P22_DRY_STATE_COUNT:-1}" -eq 0 ]; then
+    pass "adopt.sh dry-run: no .conjure-adopt-state under target (ADOPT-02/criterion 1)"
+  else
+    fail "adopt.sh dry-run: .conjure-adopt-state leaked into target (ADOPT-02/criterion 1)"
+  fi
+  # All five step labels appear in the plan output.
+  P22_DRY_STEPS_OK=1
+  for _step in preconditions snapshot inventory scaffold audit; do
+    printf '%s\n' "$P22_DRY_OUT" | grep -qi "$_step" || P22_DRY_STEPS_OK=0
+  done
+  if [ "$P22_DRY_STEPS_OK" -eq 1 ]; then
+    pass "adopt.sh dry-run: plan lists all 5 steps (preconditions/snapshot/inventory/scaffold/audit) (ADOPT-02/criterion 1)"
+  else
+    fail "adopt.sh dry-run: plan missing one or more step labels — got: $P22_DRY_OUT (ADOPT-02/criterion 1)"
+  fi
+  if printf '%s\n' "$P22_DRY_OUT" | grep -qi '\[dry-run\] would'; then
+    pass "adopt.sh dry-run: output contains a '[dry-run] would' marker (ADOPT-02/criterion 1)"
+  else
+    fail "adopt.sh dry-run: missing '[dry-run] would' marker — got: $P22_DRY_OUT (ADOPT-02/criterion 1)"
+  fi
+  # D-11: the printed dry-run manifest temp path must NOT be the hardcoded
+  # /tmp/adopt-manifest-dryrun.json the lib defaults to (must be mktemp -d).
+  if printf '%s\n' "$P22_DRY_OUT" | grep -q '/tmp/adopt-manifest-dryrun.json'; then
+    fail "adopt.sh dry-run: manifest path is the hardcoded /tmp/adopt-manifest-dryrun.json — D-11 requires mktemp (ADOPT-02)"
+  else
+    pass "adopt.sh dry-run: manifest temp path is not the hardcoded /tmp path (D-11) (ADOPT-02)"
+  fi
+  rm -rf "$P22_DRY_TARGET"
+  trap - EXIT
+fi
+
+echo
+echo "▸ Phase 22 — adopt.sh live (ADOPT-01/04/05/06 / criterion 2)"
+
+if [ "$P22_ADOPT_OK" -ne 1 ]; then
+  fail "scripts/adopt.sh not found — Wave 1 must create scripts/adopt.sh first (ADOPT-01/04/05/06/criterion 2)"
+else
+  P22_LIVE_TARGET="$(mktemp -d)"
+  trap 'rm -rf "$P22_LIVE_TARGET"' EXIT
+  cp -r "$P22_FIXTURE/." "$P22_LIVE_TARGET/"
+  # sha256 of the pre-existing skill BEFORE adopt (ADOPT-04 never-overwrite).
+  P22_SKILL_PATH="$P22_LIVE_TARGET/.claude/skills/git/SKILL.md"
+  P22_SKILL_BEFORE="$(p22_sha "$P22_SKILL_PATH" 2>/dev/null || echo NA-before)"
+  P22_LIVE_OUT="$(
+    DRY_RUN=0 CONJURE_HOME="$CONJURE_HOME" \
+      bash "$P22_ADOPT_SH" "$P22_LIVE_TARGET" 2>&1
+  )"
+  # SAFE-01: a snapshot copy of CLAUDE.md exists under .conjure-adopt-backups/.
+  P22_BACKUP_CLAUDE_COUNT="$(find "$P22_LIVE_TARGET/.conjure-adopt-backups" -name CLAUDE.md 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${P22_BACKUP_CLAUDE_COUNT:-0}" -ge 1 ]; then
+    pass "adopt.sh live: .conjure-adopt-backups/*/CLAUDE.md snapshot exists (SAFE-01/criterion 2)"
+  else
+    fail "adopt.sh live: no CLAUDE.md snapshot under .conjure-adopt-backups (SAFE-01/criterion 2)"
+  fi
+  # ADOPT-01: manifest present under target after a live run.
+  if [ -f "$P22_LIVE_TARGET/adopt-manifest.json" ]; then
+    pass "adopt.sh live: adopt-manifest.json present under target (ADOPT-01/criterion 2)"
+  else
+    fail "adopt.sh live: adopt-manifest.json missing under target (ADOPT-01/criterion 2)"
+  fi
+  # ADOPT-04 (scaffold): new .claude/hooks/* were created (fixture has none).
+  P22_HOOK_COUNT="$(find "$P22_LIVE_TARGET/.claude/hooks" -type f 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${P22_HOOK_COUNT:-0}" -ge 1 ]; then
+    pass "adopt.sh live: missing hooks layer scaffolded (.claude/hooks/*) (ADOPT-04/criterion 2)"
+  else
+    fail "adopt.sh live: no hooks scaffolded — missing-layer scaffold failed (ADOPT-04/criterion 2)"
+  fi
+  # ADOPT-04 (never-overwrite): pre-existing SKILL.md is byte-unchanged.
+  P22_SKILL_AFTER="$(p22_sha "$P22_SKILL_PATH" 2>/dev/null || echo NA-after)"
+  if [ "$P22_SKILL_BEFORE" = "$P22_SKILL_AFTER" ]; then
+    pass "adopt.sh live: pre-existing SKILL.md byte-unchanged (sha256 before==after) (ADOPT-04/criterion 2)"
+  else
+    fail "adopt.sh live: pre-existing SKILL.md was modified ($P22_SKILL_BEFORE != $P22_SKILL_AFTER) — never-overwrite violated (ADOPT-04/criterion 2)"
+  fi
+  # ADOPT-06: report shows CLAUDE.md before/after line-count (fixture is 21 lines,
+  # Phase 22 does not condense it, so the report must read "21 → 21").
+  if printf '%s\n' "$P22_LIVE_OUT" | grep -Eq 'CLAUDE\.md:?[[:space:]]*21[[:space:]]*(->|→)[[:space:]]*21'; then
+    pass "adopt.sh live: report shows CLAUDE.md 21 -> 21 before/after (ADOPT-06/criterion 2)"
+  else
+    fail "adopt.sh live: report missing 'CLAUDE.md 21 -> 21' before/after line — got: $P22_LIVE_OUT (ADOPT-06/criterion 2)"
+  fi
+  # ADOPT-06: report points the user at the next step (restructure skill).
+  if printf '%s\n' "$P22_LIVE_OUT" | grep -Eqi 'Next:|restructure'; then
+    pass "adopt.sh live: report includes a Next:/restructure pointer (ADOPT-06/criterion 2)"
+  else
+    fail "adopt.sh live: report missing Next:/restructure pointer (ADOPT-06/criterion 2)"
+  fi
+  rm -rf "$P22_LIVE_TARGET"
+  trap - EXIT
+fi
+
+echo
+echo "▸ Phase 22 — adopt.sh dirty-tree (ADOPT-03 / SAFE-06 / criterion 3)"
+
+if [ "$P22_ADOPT_OK" -ne 1 ]; then
+  fail "scripts/adopt.sh not found — Wave 1 must create scripts/adopt.sh first (ADOPT-03/SAFE-06/criterion 3)"
+else
+  # git-init dirty-tree harness: commit the fixture, then leave an untracked file
+  # so the tree is dirty for adopt's git status --porcelain check (Pitfall 5).
+  P22_DIRTY_TARGET="$(mktemp -d)"
+  trap 'rm -rf "$P22_DIRTY_TARGET"' EXIT
+  cp -r "$P22_FIXTURE/." "$P22_DIRTY_TARGET/"
+  git -C "$P22_DIRTY_TARGET" init -q >/dev/null 2>&1
+  git -C "$P22_DIRTY_TARGET" config user.email test@conjure.local >/dev/null 2>&1
+  git -C "$P22_DIRTY_TARGET" config user.name "Conjure Test" >/dev/null 2>&1
+  git -C "$P22_DIRTY_TARGET" add -A >/dev/null 2>&1
+  git -C "$P22_DIRTY_TARGET" commit -q -m "fixture baseline" >/dev/null 2>&1
+  touch "$P22_DIRTY_TARGET/UNTRACKED.txt"   # makes the tree dirty (untracked file)
+  # No --force on a dirty tree → exit 2 (never exit 1).
+  DRY_RUN=0 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$P22_DIRTY_TARGET" >/dev/null 2>&1
+  P22_DIRTY_RC=$?
+  if [ "$P22_DIRTY_RC" -eq 2 ]; then
+    pass "adopt.sh dirty-tree: refuses without --force, exit 2 (ADOPT-03/criterion 3)"
+  else
+    fail "adopt.sh dirty-tree: expected exit 2 without --force, got $P22_DIRTY_RC (ADOPT-03/criterion 3)"
+  fi
+  # With --force → proceeds (rc 0) and logs a WARN about uncommitted changes.
+  DRY_RUN=0 CONJURE_ADOPT_FORCE=1 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" --force "$P22_DIRTY_TARGET" >/dev/null 2>&1
+  P22_FORCE_RC=$?
+  if [ "$P22_FORCE_RC" -eq 0 ]; then
+    pass "adopt.sh dirty-tree: --force proceeds, exit 0 (SAFE-06/criterion 3)"
+  else
+    fail "adopt.sh dirty-tree: --force expected exit 0, got $P22_FORCE_RC (SAFE-06/criterion 3)"
+  fi
+  if [ -f "$P22_DIRTY_TARGET/RESTRUCTURE-LOG.md" ] && grep -q 'WARN.*uncommitted' "$P22_DIRTY_TARGET/RESTRUCTURE-LOG.md" 2>/dev/null; then
+    pass "adopt.sh dirty-tree: --force logged 'WARN ... uncommitted' to RESTRUCTURE-LOG.md (SAFE-06/criterion 3)"
+  else
+    fail "adopt.sh dirty-tree: --force did not log a WARN about uncommitted changes (SAFE-06/criterion 3)"
+  fi
+  rm -rf "$P22_DIRTY_TARGET"
+  trap - EXIT
+fi
+
+echo
+echo "▸ Phase 22 — adopt.sh rollback (SAFE-02 / criterion 4)"
+
+if [ "$P22_ADOPT_OK" -ne 1 ]; then
+  fail "scripts/adopt.sh not found — Wave 1 must create scripts/adopt.sh first (SAFE-02/criterion 4)"
+else
+  P22_RB_TARGET="$(mktemp -d)"
+  P22_RB_PRE="$(mktemp -d)"   # pristine pre-adopt copy for the zero-diff comparison
+  trap 'rm -rf "$P22_RB_TARGET" "$P22_RB_PRE"' EXIT
+  cp -r "$P22_FIXTURE/." "$P22_RB_TARGET/"
+  cp -r "$P22_FIXTURE/." "$P22_RB_PRE/"
+  # Record sha256 of every pre-adopt file (relative paths) for per-file verify.
+  P22_RB_HASHES="$P22_RB_PRE/.p22-hashes"
+  ( cd "$P22_RB_TARGET" && find . -type f -not -path './.git/*' | sort | while IFS= read -r f; do
+      printf '%s  %s\n' "$(p22_sha "$f")" "$f"
+    done ) > "$P22_RB_HASHES" 2>/dev/null
+  # Live adopt, then rollback.
+  DRY_RUN=0 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$P22_RB_TARGET" >/dev/null 2>&1
+  DRY_RUN=0 CONJURE_ADOPT_ROLLBACK=1 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" --rollback "$P22_RB_TARGET" >/dev/null 2>&1
+  # Per-file sha256: every pre-adopt file restored to its recorded before-hash.
+  P22_RB_MISMATCH=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    _h="${line%%  *}"; _f="${line##*  }"
+    _now="$(p22_sha "$P22_RB_TARGET/$_f" 2>/dev/null || echo MISSING)"
+    [ "$_h" = "$_now" ] || P22_RB_MISMATCH=$((P22_RB_MISMATCH+1))
+  done < "$P22_RB_HASHES"
+  if [ "$P22_RB_MISMATCH" -eq 0 ]; then
+    pass "adopt.sh rollback: every pre-adopt file sha256 == recorded before-hash (SAFE-02/criterion 4)"
+  else
+    fail "adopt.sh rollback: $P22_RB_MISMATCH file(s) differ from recorded before-hash (SAFE-02/criterion 4)"
+  fi
+  # created[] scaffolded files are gone after rollback (fixture had no hooks).
+  P22_RB_HOOK_COUNT="$(find "$P22_RB_TARGET/.claude/hooks" -type f 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${P22_RB_HOOK_COUNT:-0}" -eq 0 ]; then
+    pass "adopt.sh rollback: scaffolded created[] files removed (SAFE-02/criterion 4)"
+  else
+    fail "adopt.sh rollback: scaffolded files still present after rollback (SAFE-02/criterion 4)"
+  fi
+  # [ROLLBACK] entry logged.
+  if [ -f "$P22_RB_TARGET/RESTRUCTURE-LOG.md" ] && grep -q '\[ROLLBACK\]' "$P22_RB_TARGET/RESTRUCTURE-LOG.md" 2>/dev/null; then
+    pass "adopt.sh rollback: [ROLLBACK] entry in RESTRUCTURE-LOG.md (SAFE-02/criterion 4)"
+  else
+    fail "adopt.sh rollback: no [ROLLBACK] entry in RESTRUCTURE-LOG.md (SAFE-02/criterion 4)"
+  fi
+  # Zero-diff pre-adopt vs post-rollback, excluding conjure's own dirs (D-03).
+  P22_RB_DIFF="$(diff -r \
+    -x '.conjure-adopt-backups' -x '.conjure-archive-*' \
+    -x 'RESTRUCTURE-LOG.md' -x 'adopt-manifest.json' -x '.conjure-adopt-state' \
+    "$P22_RB_PRE" "$P22_RB_TARGET" 2>&1)"
+  if [ -z "$P22_RB_DIFF" ]; then
+    pass "adopt.sh rollback: diff -r pre-adopt vs post-rollback empty (excl. conjure dirs, D-03) (SAFE-02/criterion 4)"
+  else
+    fail "adopt.sh rollback: post-rollback diff not empty — got: $P22_RB_DIFF (SAFE-02/criterion 4)"
+  fi
+  rm -rf "$P22_RB_TARGET" "$P22_RB_PRE"
+  trap - EXIT
+fi
+
+echo
+echo "▸ Phase 22 — adopt.sh state + log (SAFE-04 / SAFE-07)"
+
+if [ "$P22_ADOPT_OK" -ne 1 ]; then
+  fail "scripts/adopt.sh not found — Wave 1 must create scripts/adopt.sh first (SAFE-04/SAFE-07)"
+else
+  P22_SL_TARGET="$(mktemp -d)"
+  trap 'rm -rf "$P22_SL_TARGET"' EXIT
+  cp -r "$P22_FIXTURE/." "$P22_SL_TARGET/"
+  DRY_RUN=0 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$P22_SL_TARGET" >/dev/null 2>&1
+  # SAFE-04: .conjure-adopt-state parses as JSON. Support both forms (file or
+  # directory with state.json) per the planner's Discretion in CONTEXT.md.
+  P22_SL_STATE="$P22_SL_TARGET/.conjure-adopt-state"
+  P22_SL_STATE_JSON=""
+  if [ -f "$P22_SL_STATE" ]; then
+    P22_SL_STATE_JSON="$P22_SL_STATE"
+  elif [ -f "$P22_SL_STATE/state.json" ]; then
+    P22_SL_STATE_JSON="$P22_SL_STATE/state.json"
+  fi
+  if [ -n "$P22_SL_STATE_JSON" ] && jq . "$P22_SL_STATE_JSON" >/dev/null 2>&1; then
+    pass "adopt.sh state: .conjure-adopt-state parses as valid JSON (SAFE-04)"
+  else
+    fail "adopt.sh state: .conjure-adopt-state missing or not valid JSON (SAFE-04)"
+  fi
+  if [ -n "$P22_SL_STATE_JSON" ] && jq -e '.mutated[0].before' "$P22_SL_STATE_JSON" >/dev/null 2>&1; then
+    pass "adopt.sh state: .mutated[].before sha256 recorded (SAFE-04)"
+  else
+    fail "adopt.sh state: .mutated[].before not present (SAFE-04)"
+  fi
+  # SAFE-07: RESTRUCTURE-LOG.md carries SNAPSHOT, INVENTORY, SCAFFOLD, AUDIT in order.
+  P22_SL_LOG="$P22_SL_TARGET/RESTRUCTURE-LOG.md"
+  if [ -f "$P22_SL_LOG" ]; then
+    P22_SL_ORDER="$(grep -nE '\[(SNAPSHOT|INVENTORY|SCAFFOLD|AUDIT)\]' "$P22_SL_LOG" 2>/dev/null | sed -E 's/.*\[(SNAPSHOT|INVENTORY|SCAFFOLD|AUDIT)\].*/\1/' | tr '\n' ' ')"
+    if printf '%s' "$P22_SL_ORDER" | grep -q 'SNAPSHOT INVENTORY SCAFFOLD AUDIT'; then
+      pass "adopt.sh log: SNAPSHOT, INVENTORY, SCAFFOLD, AUDIT entries in order (SAFE-07)"
+    else
+      fail "adopt.sh log: step entries missing or out of order — got: '$P22_SL_ORDER' (SAFE-07)"
+    fi
+  else
+    fail "adopt.sh log: RESTRUCTURE-LOG.md not created (SAFE-07)"
+  fi
+  rm -rf "$P22_SL_TARGET"
+  trap - EXIT
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# End Phase 22 test block
+# ──────────────────────────────────────────────────────────────────────────────
+
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
