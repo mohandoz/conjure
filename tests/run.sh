@@ -1687,6 +1687,617 @@ trap - EXIT
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Phase 21 — Foundation Libs + Inventory (Wave 0 test stubs)
+# These stubs fail gracefully when lib files are absent (Plans 02-04 create them).
+# All sections use the same pass/fail helpers defined at the top of run.sh.
+# ──────────────────────────────────────────────────────────────────────────────
+
+echo
+echo "▸ Phase 21 — lib/caps.sh (SC-5)"
+
+P21_CAPS_OK=0
+if ! source "$CONJURE_HOME/lib/caps.sh" 2>/dev/null; then
+  fail "lib/caps.sh not found — Wave 1 must create it first (SC-5)"
+else
+  P21_CAPS_OK=1
+  if [ "${CLAUDE_MD_CAP:-}" = "100" ]; then
+    pass "caps.sh: CLAUDE_MD_CAP=100 (SC-5)"
+  else
+    fail "caps.sh: CLAUDE_MD_CAP expected 100, got '${CLAUDE_MD_CAP:-unset}' (SC-5)"
+  fi
+  if [ "${SKILL_MD_CAP:-}" = "200" ]; then
+    pass "caps.sh: SKILL_MD_CAP=200 (SC-5)"
+  else
+    fail "caps.sh: SKILL_MD_CAP expected 200, got '${SKILL_MD_CAP:-unset}' (SC-5)"
+  fi
+  if [ "${AGENT_MD_CAP:-}" = "80" ]; then
+    pass "caps.sh: AGENT_MD_CAP=80 (SC-5)"
+  else
+    fail "caps.sh: AGENT_MD_CAP expected 80, got '${AGENT_MD_CAP:-unset}' (SC-5)"
+  fi
+fi
+
+echo
+echo "▸ Phase 21 — lib/log.sh (ADOPT-03/SC-1)"
+
+P21_LOG_OK=0
+if [ ! -f "$CONJURE_HOME/lib/log.sh" ]; then
+  fail "lib/log.sh not found — Wave 1 must create it first (ADOPT-03/SC-1)"
+else
+  P21_LOG_OK=1
+  # DRY_RUN=1 test: output must contain "[dry-run] would write"
+  P21_LOG_DRY_OUT="$(
+    DRY_RUN=1 RESTRUCTURE_LOG_PATH="/tmp/conjure-p21-log-dryrun-$$" \
+    bash -c '
+      source "$CONJURE_HOME/lib/mutate.sh"
+      source "$CONJURE_HOME/lib/log.sh"
+      CONJURE_DRY_MUTATION_COUNT=0
+      log_step TEST "hello dry-run"
+      printf "%s\n" "[count=$CONJURE_DRY_MUTATION_COUNT]"
+    ' 2>&1
+  )"
+  if printf '%s\n' "$P21_LOG_DRY_OUT" | grep -q "dry-run"; then
+    pass "log.sh DRY_RUN=1: output contains dry-run indicator (ADOPT-03/SC-1)"
+  else
+    fail "log.sh DRY_RUN=1: missing dry-run indicator — got: $P21_LOG_DRY_OUT (ADOPT-03/SC-1)"
+  fi
+  if ! printf '%s\n' "$P21_LOG_DRY_OUT" | grep -q "RESTRUCTURE-LOG"; then
+    pass "log.sh DRY_RUN=1: no actual file written (ADOPT-03/SC-1)"
+  else
+    fail "log.sh DRY_RUN=1: log file was written (ADOPT-03/SC-1)"
+  fi
+
+  # Live mode test: log_init + log_step must write file with entries
+  P21_LOG_DIR="$(mktemp -d)"
+  trap 'rm -rf "$P21_LOG_DIR"' EXIT
+  (
+    source "$CONJURE_HOME/lib/mutate.sh"
+    source "$CONJURE_HOME/lib/log.sh"
+    DRY_RUN=0
+    RESTRUCTURE_LOG_PATH="$P21_LOG_DIR/RESTRUCTURE-LOG.md"
+    CONJURE_DRY_MUTATION_COUNT=0
+    log_init "$P21_LOG_DIR"
+    log_step INVENTORY "test message alpha"
+    log_step SNAPSHOT "test message beta"
+  )
+  if [ -f "$P21_LOG_DIR/RESTRUCTURE-LOG.md" ]; then
+    pass "log.sh live: RESTRUCTURE-LOG.md created (ADOPT-03/SC-1)"
+  else
+    fail "log.sh live: RESTRUCTURE-LOG.md not created (ADOPT-03/SC-1)"
+  fi
+  P21_LOG_ENTRY_COUNT=$(grep -c "^\[" "$P21_LOG_DIR/RESTRUCTURE-LOG.md" 2>/dev/null || echo "0")
+  if [ "${P21_LOG_ENTRY_COUNT:-0}" -ge 2 ]; then
+    pass "log.sh live: at least 2 bracketed entries found (newline check) (ADOPT-03/SC-1)"
+  else
+    fail "log.sh live: expected >=2 entries, got $P21_LOG_ENTRY_COUNT — possible newline join bug (ADOPT-03/SC-1)"
+  fi
+  rm -rf "$P21_LOG_DIR"
+  trap - EXIT
+fi
+
+echo
+echo "▸ Phase 21 — lib/snapshot.sh (SC-2)"
+
+P21_SNAP_OK=0
+if [ ! -f "$CONJURE_HOME/lib/snapshot.sh" ]; then
+  fail "lib/snapshot.sh not found — Wave 1 must create it first (SC-2)"
+else
+  P21_SNAP_OK=1
+  BF_FIXTURE="$CONJURE_HOME/tests/fixtures/brownfield-simple"
+
+  # DRY_RUN=1: should print dry-run message, no dir created
+  P21_SNAP_DRY_BACKUP="$(mktemp -d)"
+  trap 'rm -rf "$P21_SNAP_DRY_BACKUP"' EXIT
+  P21_SNAP_DRY_OUT="$(
+    DRY_RUN=1 _P21_SNAP_TARGET="$BF_FIXTURE" _P21_SNAP_BACKUP="$P21_SNAP_DRY_BACKUP" \
+    bash -c '
+      source "$CONJURE_HOME/lib/mutate.sh"
+      source "$CONJURE_HOME/lib/log.sh"
+      source "$CONJURE_HOME/lib/snapshot.sh"
+      RESTRUCTURE_LOG_PATH="/tmp/conjure-p21-snap-drylog-$$"
+      CONJURE_DRY_MUTATION_COUNT=0
+      snapshot_create "$_P21_SNAP_TARGET" "$_P21_SNAP_BACKUP"
+    ' 2>&1
+  )"
+  if printf '%s\n' "$P21_SNAP_DRY_OUT" | grep -q "dry-run"; then
+    pass "snapshot.sh DRY_RUN=1: output contains dry-run indicator (SC-2)"
+  else
+    fail "snapshot.sh DRY_RUN=1: missing dry-run indicator — got: $P21_SNAP_DRY_OUT (SC-2)"
+  fi
+  P21_SNAP_DRY_COUNT="$(find "$P21_SNAP_DRY_BACKUP" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')"
+  if [ "${P21_SNAP_DRY_COUNT:-0}" -eq 0 ]; then
+    pass "snapshot.sh DRY_RUN=1: no directory created (SC-2)"
+  else
+    fail "snapshot.sh DRY_RUN=1: snapshot directory was created — DRY_RUN not honored (SC-2)"
+  fi
+  rm -rf "$P21_SNAP_DRY_BACKUP"
+  trap - EXIT
+
+  # Live mode: snapshot_create must copy the fixture
+  P21_SNAP_TARGET="$(mktemp -d)"
+  P21_SNAP_BACKUP="$(mktemp -d)"
+  trap 'rm -rf "$P21_SNAP_TARGET" "$P21_SNAP_BACKUP"' EXIT
+  cp -r "$BF_FIXTURE/." "$P21_SNAP_TARGET/"
+  (
+    source "$CONJURE_HOME/lib/mutate.sh"
+    source "$CONJURE_HOME/lib/log.sh"
+    source "$CONJURE_HOME/lib/snapshot.sh"
+    DRY_RUN=0
+    RESTRUCTURE_LOG_PATH="$P21_SNAP_BACKUP/RESTRUCTURE-LOG.md"
+    CONJURE_DRY_MUTATION_COUNT=0
+    snapshot_create "$P21_SNAP_TARGET" "$P21_SNAP_BACKUP"
+    printf '%s\n' "$CONJURE_SNAPSHOT_PATH" > "$P21_SNAP_BACKUP/.snap-path"
+  )
+  P21_SNAP_PATH="$(cat "$P21_SNAP_BACKUP/.snap-path" 2>/dev/null || true)"
+  if [ -n "$P21_SNAP_PATH" ] && [ -d "$P21_SNAP_PATH" ]; then
+    pass "snapshot.sh live: CONJURE_SNAPSHOT_PATH is non-empty and dir exists (SC-2)"
+  else
+    fail "snapshot.sh live: CONJURE_SNAPSHOT_PATH missing or dir not found (SC-2)"
+  fi
+  if [ -n "$P21_SNAP_PATH" ] && [ -f "$P21_SNAP_PATH/CLAUDE.md" ]; then
+    pass "snapshot.sh live: snapshot contains CLAUDE.md (SC-2)"
+  else
+    fail "snapshot.sh live: snapshot missing CLAUDE.md (SC-2)"
+  fi
+  rm -rf "$P21_SNAP_TARGET" "$P21_SNAP_BACKUP"
+  trap - EXIT
+fi
+
+echo
+echo "▸ Phase 21 — lib/inventory.sh (INV-01..INV-04)"
+
+P21_INV_OK=0
+if [ ! -f "$CONJURE_HOME/lib/inventory.sh" ]; then
+  fail "lib/inventory.sh not found — Wave 1 must create it first (INV-01..INV-04)"
+else
+  P21_INV_OK=1
+  BF_FIXTURE="$CONJURE_HOME/tests/fixtures/brownfield-simple"
+
+  # Source all required libs
+  source "$CONJURE_HOME/lib/mutate.sh"
+  [ -f "$CONJURE_HOME/lib/caps.sh" ]     && source "$CONJURE_HOME/lib/caps.sh"
+  [ -f "$CONJURE_HOME/lib/log.sh" ]      && source "$CONJURE_HOME/lib/log.sh"
+  [ -f "$CONJURE_HOME/lib/inventory.sh" ] && source "$CONJURE_HOME/lib/inventory.sh"
+
+  # INV-01: classify — core bucket
+  P21_CLS=$(inventory_classify "$BF_FIXTURE/CLAUDE.md" "$BF_FIXTURE" /dev/null 2>/dev/null || true)
+  if [ "$P21_CLS" = "core" ]; then
+    pass "inventory_classify: CLAUDE.md → core (INV-01)"
+  else
+    fail "inventory_classify: CLAUDE.md expected 'core', got '$P21_CLS' (INV-01)"
+  fi
+
+  # INV-01: skill bucket
+  P21_CLS=$(inventory_classify "$BF_FIXTURE/.claude/skills/git/SKILL.md" "$BF_FIXTURE" /dev/null 2>/dev/null || true)
+  if [ "$P21_CLS" = "skill" ]; then
+    pass "inventory_classify: SKILL.md → skill (INV-01)"
+  else
+    fail "inventory_classify: SKILL.md expected 'skill', got '$P21_CLS' (INV-01)"
+  fi
+
+  # INV-01: agent bucket
+  P21_CLS=$(inventory_classify "$BF_FIXTURE/.claude/agents/deploy.md" "$BF_FIXTURE" /dev/null 2>/dev/null || true)
+  if [ "$P21_CLS" = "agent" ]; then
+    pass "inventory_classify: deploy.md → agent (INV-01)"
+  else
+    fail "inventory_classify: deploy.md expected 'agent', got '$P21_CLS' (INV-01)"
+  fi
+
+  # INV-01: planning-doc bucket
+  P21_CLS=$(inventory_classify "$BF_FIXTURE/.planning/21-PLAN.md" "$BF_FIXTURE" /dev/null 2>/dev/null || true)
+  if [ "$P21_CLS" = "planning-doc" ]; then
+    pass "inventory_classify: 21-PLAN.md → planning-doc (INV-01)"
+  else
+    fail "inventory_classify: 21-PLAN.md expected 'planning-doc', got '$P21_CLS' (INV-01)"
+  fi
+
+  # INV-01: reference-doc bucket
+  P21_CLS=$(inventory_classify "$BF_FIXTURE/docs/README.md" "$BF_FIXTURE" /dev/null 2>/dev/null || true)
+  if [ "$P21_CLS" = "reference-doc" ]; then
+    pass "inventory_classify: docs/README.md → reference-doc (INV-01)"
+  else
+    fail "inventory_classify: docs/README.md expected 'reference-doc', got '$P21_CLS' (INV-01)"
+  fi
+
+  # INV-01: unknown bucket — file outside harness dirs
+  P21_UNKNOWN_TMP="$(mktemp --suffix=.md 2>/dev/null || mktemp -t tmp.XXXXXX.md)"
+  P21_CLS=$(inventory_classify "$P21_UNKNOWN_TMP" "$BF_FIXTURE" /dev/null 2>/dev/null || true)
+  rm -f "$P21_UNKNOWN_TMP"
+  if [ "$P21_CLS" = "unknown" ]; then
+    pass "inventory_classify: external file → unknown (INV-01)"
+  else
+    fail "inventory_classify: external file expected 'unknown', got '$P21_CLS' (INV-01)"
+  fi
+
+  # INV-02: emit manifest and check required keys
+  P21_INV_WORK="$(mktemp -d)"
+  trap 'rm -rf "$P21_INV_WORK"' EXIT
+  cp -r "$BF_FIXTURE/." "$P21_INV_WORK/target/"
+  P21_MANIFEST="$P21_INV_WORK/adopt-manifest.json"
+  (
+    source "$CONJURE_HOME/lib/mutate.sh"
+    [ -f "$CONJURE_HOME/lib/caps.sh" ]     && source "$CONJURE_HOME/lib/caps.sh"
+    [ -f "$CONJURE_HOME/lib/log.sh" ]      && source "$CONJURE_HOME/lib/log.sh"
+    [ -f "$CONJURE_HOME/lib/inventory.sh" ] && source "$CONJURE_HOME/lib/inventory.sh"
+    DRY_RUN=0
+    RESTRUCTURE_LOG_PATH="$P21_INV_WORK/RESTRUCTURE-LOG.md"
+    CONJURE_DRY_MUTATION_COUNT=0
+    inventory_scan "$P21_INV_WORK/target" 2>/dev/null || true
+    inventory_emit_manifest "$P21_INV_WORK/target" "$P21_MANIFEST" 2>/dev/null || true
+  )
+  if [ -f "$P21_MANIFEST" ]; then
+    pass "inventory_emit_manifest: adopt-manifest.json created (INV-02)"
+  else
+    fail "inventory_emit_manifest: adopt-manifest.json not created (INV-02)"
+  fi
+  if [ -f "$P21_MANIFEST" ] && command -v jq >/dev/null 2>&1; then
+    if jq -e '.schema_version' "$P21_MANIFEST" >/dev/null 2>&1; then
+      pass "adopt-manifest.json: schema_version field present (INV-02)"
+    else
+      fail "adopt-manifest.json: schema_version field missing (INV-02)"
+    fi
+    if jq -e '.summary.scan_capped == false' "$P21_MANIFEST" >/dev/null 2>&1; then
+      pass "adopt-manifest.json: summary.scan_capped=false for small fixture (INV-02)"
+    else
+      fail "adopt-manifest.json: summary.scan_capped unexpected value (INV-02)"
+    fi
+    if jq -e '.files | length > 0' "$P21_MANIFEST" >/dev/null 2>&1; then
+      pass "adopt-manifest.json: files[] is non-empty (INV-02)"
+    else
+      fail "adopt-manifest.json: files[] is empty (INV-02)"
+    fi
+    if jq -e '.summary.core == 1' "$P21_MANIFEST" >/dev/null 2>&1; then
+      pass "adopt-manifest.json: summary.core == 1 (one CLAUDE.md) (INV-02)"
+    else
+      P21_CORE_COUNT="$(jq '.summary.core // "N/A"' "$P21_MANIFEST" 2>/dev/null || echo "N/A")"
+      fail "adopt-manifest.json: summary.core expected 1, got $P21_CORE_COUNT (INV-02)"
+    fi
+  fi
+  rm -rf "$P21_INV_WORK"
+  trap - EXIT
+
+  # INV-03: symlink skip — symlink-target.md must NOT appear in files[]
+  P21_INV_WORK="$(mktemp -d)"
+  trap 'rm -rf "$P21_INV_WORK"' EXIT
+  cp -r "$BF_FIXTURE/." "$P21_INV_WORK/target/" 2>/dev/null || true
+  P21_MANIFEST="$P21_INV_WORK/adopt-manifest.json"
+  (
+    source "$CONJURE_HOME/lib/mutate.sh"
+    [ -f "$CONJURE_HOME/lib/caps.sh" ]     && source "$CONJURE_HOME/lib/caps.sh"
+    [ -f "$CONJURE_HOME/lib/log.sh" ]      && source "$CONJURE_HOME/lib/log.sh"
+    [ -f "$CONJURE_HOME/lib/inventory.sh" ] && source "$CONJURE_HOME/lib/inventory.sh"
+    DRY_RUN=0
+    RESTRUCTURE_LOG_PATH="$P21_INV_WORK/RESTRUCTURE-LOG.md"
+    CONJURE_DRY_MUTATION_COUNT=0
+    inventory_scan "$P21_INV_WORK/target" 2>/dev/null || true
+    inventory_emit_manifest "$P21_INV_WORK/target" "$P21_MANIFEST" 2>/dev/null || true
+  )
+  if [ -f "$P21_MANIFEST" ] && command -v jq >/dev/null 2>&1; then
+    P21_SYMLINK_COUNT="$(jq '[.files[]? | select(.path | test("symlink-target"))] | length' "$P21_MANIFEST" 2>/dev/null || echo "0")"
+    if [ "${P21_SYMLINK_COUNT:-0}" -eq 0 ]; then
+      pass "inventory: symlink-target.md skipped (not in files[]) (INV-03)"
+    else
+      fail "inventory: symlink-target.md found in files[] — symlinks must be skipped (INV-03)"
+    fi
+  else
+    fail "inventory: cannot check symlink skip — manifest not created or jq missing (INV-03)"
+  fi
+  rm -rf "$P21_INV_WORK"
+  trap - EXIT
+
+  # INV-03: 500-file cap — use generate-large.sh
+  P21_CAP_WORK="$(mktemp -d)"
+  trap 'rm -rf "$P21_CAP_WORK"' EXIT
+  mkdir -p "$P21_CAP_WORK/target"
+  printf '# CLAUDE\n\nCap test fixture.\n' > "$P21_CAP_WORK/target/CLAUDE.md"
+  bash "$CONJURE_HOME/tests/fixtures/brownfield-simple/generate-large.sh" "$P21_CAP_WORK/target" >/dev/null 2>&1
+  P21_MANIFEST="$P21_CAP_WORK/adopt-manifest.json"
+  (
+    source "$CONJURE_HOME/lib/mutate.sh"
+    [ -f "$CONJURE_HOME/lib/caps.sh" ]     && source "$CONJURE_HOME/lib/caps.sh"
+    [ -f "$CONJURE_HOME/lib/log.sh" ]      && source "$CONJURE_HOME/lib/log.sh"
+    [ -f "$CONJURE_HOME/lib/inventory.sh" ] && source "$CONJURE_HOME/lib/inventory.sh"
+    DRY_RUN=0
+    RESTRUCTURE_LOG_PATH="$P21_CAP_WORK/RESTRUCTURE-LOG.md"
+    CONJURE_DRY_MUTATION_COUNT=0
+    inventory_scan "$P21_CAP_WORK/target" 2>/dev/null || true
+    inventory_emit_manifest "$P21_CAP_WORK/target" "$P21_MANIFEST" 2>/dev/null || true
+  )
+  if [ -f "$P21_MANIFEST" ] && command -v jq >/dev/null 2>&1; then
+    if jq -e '.summary.scan_capped == true' "$P21_MANIFEST" >/dev/null 2>&1; then
+      pass "inventory: scan_capped=true for 510-file fixture (INV-03)"
+    else
+      fail "inventory: scan_capped expected true for 510-file fixture (INV-03)"
+    fi
+    if jq -e '.summary.total_found > 500' "$P21_MANIFEST" >/dev/null 2>&1; then
+      pass "inventory: total_found > 500 (INV-03)"
+    else
+      P21_TF="$(jq '.summary.total_found // "N/A"' "$P21_MANIFEST" 2>/dev/null || echo "N/A")"
+      fail "inventory: total_found expected >500, got $P21_TF (INV-03)"
+    fi
+    if jq -e '(.files | length) <= 500' "$P21_MANIFEST" >/dev/null 2>&1; then
+      pass "inventory: files[] capped at <= 500 entries (INV-03)"
+    else
+      P21_FL="$(jq '.files | length' "$P21_MANIFEST" 2>/dev/null || echo "N/A")"
+      fail "inventory: files[] length $P21_FL exceeds cap of 500 (INV-03)"
+    fi
+    # Harness-first: CLAUDE.md must be in files[]
+    if jq -e '.files[] | select(.path == "CLAUDE.md") | .classification == "core"' "$P21_MANIFEST" >/dev/null 2>&1; then
+      pass "inventory: CLAUDE.md always included (harness-first budget) (INV-03)"
+    else
+      fail "inventory: CLAUDE.md missing from files[] in 510-file fixture (INV-03)"
+    fi
+  else
+    fail "inventory: cannot check cap behavior — manifest not created or jq missing (INV-03)"
+  fi
+  rm -rf "$P21_CAP_WORK"
+  trap - EXIT
+
+  # INV-04: size_cap_exceeded for oversized CLAUDE.md
+  P21_SZ_WORK="$(mktemp -d)"
+  trap 'rm -rf "$P21_SZ_WORK"' EXIT
+  mkdir -p "$P21_SZ_WORK/target"
+  printf '# CLAUDE\n\nOversized test.\n' > "$P21_SZ_WORK/target/CLAUDE.md"
+  # Add 105 lines to exceed CLAUDE_MD_CAP=100
+  i=1
+  while [ "$i" -le 105 ]; do printf '# filler %s\n' "$i" >> "$P21_SZ_WORK/target/CLAUDE.md"; i=$((i+1)); done
+  P21_MANIFEST="$P21_SZ_WORK/adopt-manifest.json"
+  (
+    source "$CONJURE_HOME/lib/mutate.sh"
+    [ -f "$CONJURE_HOME/lib/caps.sh" ]     && source "$CONJURE_HOME/lib/caps.sh"
+    [ -f "$CONJURE_HOME/lib/log.sh" ]      && source "$CONJURE_HOME/lib/log.sh"
+    [ -f "$CONJURE_HOME/lib/inventory.sh" ] && source "$CONJURE_HOME/lib/inventory.sh"
+    DRY_RUN=0
+    RESTRUCTURE_LOG_PATH="$P21_SZ_WORK/RESTRUCTURE-LOG.md"
+    CONJURE_DRY_MUTATION_COUNT=0
+    inventory_scan "$P21_SZ_WORK/target" 2>/dev/null || true
+    inventory_emit_manifest "$P21_SZ_WORK/target" "$P21_MANIFEST" 2>/dev/null || true
+  )
+  if [ -f "$P21_MANIFEST" ] && command -v jq >/dev/null 2>&1; then
+    if jq -e '.files[] | select(.path == "CLAUDE.md") | .size_cap_exceeded == true' "$P21_MANIFEST" >/dev/null 2>&1; then
+      pass "inventory: size_cap_exceeded=true for 108-line CLAUDE.md (INV-04)"
+    else
+      fail "inventory: size_cap_exceeded expected true for oversized CLAUDE.md (INV-04)"
+    fi
+    if jq -e '.size_cap_violations | length > 0' "$P21_MANIFEST" >/dev/null 2>&1; then
+      pass "inventory: size_cap_violations[] populated (INV-04)"
+    else
+      fail "inventory: size_cap_violations[] empty for oversized CLAUDE.md (INV-04)"
+    fi
+  else
+    fail "inventory: cannot check size cap violation — manifest not created or jq missing (INV-04)"
+  fi
+  rm -rf "$P21_SZ_WORK"
+  trap - EXIT
+fi
+
+echo
+echo "▸ Phase 21 — mutate_archive (SAFE-03)"
+
+P21_ARCHIVE_OK=0
+# mutate_archive lives in lib/mutate.sh — check if it has been added
+if ! grep -q "mutate_archive" "$CONJURE_HOME/lib/mutate.sh" 2>/dev/null; then
+  fail "mutate_archive not found in lib/mutate.sh — Wave 1 must add it (SAFE-03)"
+else
+  P21_ARCHIVE_OK=1
+
+  # DRY_RUN=1 test
+  P21_ARCH_TMPFILE="$(mktemp)"
+  P21_ARCH_DRY_ROOT="/tmp/conjure-p21-arch-dryroot-$$"
+  P21_ARCH_DRY_OUT="$(
+    DRY_RUN=1 _P21_ARCH_SRC="$P21_ARCH_TMPFILE" _P21_ARCH_ROOT="$P21_ARCH_DRY_ROOT" \
+    bash -c '
+      source "$CONJURE_HOME/lib/mutate.sh"
+      CONJURE_DRY_MUTATION_COUNT=0
+      mutate_archive "$_P21_ARCH_SRC" "$_P21_ARCH_ROOT"
+      printf "%s\n" "[count=$CONJURE_DRY_MUTATION_COUNT]"
+    ' 2>&1
+  )"
+  if printf '%s\n' "$P21_ARCH_DRY_OUT" | grep -q "would archive"; then
+    pass "mutate_archive DRY_RUN=1: output contains 'would archive' (SAFE-03)"
+  else
+    fail "mutate_archive DRY_RUN=1: missing 'would archive' — got: $P21_ARCH_DRY_OUT (SAFE-03)"
+  fi
+  if printf '%s\n' "$P21_ARCH_DRY_OUT" | grep -q "\[count=1\]"; then
+    pass "mutate_archive DRY_RUN=1: CONJURE_DRY_MUTATION_COUNT incremented (SAFE-03)"
+  else
+    fail "mutate_archive DRY_RUN=1: counter not incremented — got: $P21_ARCH_DRY_OUT (SAFE-03)"
+  fi
+  if [ -f "$P21_ARCH_TMPFILE" ]; then
+    pass "mutate_archive DRY_RUN=1: original file still exists (SAFE-03)"
+  else
+    fail "mutate_archive DRY_RUN=1: original file was deleted (SAFE-03)"
+  fi
+  rm -f "$P21_ARCH_TMPFILE"
+
+  # Live mode: file moved to archive, not deleted
+  P21_ARCH_WORK="$(mktemp -d)"
+  trap 'rm -rf "$P21_ARCH_WORK"' EXIT
+  P21_ARCH_SRC="$P21_ARCH_WORK/src/original.md"
+  mkdir -p "$P21_ARCH_WORK/src"
+  printf 'hello archive\n' > "$P21_ARCH_SRC"
+  P21_ARCH_ROOT="$P21_ARCH_WORK/archive-root"
+  source "$CONJURE_HOME/lib/mutate.sh"
+  DRY_RUN=0
+  CONJURE_DRY_MUTATION_COUNT=0
+  mutate_archive "$P21_ARCH_SRC" "$P21_ARCH_ROOT" 2>/dev/null
+  P21_ARCH_RC=$?
+  if [ ! -f "$P21_ARCH_SRC" ]; then
+    pass "mutate_archive live: source file no longer at original path (SAFE-03)"
+  else
+    fail "mutate_archive live: source file still present after archive (SAFE-03)"
+  fi
+  # Archive destination should preserve path structure
+  P21_ARCH_DEST_COUNT="$(find "$P21_ARCH_ROOT" -name 'original.md' 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${P21_ARCH_DEST_COUNT:-0}" -ge 1 ]; then
+    pass "mutate_archive live: file exists in archive at path-preserving location (SAFE-03)"
+  else
+    fail "mutate_archive live: file not found in archive (SAFE-03)"
+  fi
+  # Ledger file
+  if [ -f "$P21_ARCH_ROOT/.archive-ledger" ]; then
+    pass "mutate_archive live: .archive-ledger file created (SAFE-03)"
+  else
+    fail "mutate_archive live: .archive-ledger missing (SAFE-03)"
+  fi
+  if [ -f "$P21_ARCH_ROOT/.archive-ledger" ] && grep -q "original.md" "$P21_ARCH_ROOT/.archive-ledger"; then
+    pass "mutate_archive live: ledger contains source path (SAFE-03)"
+  else
+    fail "mutate_archive live: ledger missing or does not contain source path (SAFE-03)"
+  fi
+
+  # sha256 mismatch: create dest manually with wrong content, then try to archive
+  P21_ARCH_WORK2="$(mktemp -d)"
+  trap 'rm -rf "$P21_ARCH_WORK2"' EXIT
+  P21_SHA_SRC="$P21_ARCH_WORK2/src-sha.md"
+  printf 'original content\n' > "$P21_SHA_SRC"
+  P21_SHA_ROOT="$P21_ARCH_WORK2/sha-archive"
+  # Pre-populate archive destination with wrong content to simulate sha256 mismatch
+  P21_SHA_SRC_REL="${P21_SHA_SRC#/}"
+  P21_SHA_DEST_DIR="$P21_SHA_ROOT/$( dirname "$P21_SHA_SRC_REL" )"
+  mkdir -p "$P21_SHA_DEST_DIR"
+  printf 'corrupted content\n' > "$P21_SHA_ROOT/$P21_SHA_SRC_REL"
+  source "$CONJURE_HOME/lib/mutate.sh"
+  DRY_RUN=0
+  CONJURE_DRY_MUTATION_COUNT=0
+  mutate_archive "$P21_SHA_SRC" "$P21_SHA_ROOT" 2>/dev/null
+  P21_SHA_RC=$?
+  if [ "$P21_SHA_RC" -ne 0 ]; then
+    pass "mutate_archive: sha256 mismatch aborts (non-zero return) (SAFE-03)"
+  else
+    fail "mutate_archive: sha256 mismatch should abort, got rc=0 (SAFE-03)"
+  fi
+  if [ -f "$P21_SHA_SRC" ]; then
+    pass "mutate_archive: source preserved on sha256 mismatch (SAFE-03)"
+  else
+    fail "mutate_archive: source was deleted despite sha256 mismatch — D-13 violation (SAFE-03)"
+  fi
+  rm -rf "$P21_ARCH_WORK" "$P21_ARCH_WORK2"
+  trap - EXIT
+fi
+
+echo
+echo "▸ Phase 21 — audit-setup.sh caps (SC-5)"
+
+P21_AUDIT_CAP_COUNT=$(grep -v '^#' "$CONJURE_HOME/scripts/audit-setup.sh" 2>/dev/null | grep -c 'CLAUDE_MD_CAP' 2>/dev/null || true)
+P21_AUDIT_CAP_COUNT="${P21_AUDIT_CAP_COUNT:-0}"
+if [ "$P21_AUDIT_CAP_COUNT" -gt 0 ] 2>/dev/null; then
+  pass "audit-setup.sh uses CLAUDE_MD_CAP variable (SC-5)"
+else
+  fail "audit-setup.sh not yet updated — Plan 04 required to source lib/caps.sh (SC-5)"
+fi
+
+echo
+echo "▸ Phase 21 — manifest schema (SC-4)"
+
+if jq empty "$CONJURE_HOME/adopt-manifest.schema.json" >/dev/null 2>&1; then
+  pass "adopt-manifest.schema.json: valid JSON (SC-4)"
+else
+  fail "adopt-manifest.schema.json: invalid JSON (SC-4)"
+fi
+if [ "$(jq '.properties.files.items.properties.classification.enum | length' "$CONJURE_HOME/adopt-manifest.schema.json" 2>/dev/null)" = "6" ]; then
+  pass "adopt-manifest.schema.json: classification enum has 6 values (SC-4)"
+else
+  fail "adopt-manifest.schema.json: classification enum does not have 6 values (SC-4)"
+fi
+# Validate RESEARCH.md Pattern 7 sample JSON against schema structure
+P21_SCHEMA_SAMPLE="$(mktemp --suffix=.json 2>/dev/null || mktemp -t tmp.XXXXXX.json)"
+trap 'rm -f "$P21_SCHEMA_SAMPLE"' EXIT
+cat > "$P21_SCHEMA_SAMPLE" << 'SCHEMA_SAMPLE_EOF'
+{
+  "schema_version": "1",
+  "generated_at": "2026-05-28T14:23:00Z",
+  "conjure_version": "0.6.0",
+  "target": "/abs/path/to/repo",
+  "snapshot_path": "",
+  "summary": {
+    "total_files": 2,
+    "scan_capped": false,
+    "total_found": 2,
+    "core": 1,
+    "skill": 0,
+    "agent": 0,
+    "planning-doc": 0,
+    "reference-doc": 1,
+    "unknown": 0
+  },
+  "files": [
+    {
+      "path": "CLAUDE.md",
+      "classification": "core",
+      "line_count": 87,
+      "size_bytes": 4200,
+      "size_cap_exceeded": false,
+      "size_cap_limit": 100,
+      "linked_from": []
+    },
+    {
+      "path": "docs/guide.md",
+      "classification": "reference-doc",
+      "line_count": 45,
+      "size_bytes": 1800,
+      "size_cap_exceeded": false,
+      "size_cap_limit": null,
+      "linked_from": ["CLAUDE.md"]
+    }
+  ],
+  "size_cap_violations": [],
+  "harness_missing_layers": [],
+  "restructure_steps": []
+}
+SCHEMA_SAMPLE_EOF
+if jq -e '.schema_version and .summary and .files' "$P21_SCHEMA_SAMPLE" >/dev/null 2>&1; then
+  pass "Pattern 7 sample JSON: contains required top-level keys (SC-4)"
+else
+  fail "Pattern 7 sample JSON: missing required keys (SC-4)"
+fi
+rm -f "$P21_SCHEMA_SAMPLE"
+trap - EXIT
+
+echo
+echo "▸ Phase 21 — perf gate (CR-7)"
+
+if [ "$P21_INV_OK" -eq 1 ] || true; then
+  P21_PERF_WORK="$(mktemp -d)"
+  trap 'rm -rf "$P21_PERF_WORK"' EXIT
+  mkdir -p "$P21_PERF_WORK/target"
+  printf '# CLAUDE\n\nPerf test.\n' > "$P21_PERF_WORK/target/CLAUDE.md"
+  bash "$CONJURE_HOME/tests/fixtures/brownfield-simple/generate-large.sh" "$P21_PERF_WORK/target" >/dev/null 2>&1
+  if [ ! -f "$CONJURE_HOME/lib/inventory.sh" ]; then
+    fail "perf gate skipped — lib/inventory.sh not found (CR-7)"
+  else
+    P21_START="$(date +%s)"
+    (
+      source "$CONJURE_HOME/lib/mutate.sh"
+      [ -f "$CONJURE_HOME/lib/caps.sh" ]     && source "$CONJURE_HOME/lib/caps.sh"
+      [ -f "$CONJURE_HOME/lib/log.sh" ]      && source "$CONJURE_HOME/lib/log.sh"
+      [ -f "$CONJURE_HOME/lib/inventory.sh" ] && source "$CONJURE_HOME/lib/inventory.sh"
+      DRY_RUN=0
+      RESTRUCTURE_LOG_PATH="$P21_PERF_WORK/RESTRUCTURE-LOG.md"
+      CONJURE_DRY_MUTATION_COUNT=0
+      inventory_scan "$P21_PERF_WORK/target" 2>/dev/null || true
+      inventory_emit_manifest "$P21_PERF_WORK/target" "$P21_PERF_WORK/adopt-manifest.json" 2>/dev/null || true
+    )
+    P21_END="$(date +%s)"
+    P21_ELAPSED=$((P21_END - P21_START))
+    if [ "$P21_ELAPSED" -lt 30 ]; then
+      pass "perf gate: inventory_emit_manifest on 510-file fixture completed in ${P21_ELAPSED}s (< 30s) (CR-7)"
+    else
+      fail "perf gate: inventory_emit_manifest took ${P21_ELAPSED}s (>= 30s limit) (CR-7)"
+    fi
+  fi
+  rm -rf "$P21_PERF_WORK"
+  trap - EXIT
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# End Phase 21 test block
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Clean up any gh-hiding stub dirs created by mk_path_without_gh
+for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
+
 # Summary
 echo
 echo "═══════════════════════════════════════════════════════════════════"
