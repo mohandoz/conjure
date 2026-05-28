@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v0.6.0
 milestone_name: Safe Brownfield Adoption
-status: executing
-last_updated: "2026-05-28T17:29:37.555Z"
+status: ready_to_plan
+last_updated: 2026-05-28T19:24:59.601Z
 last_activity: 2026-05-28 -- Phase 21 execution started
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 4
   percent: 0
+stopped_at: Phase 21 complete (4/4) — ready to discuss Phase 22
 ---
 
 # Project State
@@ -20,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-28)
 
 **Core value:** A developer can turn any repo into a production-grade, eval-backed Claude Code harness with one trustworthy command — and keep it healthy over time.
-**Current focus:** Phase 21 — foundation-libs-inventory
+**Current focus:** Phase 22 — `conjure adopt` cli core + rollback
 
 ## Current Position
 
-Phase: 21 (foundation-libs-inventory) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 21
-Last activity: 2026-05-28 -- Phase 21 execution started
+Phase: 22
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-05-28
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -35,7 +36,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 55 (v0.3.0: 22, v0.4.0: 23, v0.5.0: 10)
+- Total plans completed: 59 (v0.3.0: 22, v0.4.0: 23, v0.5.0: 10)
 - Average duration: — min
 - Total execution time: —
 
@@ -46,6 +47,7 @@ Progress: [░░░░░░░░░░] 0%
 | v0.3.0 phases 01–07 | 22 | - | - |
 | v0.4.0 phases 08–15.1 | 23 | - | - |
 | v0.5.0 phases 16–20 | 10 | - | - |
+| 21 | 4 | - | - |
 
 **Recent Trend:**
 
