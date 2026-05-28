@@ -19,8 +19,11 @@
 #   HOME             → $SANDBOX_DIR
 #   XDG_CONFIG_HOME  → $SANDBOX_DIR
 #   CLAUDE_CONFIG_DIR → $SANDBOX_DIR
-#   PATH             → $CONJURE_HOME/cli:[resolved-node-dir]:/usr/local/bin:/usr/bin:/bin
-#                      resolved-node-dir is empty when node is not in PATH (safe no-op).
+#   PATH             → $CONJURE_HOME/cli:[node]:[git]:[jq]:[python3]:/usr/local/bin:/usr/bin:/bin
+#                      Each resolved-tool dir is empty when the tool is absent (safe
+#                      no-op). git/jq/python3 are resolved dynamically because they
+#                      live outside /usr/bin on Git Bash (e.g. /mingw64/bin), and a
+#                      hardcoded PATH would drop them on Windows runners (WR-01).
 #
 # Cleanup:
 #   trap 'rm -rf "$SANDBOX_DIR"' EXIT is registered inside sandbox_setup() (per D-06).
@@ -28,6 +31,15 @@
 #
 # CONJURE_HOME is intentionally NOT overridden (per D-05, Pitfall 5).
 # The kit location must stay real so CLI invocations resolve kit scripts correctly.
+
+# _sandbox_tool_dir <name> — echo the parent dir of <name>, or nothing if absent.
+# Used to keep critical tools reachable after the sandbox resets PATH, regardless
+# of where they are installed (nvm/fnm/Homebrew, or /mingw64/bin on Git Bash).
+_sandbox_tool_dir() {
+  local _p
+  _p="$(command -v "$1" 2>/dev/null || true)"
+  [ -n "$_p" ] && dirname "$_p"
+}
 
 # sandbox_setup <fixture_dir>
 # Sets SANDBOX_DIR (global), copies fixture contents into it, exports isolation vars.
@@ -39,9 +51,13 @@ sandbox_setup() {
   export HOME="$SANDBOX_DIR"
   export XDG_CONFIG_HOME="$SANDBOX_DIR"
   export CLAUDE_CONFIG_DIR="$SANDBOX_DIR"
-  # Resolve node's parent directory so nvm/fnm/volta/Homebrew installations remain
-  # reachable inside the sandbox. Falls back gracefully when node is absent (WR-01).
-  local _node_dir
-  _node_dir="$(dirname "$(command -v node 2>/dev/null || true)" 2>/dev/null || true)"
-  export PATH="$CONJURE_HOME/cli:${_node_dir:+$_node_dir:}/usr/local/bin:/usr/bin:/bin"
+  # Resolve parent dirs of critical tools so installations outside /usr/bin stay
+  # reachable in-sandbox. On Git Bash git/jq/python3 live in /mingw64/bin or /cmd,
+  # so a hardcoded /usr/bin:/bin would drop them and break ~all Windows tests (WR-01).
+  local _node_dir _git_dir _jq_dir _py_dir
+  _node_dir="$(_sandbox_tool_dir node)"
+  _git_dir="$(_sandbox_tool_dir git)"
+  _jq_dir="$(_sandbox_tool_dir jq)"
+  _py_dir="$(_sandbox_tool_dir python3)"
+  export PATH="$CONJURE_HOME/cli:${_node_dir:+$_node_dir:}${_git_dir:+$_git_dir:}${_jq_dir:+$_jq_dir:}${_py_dir:+$_py_dir:}/usr/local/bin:/usr/bin:/bin"
 }

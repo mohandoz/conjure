@@ -15,6 +15,28 @@ t() { TESTS+=("$1"); }
 pass() { echo "  ✓ $1"; PASS=$((PASS+1)); }
 fail() { echo "  ✗ $1"; FAIL=$((FAIL+1)); }
 
+# mk_path_without_gh — echo a PATH value in which `gh` is unresolvable.
+# A naive "strip gh's dir, re-add git's dir" breaks when gh and git share a
+# directory (e.g. /usr/bin on GitHub runners): re-adding git's dir restores gh.
+# Instead mirror gh's dir into a temp stub via symlinks (every sibling EXCEPT
+# gh), then swap the real dir for the stub. Echoes $PATH unchanged if gh absent.
+GH_HIDE_STUBS=""
+mk_path_without_gh() {
+  local gh_loc gh_dir stub f base filtered
+  gh_loc="$(command -v gh 2>/dev/null || true)"
+  if [ -z "$gh_loc" ]; then printf '%s' "$PATH"; return 0; fi
+  gh_dir="$(dirname "$gh_loc")"
+  stub="$(mktemp -d)"
+  GH_HIDE_STUBS="${GH_HIDE_STUBS:+$GH_HIDE_STUBS }$stub"
+  for f in "$gh_dir"/*; do
+    base="$(basename "$f")"
+    [ "$base" = "gh" ] && continue
+    ln -s "$f" "$stub/$base" 2>/dev/null || true
+  done
+  filtered="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$gh_dir" | tr '\n' ':' | sed 's/:$//')"
+  printf '%s' "${stub}:${filtered}"
+}
+
 echo "═══════════════════════════════════════════════════════════════════"
 echo "Conjure test suite — version $(cat VERSION)"
 echo "═══════════════════════════════════════════════════════════════════"
@@ -536,6 +558,16 @@ TLMY_FX="$CONJURE_HOME/tests/fixtures/python-fastapi"
 sandbox_setup "$TLMY_FX"
 trap 'rm -rf "$SANDBOX_DIR"' EXIT
 
+# The telemetry hook runs under native node; on Git Bash a POSIX cwd (/tmp/...)
+# is mis-resolved relative to the current drive, so the JSONL lands somewhere the
+# POSIX-path file checks below can't see. cygpath -m yields a forward-slash Windows
+# path (JSON-safe, resolves to the same physical dir). No-op off Windows (WR-01).
+if command -v cygpath >/dev/null 2>&1; then
+  TLMY_CWD="$(cygpath -m "$SANDBOX_DIR")"
+else
+  TLMY_CWD="$SANDBOX_DIR"
+fi
+
 # TLMY-01: hook exits 0 silently when CONJURE_TELEMETRY is unset
 UNSET_RC=0
 printf '{}' | CONJURE_TELEMETRY="" node "$TLMY_HOOK" >/dev/null 2>&1 || UNSET_RC=$?
@@ -553,7 +585,7 @@ else
 fi
 
 # TLMY-01: DO_NOT_TRACK=1 suppresses writes even when CONJURE_TELEMETRY=1
-SKILL_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill_name":"test-skill"},"session_id":"sess-001","cwd":"'"$SANDBOX_DIR"'"}'
+SKILL_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill_name":"test-skill"},"session_id":"sess-001","cwd":"'"$TLMY_CWD"'"}'
 DNT_RC=0
 printf '%s' "$SKILL_PAYLOAD" | DO_NOT_TRACK=1 CONJURE_TELEMETRY=1 node "$TLMY_HOOK" >/dev/null 2>&1 || DNT_RC=$?
 if [ "$DNT_RC" -eq 0 ]; then
@@ -604,7 +636,7 @@ if [ -f "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl" ]; then
 fi
 
 # TLMY-02b: UserPromptExpansion path writes JSONL (skill_typed event)
-UPE_PAYLOAD='{"hook_event_name":"UserPromptExpansion","command_name":"/test-skill","session_id":"sess-002","cwd":"'"$SANDBOX_DIR"'"}'
+UPE_PAYLOAD='{"hook_event_name":"UserPromptExpansion","command_name":"/test-skill","session_id":"sess-002","cwd":"'"$TLMY_CWD"'"}'
 UPE_RC=0
 printf '%s' "$UPE_PAYLOAD" | CONJURE_TELEMETRY=1 node "$TLMY_HOOK" >/dev/null 2>&1 || UPE_RC=$?
 if [ "$UPE_RC" -eq 0 ]; then
@@ -1040,20 +1072,8 @@ else
 fi
 
 # SKILL-02: gh absent — printed output contains "manually" or github.com URL
-SAVED_PATH2="$PATH"
-GH_LOC="$(command -v gh 2>/dev/null || true)"
-FILTERED_PATH="$PATH"
-if [ -n "$GH_LOC" ]; then
-  GH_LOC_DIR="$(dirname "$GH_LOC")"
-  GIT_LOC_DIR="$(dirname "$(command -v git)")"
-  FILTERED_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$GH_LOC_DIR" | tr '\n' ':' | sed 's/:$//')"
-  case ":$FILTERED_PATH:" in
-    *":$GIT_LOC_DIR:"*) ;;
-    *) FILTERED_PATH="${GIT_LOC_DIR}:${FILTERED_PATH}" ;;
-  esac
-fi
+FILTERED_PATH="$(mk_path_without_gh)"
 NOGH_OUT="$(PATH="$FILTERED_PATH" skill_run test-skill myorg/myrepo 2>&1)"
-PATH="$SAVED_PATH2"
 if printf '%s\n' "$NOGH_OUT" | grep -qE 'manually|github\.com'; then
   pass "publish-skill prints manual URL when gh is absent (SKILL-02)"
 else
@@ -1542,19 +1562,8 @@ trap - EXIT
 echo
 echo "▸ Auto-PR tests (AUTPR-01, AUTPR-02)"
 
-# Build a FILTERED_PATH that strips gh (same pattern as SKILL-02 lines 1044-1054)
-AUTPR_SAVED_PATH="$PATH"
-AUTPR_GH_LOC="$(command -v gh 2>/dev/null || true)"
-AUTPR_FILTERED_PATH="$PATH"
-if [ -n "$AUTPR_GH_LOC" ]; then
-  AUTPR_GH_LOC_DIR="$(dirname "$AUTPR_GH_LOC")"
-  AUTPR_GIT_LOC_DIR="$(dirname "$(command -v git)")"
-  AUTPR_FILTERED_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$AUTPR_GH_LOC_DIR" | tr '\n' ':' | sed 's/:$//')"
-  case ":$AUTPR_FILTERED_PATH:" in
-    *":$AUTPR_GIT_LOC_DIR:"*) ;;
-    *) AUTPR_FILTERED_PATH="${AUTPR_GIT_LOC_DIR}:${AUTPR_FILTERED_PATH}" ;;
-  esac
-fi
+# Build a PATH in which gh is unresolvable (mirror-stub; handles gh/git colocation)
+AUTPR_FILTERED_PATH="$(mk_path_without_gh)"
 
 # AUTPR-01a — zero-drift guard: fully-current harness → "Harness is current" + exit 0
 # Note: --pr checks for gh before the zero-drift guard, so we stub gh to a no-op binary.
@@ -1666,6 +1675,9 @@ else
 fi
 rm -rf "$AUTPR_DIR"
 trap - EXIT
+
+# Clean up any gh-hiding stub dirs created by mk_path_without_gh
+for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
 # Summary
 echo
