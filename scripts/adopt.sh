@@ -329,6 +329,16 @@ rollback_path() {
     mutate_rm "$TARGET/$p"
     created_count=$((created_count + 1))
   done < "$created_list"
+  # Safety net (D-02/D-03): conjure-managed, gitignored scaffold artifacts that
+  # init-project.sh always creates fresh and the snapshot (taken PRE-scaffold) never
+  # holds. These belong to created[], but on a Windows runner the find/comm diff that
+  # populates created[] can miss a path (separator/locale edge), leaving the artifact
+  # behind and breaking the zero-diff post-rollback contract. rm -f is idempotent — a
+  # no-op when the file was already removed above. Keep this list = conjure-owned files
+  # that are never part of a user's pre-adopt tree.
+  for _orphan in ".claude/COMPOUND-CANDIDATES.md"; do
+    [ -e "$TARGET/$_orphan" ] && mutate_rm "$TARGET/$_orphan"
+  done
   # Bottom-up empty-dir prune (longest paths first). Only remove dirs absent from the
   # snapshot — any original dir (even if it ended up empty) lives in the snapshot and
   # is preserved. rmdir is a no-op on non-empty dirs, so this never deletes content.
@@ -665,11 +675,17 @@ run_pipeline() {
   fi
 
   # Capture CLAUDE.md "before" line count from the live tree (Pitfall 6: wc -l <).
+  # NOTE: the "before" sha256 is captured AFTER snapshot_guarded (below), NOT here.
+  # The rollback contract is "restore to the SNAPSHOT state", and snapshot_rollback
+  # reproduces the bytes the snapshot captured. Capturing the before-hash pre-snapshot
+  # risks recording a hash the restore cannot reproduce — e.g. on a Windows runner with
+  # core.autocrlf=true the live checkout is CRLF and the tar/cp snapshot↔restore round
+  # trip can diverge from a pre-snapshot reading — making the step-3 sha256 verify abort
+  # rollback even though nothing was actually mutated (the bug this fixes).
   local before_lines after_lines claude_before_sha
   before_lines=0
   if [ -f "$TARGET/CLAUDE.md" ]; then
     before_lines="$(wc -l < "$TARGET/CLAUDE.md" | tr -d ' ')"
-    claude_before_sha="$(sha_of "$TARGET/CLAUDE.md")"
   fi
 
   # Audit BEFORE scaffold (ADOPT-05): capture rc, do NOT abort.
@@ -694,6 +710,15 @@ run_pipeline() {
       state_set_snapshot "$CONJURE_SNAPSHOT_PATH"
       state_set_step snapshot completed
     fi
+  fi
+
+  # Capture CLAUDE.md "before" sha256 from the just-snapshotted tree (SAFE-02 source
+  # of truth). The live CLAUDE.md here is byte-identical to the snapshot copy, so the
+  # recorded before-hash is exactly what snapshot_rollback will reproduce — the step-3
+  # rollback verify (adopt.sh ~352) then matches on every platform (cross-platform fix:
+  # Windows core.autocrlf=true CRLF round-trips no longer fabricate a sha mismatch).
+  if [ -f "$TARGET/CLAUDE.md" ]; then
+    claude_before_sha="$(sha_of "$TARGET/CLAUDE.md")"
   fi
 
   # Step 2: inventory (ADOPT-01). Read-only scan, then emit the manifest.
