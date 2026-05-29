@@ -338,20 +338,19 @@ grep -q '^@' "$P24_TARGET/CLAUDE.md" && fail "@import leaked to target CLAUDE.md
 
 **All other claims in this research are VERIFIED (read source + ran the pipeline this session) — no other assumptions.**
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All three resolved during planning; resolutions recorded in 24-VALIDATION.md "## Planning Resolutions" (O-1/O-2/O-3) and encoded in plans 24-01/24-02.
 
 1. **Criterion 3 "nothing to scaffold" — assert the real signal, or make a source deviation?**
    - What we know: the shipped `report()` (`scripts/adopt.sh:236-245`) prints `Scaffolded: ${created_count} layer files`. On an idempotent re-run, `created_count == 0` (empirically verified). The literal string "nothing to scaffold" exists nowhere in the codebase.
-   - What's unclear: whether the ROADMAP phrase is normative (the tool must say those words) or descriptive (the tool must make zero mutations and report it).
-   - **Recommendation:** Do BOTH. (a) Assert the already-true signal: `Scaffolded: 0 layer files` AND `state.json .created | length == 0`. (b) Make a tiny, well-scoped `report()` deviation: emit `nothing to scaffold` (or `Scaffolded: nothing to scaffold`) when `created_count` is 0, so the criterion text and the test literally agree. This is a 1-line conditional in `report()`, within the CONTEXT's "fix at source as a deviation" allowance. Flag it explicitly in the plan as a deviation.
+   - **RESOLVED — do BOTH (O-1):** (a) assert the already-true signals (`Scaffolded: 0 layer files`, `state.json .created|length==0`, `diff -r` excl D-03 between run-1-after and run-2-after empty); (b) make a minimal 1-line additive `report()` deviation emitting the literal `nothing to scaffold` when `created_count` is 0, so the ROADMAP criterion text and the test agree. Scoped as a documented deviation in plan 24-01; 429-green no-regression is an acceptance criterion. See 24-VALIDATION.md O-1.
 
 2. **Does the live-adopt path need a git-clean tree for argus?**
-   - What we know: `precondition_git()` skips the gate on a non-git target (`adopt.sh:157-160`). A `mktemp -d` sandbox is non-git, so live adopt proceeds without `git init`.
-   - **Recommendation:** Run criteria 1–5 in a plain non-git sandbox (simplest, correct). Only `git init` if a future criterion requires the dirty-tree gate (none of Phase 24's five do).
+   - **RESOLVED — no `git init` needed (O-2):** `precondition_git()` skips the gate on a non-git target (`adopt.sh:157-160`); a `mktemp -d` sandbox is non-git so live adopt runs the full path. Criteria 1–5 run in a plain non-git sandbox. See 24-VALIDATION.md O-2.
 
 3. **Where in `run.sh` does the `▸ Phase 24` block go?**
-   - What we know: the Phase 23 block ends at `run.sh:3280`; the Summary starts at `:3285`.
-   - **Recommendation:** Insert the `▸ Phase 24` block after `:3280` (end of Phase 23) and before the gh-stub cleanup at `:3283`/Summary at `:3285`. Mirror the section-header comment-banner style.
+   - **RESOLVED — after `:3280` (O-3):** insert the `▸ Phase 24` block after the end of the Phase 23 block (`:3280`) and before the gh-stub cleanup/Summary, behind a `P24_ARGUS_OK` guard, mirroring the section-banner style. See 24-VALIDATION.md O-3 + plan 24-02.
 
 ## Environment Availability
 
