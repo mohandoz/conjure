@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v0.6.0
 milestone_name: Safe Brownfield Adoption
 status: executing
-last_updated: "2026-05-29T03:15:09.833Z"
-last_activity: 2026-05-29 -- Phase 24 planning complete
+last_updated: "2026-05-29T03:22:47.011Z"
+last_activity: 2026-05-29
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 75
 ---
 
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-05-28)
 ## Current Position
 
 Phase: 24 (integration-tests-argus-fixture) — EXECUTING
-Plan: 1 of ?
+Plan: 2 of 2
 Status: Ready to execute
-Last activity: 2026-05-29 -- Phase 24 planning complete
+Last activity: 2026-05-29
 
-Progress: [██████████] 100%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [██████████] 100%
 | Phase 23 P23-01 | 14 | 2 tasks | 9 files |
 | Phase 23 P23-02 | 35 | 2 tasks | 5 files |
 | Phase 23 P23-03 | 9 | 2 tasks | 4 files |
+| Phase 24 P24-01 | 4 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,8 @@ Full decision log in PROJECT.md Key Decisions table. Key v0.6.0 design decisions
 - [Phase ?]: Phase 23 Wave 1: 4 deterministic gate helpers shipped (verify-invariants/audit-staged/extract-invariants/decision-scan); all exit 2 never exit 1, shellcheck-clean; audit-staged BLOCK keys on named conditions not audit rc; fixed check.sh to skip SKILL.md-less skill dirs
 - [Phase 23]: Wave 2: thin restructure SKILL.md ([Read, Bash] chokepoint, <=200 lines, orchestration prose only) + per-class /dev/tty approve/skip/edit driver (non-TTY exit-2, one RESTRUCTURE summary line per bucket, no external editor on edit/O-3); scaffolded via init-project.sh whole-dir copy
 - [Phase 23]: check.sh drift manifest now registers every kit file under an installable skill dir (SKILL.md + attached gates/*.sh), not just SKILL.md - whole-dir-copied helpers are no longer spurious added-drift and ARE integrity-checked
+- [Phase ?]: [Phase 24] Plan 01: _brownfield-argus is a generator-script fixture (509 .md + real ln -s symlink + 127-line oversized CLAUDE.md + @import seed materialized at test time), exit 2 not exit 1, shellcheck-clean; only the generator is committed
+- [Phase ?]: [Phase 24] Plan 01: O-1 report() deviation is a single ADDITIVE conditional echo — emits literal 'nothing to scaffold' when created_count==0 while preserving the 'Scaffolded: 0 layer files' count line; full suite stays PASS 429/0
 
 ### Pending Todos
 
@@ -112,6 +115,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-05-29T02:20:03.671Z
-Stopped at: Completed 23-01-PLAN.md (Phase 23 Wave 0 test-first foundation)
+Last session: 2026-05-29T03:22:47.006Z
+Stopped at: Completed 24-01-PLAN.md (Phase 24 Wave 1)
 Resume file: None

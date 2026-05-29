@@ -136,7 +136,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 24-01-PLAN.md — Wave 1: `_brownfield-argus` 500-file fixture generator (bulk .md + real `ln -s` symlink + oversized CLAUDE.md + @import seed) + the criterion-3 `report()` "nothing to scaffold" deviation (O-1)
+- [x] 24-01-PLAN.md — Wave 1: `_brownfield-argus` 500-file fixture generator (bulk .md + real `ln -s` symlink + oversized CLAUDE.md + @import seed) + the criterion-3 `report()` "nothing to scaffold" deviation (O-1)
 
 **Wave 2** *(blocked on Wave 1 — consumes the generator + the report() deviation)*
 
@@ -154,4 +154,4 @@ Plans:
 | 21. Foundation Libs + Inventory | v0.6.0 | 4/4 | Complete    | 2026-05-28 |
 | 22. `conjure adopt` CLI Core + Rollback | v0.6.0 | 3/3 | Complete    | 2026-05-28 |
 | 23. Restructure Skill + Safety Gates | v0.6.0 | 3/3 | Complete    | 2026-05-29 |
-| 24. Integration Tests + Argus Fixture | v0.6.0 | 0/2 | Not started | - |
+| 24. Integration Tests + Argus Fixture | v0.6.0 | 1/2 | In Progress|  |
