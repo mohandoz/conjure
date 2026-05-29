@@ -125,6 +125,9 @@ for bucket in $BUCKETS; do
     case "$CHOICE" in
       a|approve)
         applied=0
+        # IN-02: track failed applies too so the bucket summary does not silently
+        # under-report (a path-rejected write must be visible to the human).
+        failed=0
         # Apply every proposed step whose dest/src belongs to a file in this bucket.
         # Bucket membership keys on the file path appearing as the step dest or src.
         paths_tmp="$(mktemp)"
@@ -159,13 +162,16 @@ for bucket in $BUCKETS; do
           [ -n "$id" ] || continue
           if bash "$CONJURE_BIN" adopt --apply-step "$id" "$TARGET" >/dev/null 2>&1; then
             applied=$((applied + 1))
+          else
+            failed=$((failed + 1))
           fi
         done
         exec 4<&-
         rm -f "$paths_tmp" "$steps_tmp"
-        # ONE summary line for the whole bucket (D-09 / SAFE-07).
-        log_step RESTRUCTURE "approved $bucket bucket — applied $applied step(s)"
-        echo "  approved ($applied step(s) applied)"
+        # ONE summary line for the whole bucket (D-09 / SAFE-07). IN-02: include the
+        # failed count so a partially-applied bucket is not reported as fully done.
+        log_step RESTRUCTURE "approved $bucket bucket — applied $applied step(s), $failed failed"
+        echo "  approved ($applied step(s) applied, $failed failed)"
         break
         ;;
       s|skip)

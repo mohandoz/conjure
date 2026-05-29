@@ -103,7 +103,11 @@ while IFS= read -r harness_file; do
     .claude/COMPOUND-CANDIDATES.md) continue ;;
     .claude/docs/*) continue ;;
   esac
-  if ! grep -qF "$rel" "$MANIFEST" 2>/dev/null; then
+  # IN-04: anchor to a WHOLE-LINE match (-x). Manifest entries are bare relative
+  # paths one-per-line, so an unanchored -qF substring match would falsely treat a
+  # short added path as "registered" when it is a substring of a longer manifest
+  # path (more likely now that nested skill-resource paths are registered).
+  if ! grep -qxF "$rel" "$MANIFEST" 2>/dev/null; then
     added="$added$rel\n"
   fi
 done < <(find "$TARGET/.claude" -type f 2>/dev/null | sort)

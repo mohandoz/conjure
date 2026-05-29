@@ -14,7 +14,7 @@ source "$KIT/lib/mutate.sh"
 
 if [[ "$MODE" != "new" && "$MODE" != "existing" ]]; then
   echo "Usage: $0 [new|existing] [target-dir]"
-  exit 1
+  exit 2
 fi
 
 cd "$TARGET"
