@@ -61,10 +61,14 @@ trap 'echo "interrupted — partial state at $STATE_DIR; recover with --rollback
 
 # ── sha256 helper (cross-platform; exact mutate.sh 113-123 pattern) ───────────
 sha_of() {
+  # tr -d '\r': on Windows Git Bash (MSYS) the coreutils sha256sum can emit a
+  # CR before the line terminator; an unstripped \r poisons every later string
+  # compare (recorded before-hash vs verify-hash) and fabricates a rollback
+  # mismatch on an unchanged file. No-op on macOS/Linux (no CR to strip).
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" 2>/dev/null | cut -d' ' -f1
+    sha256sum "$1" 2>/dev/null | cut -d' ' -f1 | tr -d '\r'
   else
-    shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1
+    shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1 | tr -d '\r'
   fi
 }
 
@@ -343,6 +347,7 @@ rollback_path() {
   # snapshot can't account for) — keeps the post-rollback tree byte-identical (D-03).
   local created_count=0 p
   while IFS= read -r p; do
+    p="${p%$'\r'}"
     [ -n "$p" ] || continue
     mutate_rm "$TARGET/$p"
     created_count=$((created_count + 1))
@@ -370,11 +375,16 @@ rollback_path() {
               2>/dev/null | awk '{ print length, $0 }' | sort -rn | cut -d' ' -f2-)
 
   # Step 3: verify every mutated[] file's sha256 == recorded before-hash (SAFE-02).
-  local mismatch=0 path before
+  local mismatch=0 path before got
   while IFS=$'\t' read -r path before; do
+    # Strip any MSYS-injected CR from the tab-split fields (Windows Git Bash).
+    path="${path%$'\r'}"; before="${before%$'\r'}"
     [ -n "$path" ] || continue
-    if [ "$(sha_of "$TARGET/$path")" != "$before" ]; then
-      echo "✗ adopt.sh: --rollback: sha256 mismatch after restore: $path" >&2
+    got="$(sha_of "$TARGET/$path")"
+    if [ "$got" != "$before" ]; then
+      # Bracket-delimited values surface trailing CR/whitespace vs a real byte
+      # divergence on the windows-test log (cannot reproduce locally).
+      echo "✗ adopt.sh: --rollback: sha256 mismatch after restore: $path (got=[$got] want=[$before])" >&2
       mismatch=1
     fi
   done < "$mutated_list"
@@ -807,7 +817,7 @@ run_pipeline() {
       # PRIMARY (Windows-safe): trust init-project.sh's own created list. Normalize a
       # leading ./, expand any directory entry to its files (relative to $TARGET).
       while IFS= read -r newf; do
-        newf="${newf#./}"
+        newf="${newf%$'\r'}"; newf="${newf#./}"
         [ -n "$newf" ] || continue
         if [ -d "$TARGET/$newf" ]; then
           ( cd "$TARGET" && find "$newf" -type f 2>/dev/null ) >> "$created_flat"
@@ -821,7 +831,7 @@ run_pipeline() {
     fi
     # Record deduped, ./-normalized paths into created[]; mutate_rm is per-file (D-02).
     while IFS= read -r newf; do
-      newf="${newf#./}"
+      newf="${newf%$'\r'}"; newf="${newf#./}"
       [ -n "$newf" ] || continue
       state_add_created "$newf"
       created_n=$((created_n + 1))

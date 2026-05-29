@@ -123,3 +123,66 @@ Local (macOS) verification BEFORE this CI cycle:
 ## Resolution status
 
 Fix #2 applied (tar temp-file + manifest-driven created[] + 3-point diag); committed; awaiting the single windows-test CI confirmation cycle. Cannot reproduce Windows locally — reasoned from code + binary-pipe pathology, kept macOS suite green (439/0), shellcheck clean, local adopt/rollback verified. If the diag shows the mismatch persists, the (a)/(b)/(c) shas pinpoint create-vs-restore for the next cycle.
+
+## Update 2026-05-29 (CI run 26657033420, commit cbb75ff) — FIX #2 FAILED, but byte-fidelity CONFIRMED
+
+windows-test PASS 434 / FAIL 5 (SAME 5). Other 4 jobs green (test, windows-hook-wiring, audit-on-fixture, windows-ps1-shim).
+
+**Decisive new signal — the tar round-trip IS byte-faithful (fix #2 worked).** The test
+`✓ adopt.sh rollback: every pre-adopt file sha256 == recorded before-hash` PASSED. That
+test compares the PRISTINE pre-adopt file bytes (test's own p22_sha) against the
+POST-rollback file bytes. PASS ⇒ restored CLAUDE.md == pristine CLAUDE.md exactly. So the
+snapshot↔restore tar temp-file round-trip is byte-faithful on Windows. The "tar PIPE
+corruption" theory was the WRONG remaining cause for the step-3 abort.
+
+**The real remaining failure is the INTERNAL step-3 compare, not the restore.** adopt.sh
+step-3 does `sha_of(restored CLAUDE.md) != $before` where `$before` = recorded
+`claude_before_sha`. It aborts with `✗ sha256 mismatch after restore: CLAUDE.md` even though
+restored == pristine. Paradox by pure code reading:
+- `audit-setup.sh` (runs at adopt.sh:708, BEFORE snapshot) is READ-ONLY re CLAUDE.md (only `wc -l` + `grep`). VERIFIED.
+- `snapshot_guarded` (722) never mutates the live target's CLAUDE.md. VERIFIED.
+- Nothing touches CLAUDE.md between snapshot(722) and the before-hash capture(735).
+- Test proves the full round-trip is identity. ⇒ step-3 SHOULD pass. But it FAILS.
+One premise is false on Windows ONLY, in a way invisible to code reading.
+
+**3-point diag (a/b/c) NEVER FIRED** — root cause: the P22/P24 rollback tests never set
+`CONJURE_ADOPT_ROLLBACK_DIAG=1` (the prior note claiming "the test runs with the diag flag"
+was wrong). stderr DOES reach the CI log (the `✗ mismatch` lines show), so the diag would
+have shown if enabled.
+
+**Secondary bug still live + UNSTABLE:** exactly one scaffold file survives rollback — and
+it WANDERS across cycles (COMPOUND-CANDIDATES.md → code-explorer.md → COMPOUND-CANDIDATES.md
+again this cycle). init-project.sh DOES record COMPOUND-CANDIDATES.md into the manifest
+(init-project.sh:141), so created[] tracking is intermittently lossy on Windows, not a
+one-file gap. Instability points at a per-path failure in the manifest-read / step-2 delete.
+
+## Current Focus 3
+
+hypothesis: a stray CARRIAGE RETURN (`\r`) injected by Windows Git Bash (MSYS) at a READ
+boundary poisons string operations — Windows only. It explains BOTH live bugs at once:
+  - step-3: if recorded `before` (or the verify `sha_of` output) carries a `\r`, then
+    `"abc…" != "abc…\r"` → spurious mismatch on a byte-identical file → exit 2 → no [ROLLBACK].
+  - created[] delete: if a manifest path is read as `…/FILE\r`, then `mutate_rm "$TARGET/FILE\r"`
+    targets a non-existent path → that one scaffold file survives (and which file "wins" the
+    CR shifts run-to-run → the wandering leftover).
+Clean-LF writers (jq -r, printf '\n') do NOT rule this out — MSYS can surface CR on the read
+side. macOS/Linux have no CR ⇒ green there. This is the only mechanism consistent with ALL
+observations (byte-faithful restore + internal compare mismatch + unstable single leftover).
+
+fix #3 applied (this cycle — defensive CR-strip + high-res diagnostic, both no-ops on macOS):
+  - `sha_of` (adopt.sh): pipe through `| tr -d '\r'` (both sha256sum + shasum branches).
+  - step-3 verify loop: strip `\r` from `path` and `before`; emit bracketed
+    `got=[…] want=[…]` on mismatch (surfaces CR vs a real byte divergence on the CI log).
+  - manifest-read loops (PRIMARY + record): `newf="${newf%$'\r'}"` before the `#./` strip.
+  - step-2 delete loop: `p="${p%$'\r'}"` before `mutate_rm` (the actual deletion site).
+  - tests/run.sh P22 (2586) + P24 argus (3375): set `CONJURE_ADOPT_ROLLBACK_DIAG=1` so the
+    (a) live / (b) snapshot / (c) restored shas finally print on the windows-test log.
+expecting: if `\r` is the gremlin ⇒ windows-test GREEN this cycle (both bugs cleared). Else
+the got/want brackets + (a)/(b)/(c) shas pin the exact cause (CR vs real divergence vs
+create-vs-restore) for the next cycle. macOS stays 439/0; shellcheck clean.
+next_action: confirm macOS suite 439/0 + shellcheck clean (DONE pre-push), commit fix #3,
+push ONE windows-test cycle (~21 min), read got/want + (a/b/c) from the windows-test log.
+
+## Eliminated (cont.)
+
+- hypothesis: the tar snapshot↔restore round-trip is not byte-faithful on Windows (fix #2's premise) — ELIMINATED (CI run 26657033420): the test `every pre-adopt file sha256 == recorded before-hash` PASSED, proving restored == pristine bytes exactly. The tar temp-file fix DID make the round-trip byte-faithful. The step-3 abort is an INTERNAL compare problem (recorded before-hash vs verify-hash), not a restore-fidelity problem.
