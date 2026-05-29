@@ -132,7 +132,15 @@ Plans:
   4. Simulating a SIGKILL after the snapshot step and before the scaffold step, then re-running `conjure adopt`, triggers the partial-state recovery prompt; choosing rollback restores the fixture cleanly
   5. A fixture file that is a symlink is skipped by inventory; a proposed CLAUDE.md containing an `@import` line is blocked by the pre-write audit gate and never written to disk
 
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+**Wave 1**
+
+- [ ] 24-01-PLAN.md — Wave 1: `_brownfield-argus` 500-file fixture generator (bulk .md + real `ln -s` symlink + oversized CLAUDE.md + @import seed) + the criterion-3 `report()` "nothing to scaffold" deviation (O-1)
+
+**Wave 2** *(blocked on Wave 1 — consumes the generator + the report() deviation)*
+
+- [ ] 24-02-PLAN.md — Wave 2: the `▸ Phase 24` test block in `tests/run.sh` (after :3280) — 5 criterion sections (dry-run perf/zero-write, rollback zero-diff, idempotent re-run, SIGKILL recovery, symlink-skip + @import-block) behind a `P24_ARGUS_OK` guard, full suite stays ≥429 green
 
 ## Progress
 
@@ -146,4 +154,4 @@ Plans:
 | 21. Foundation Libs + Inventory | v0.6.0 | 4/4 | Complete    | 2026-05-28 |
 | 22. `conjure adopt` CLI Core + Rollback | v0.6.0 | 3/3 | Complete    | 2026-05-28 |
 | 23. Restructure Skill + Safety Gates | v0.6.0 | 3/3 | Complete    | 2026-05-29 |
-| 24. Integration Tests + Argus Fixture | v0.6.0 | 0/TBD | Not started | - |
+| 24. Integration Tests + Argus Fixture | v0.6.0 | 0/2 | Not started | - |
