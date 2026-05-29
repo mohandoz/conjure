@@ -105,7 +105,19 @@ Plans:
   5. A proposed CLAUDE.md containing `@import` lines is run through `conjure audit` before approval; the gate blocks with the audit output and the user is not presented an approval prompt for invalid content
   6. Archive steps are sequenced last in the plan; files with decision-vocabulary keywords ("decided", "we chose", "rationale", "do not", "never") are flagged for individual confirmation and not included in bulk archive approvals
 
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+**Wave 0** *(test-first — gates all later verification)*
+
+- [ ] 23-01-PLAN.md — Wave 0: graceful-red `▸ Phase 23` test block in tests/run.sh + synthetic gate fixtures (invariant present/missing/reflowed, @import, oversized, decision-vocab, clean)
+
+**Wave 1** *(blocked on Wave 0)*
+
+- [ ] 23-02-PLAN.md — Wave 1: the 4 gate helpers — verify-invariants (GATE A, D-05/07/08), audit-staged (GATE B, D-13/O-1 shim), extract-invariants (D-03/06), decision-scan (D-11)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 23-03-PLAN.md — Wave 2: thin SKILL.md (≤200 lines, allowed-tools: [Read, Bash], D-16) + approve.sh per-class /dev/tty driver (D-09/10/12) + init-project.sh scaffold edit
 
 ### Phase 24: Integration Tests + Argus Fixture
 
