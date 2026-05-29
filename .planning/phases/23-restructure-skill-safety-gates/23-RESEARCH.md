@@ -378,22 +378,21 @@ grep -niE 'must|never|always|forbidden|required|do not|exit 2|@import|≤[0-9]+|
 | A3 | Invariant extraction granularity = canonical tokens (not full sentences) is the robust choice | Pattern 2 / Pitfall 3 | If sentences are used, paraphrase causes false blocks (D-07 explicitly chose normalized substring to avoid this). Recommendation, not locked. `[ASSUMED]` |
 | A4 | The staging-file write by the `[Read, Bash]` skill (Bash redirect into `.conjure-adopt-state/staging/`) is acceptable under D-04 ("write proposed ops + staged content") | Pattern 1 caveat | If the user intends staging content to also route through a CLI primitive, the skill would need a `--stage-file` flag (not shipped). D-04 wording + Phase 22 22-03-SUMMARY ("skill writes staged content to staging/<file>") support the Bash-redirect reading. Confirm in planning. `[ASSUMED]` |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Audit gate strictness (O-2)**
+> All three resolved during planning; resolutions recorded in 23-VALIDATION.md "## Planning Resolutions" and encoded in the plans (23-01/23-02).
+
+1. **Audit gate strictness (O-1)**
    - What we know: `audit-setup.sh` treats `@import` and >200 lines as hard errors (exit 2), 101–200 lines as warn (exit 1). RESTR-05 names two conditions: "`@imports` or cap breaches."
-   - What's unclear: Does "cap breach" mean >100 (CLAUDE_MD_CAP, the restructure goal) or >200 (hard cap)? Should the gate use the temp-dir `conjure audit` shim (D-13 literal) or a direct `grep '^@'`+`wc -l` check?
-   - Recommendation: Block on `@import` always; block on >100 lines (the restructure target). A direct check on the staged file is leaner and matches RESTR-05's exact two conditions; the temp-dir shim is the literal "run `conjure audit`" reading. Either satisfies D-13. Decide in planning.
+   - **RESOLVED — block on the two NAMED conditions, not the audit rc.** `gates/audit-staged.sh` runs the real `conjure audit` (temp-dir shim) to SURFACE the human-readable WHY (faithful to D-13/RESTR-05), but the deterministic BLOCK decision is: `@import` present (`grep -q '^@'`) OR line count > `CLAUDE_MD_CAP` (100, the restructure target). This avoids the checker-found trap where `conjure audit` returns rc=1 for unrelated harness-completeness WARNs and would block every clean proposal. See 23-02 Task 1.
 
-2. **Invariant extraction granularity (O-1/O-3)**
+2. **Invariant extraction granularity (O-2)**
    - What we know: D-06 scope = imperatives/prohibitions + exit-code rules + caps + named/backtick'd tokens; D-07 = normalized substring match.
-   - What's unclear: Extract full imperative sentences vs short canonical tokens; how the LLM confirms each before draft (D-05).
-   - Recommendation: Tokens (e.g. `exit 2`, `@import`, `≤100`, command names) maximize substring robustness against paraphrase. Have the LLM both list the invariant and confirm its presence verbatim/by-reference at draft time; the bash gate is the deterministic backstop.
+   - **RESOLVED — short canonical TOKENS** (e.g. `exit 2`, `@import`, `≤100`, command names), not full sentences — maximizes normalized-substring robustness against LLM paraphrase (CR-1). The LLM lists + confirms each invariant at draft time; the bash gate (`verify-invariants.sh`) is the deterministic backstop. See 23-01 Task 2 (INVARIANTS.txt) + 23-02 Task 1/2.
 
-3. **`edit` verb mechanics (discretionary)**
+3. **`edit` verb mechanics (O-3, discretionary)**
    - What we know: `edit` re-opens the staged file and RE-RUNS gates before re-prompt (D-10); `resolve.sh:68` uses `${EDITOR:-vi}`.
-   - What's unclear: Whether to launch `$EDITOR` (resolve precedent) or just print the staging path and let the LLM re-draft via `--update-manifest` (more aligned with an in-session skill where the human may not want a terminal editor).
-   - Recommendation: Support both — print the staging path + offer "edit in editor (e)" mirroring resolve.sh; for an LLM-driven re-draft the skill re-runs `--update-manifest` to overwrite the staging op, then re-gates. Discretionary per CONTEXT.md.
+   - **RESOLVED — LLM re-draft via `--update-manifest`, no `$EDITOR` launch.** On `edit`, the skill prompts the user (via `/dev/tty`) for the change, re-drafts the staged content, re-writes it through `conjure adopt --update-manifest`, then RE-RUNS both gates before re-prompting. Keeps the Read+Bash proposer model intact (the LLM is the editor). See 23-03.
 
 ## Environment Availability
 
