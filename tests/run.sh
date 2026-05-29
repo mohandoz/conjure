@@ -2913,6 +2913,321 @@ fi
 # End Phase 22 test block
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Phase 23 — restructure skill + safety gates (Wave 0 test-first)
+# Mirrors the Phase 22 block style: `▸ Phase 23 — ...` headers, t/pass/fail
+# helpers, mktemp sandboxes with set/reset EXIT-trap discipline. Every gate
+# helper / SKILL.md / scaffold invocation is guarded behind P23_RESTR_OK /
+# P23_GATES_OK so the suite reports these assertions as graceful RED (with a
+# "Wave 1/2 must create ..." message) instead of crashing while the production
+# code is absent. Production code (the 4 gates/*.sh, SKILL.md, the
+# init-project.sh scaffold edit) lands in Waves 1-2.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Presence guards shared by every Phase 23 section (mirror P22_ADOPT_OK).
+P23_RESTR_DIR="$CONJURE_HOME/templates/skills/restructure"
+P23_RESTR_OK=0
+[ -f "$P23_RESTR_DIR/SKILL.md" ] && P23_RESTR_OK=1
+P23_GATES_OK=0
+[ -f "$P23_RESTR_DIR/gates/verify-invariants.sh" ] && P23_GATES_OK=1
+# Synthetic gate fixtures (created in Task 2); reused across the sections below.
+P23_FIXTURE="$CONJURE_HOME/tests/fixtures/_restructure-gates"
+# The shipped Phase 22 restructure-steps manifest, reused for group-by / apply-step.
+P23_MANIFEST="$CONJURE_HOME/tests/fixtures/_adopt-restructure-steps/adopt-manifest.json"
+
+echo
+echo "▸ Phase 23 — restructure gate helpers"
+
+# ── verify-invariants gate (RESTR-04 / criterion 4) ─────────────────────────
+if [ "$P23_GATES_OK" -ne 1 ]; then
+  fail "templates/skills/restructure/gates/verify-invariants.sh not found — Wave 1 must create the gate helpers first (RESTR-04/criterion 4)"
+else
+  P23_VI="$P23_RESTR_DIR/gates/verify-invariants.sh"
+  P23_INV="$P23_FIXTURE/INVARIANTS.txt"
+  # present → rc 0 (every canonical token appears, possibly reworded around).
+  CONJURE_HOME="$CONJURE_HOME" bash "$P23_VI" "$P23_FIXTURE/with-invariant.md" "$P23_INV" >/dev/null 2>&1
+  P23_VI_RC=$?
+  if [ "$P23_VI_RC" -eq 0 ]; then
+    pass "verify-invariants: all invariants present → rc 0 (RESTR-04/criterion 4)"
+  else
+    fail "verify-invariants: complete file expected rc 0, got $P23_VI_RC (RESTR-04/criterion 4)"
+  fi
+  # omitted token → rc 2 + the missing token(s) listed on stderr.
+  P23_VI_MISS_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P23_VI" "$P23_FIXTURE/missing-invariant.md" "$P23_INV" 2>&1)"
+  P23_VI_MISS_RC=$?
+  if [ "$P23_VI_MISS_RC" -eq 2 ]; then
+    pass "verify-invariants: dropped invariant → exit 2 BLOCK (D-08, RESTR-04/criterion 4)"
+  else
+    fail "verify-invariants: dropped invariant expected exit 2, got $P23_VI_MISS_RC (RESTR-04/criterion 4)"
+  fi
+  if printf '%s\n' "$P23_VI_MISS_OUT" | grep -qi 'missing'; then
+    pass "verify-invariants: stderr lists the missing invariant(s) (RESTR-04/criterion 4)"
+  else
+    fail "verify-invariants: missing-list not reported — got: $P23_VI_MISS_OUT (RESTR-04/criterion 4)"
+  fi
+  # reflowed/case-mangled but content-complete → rc 0 (D-07 normalized-substring match).
+  CONJURE_HOME="$CONJURE_HOME" bash "$P23_VI" "$P23_FIXTURE/reflowed-invariant.md" "$P23_INV" >/dev/null 2>&1
+  P23_VI_RF_RC=$?
+  if [ "$P23_VI_RF_RC" -eq 0 ]; then
+    pass "verify-invariants: reflowed/case-mangled-but-complete → rc 0 (D-07 normalized match, RESTR-04)"
+  else
+    fail "verify-invariants: reflowed-complete expected rc 0, got $P23_VI_RF_RC (D-07, RESTR-04)"
+  fi
+fi
+
+# ── audit-staged gate (RESTR-05 / criterion 5) ──────────────────────────────
+if [ "$P23_GATES_OK" -ne 1 ]; then
+  fail "templates/skills/restructure/gates/audit-staged.sh not found — Wave 1 must create the gate helpers first (RESTR-05/criterion 5)"
+else
+  P23_AUD="$P23_RESTR_DIR/gates/audit-staged.sh"
+  # @import in the proposed CLAUDE.md → exit 2 (O-1: block on @import always).
+  CONJURE_HOME="$CONJURE_HOME" bash "$P23_AUD" "$P23_FIXTURE/with-import.md" >/dev/null 2>&1
+  P23_AUD_IMP_RC=$?
+  if [ "$P23_AUD_IMP_RC" -eq 2 ]; then
+    pass "audit-staged: @import in proposed CLAUDE.md → exit 2 BLOCK (O-1, RESTR-05/criterion 5)"
+  else
+    fail "audit-staged: @import expected exit 2, got $P23_AUD_IMP_RC (O-1, RESTR-05/criterion 5)"
+  fi
+  # clean ≤100-line @import-free file → exit 0.
+  CONJURE_HOME="$CONJURE_HOME" bash "$P23_AUD" "$P23_FIXTURE/clean-doc.md" >/dev/null 2>&1
+  P23_AUD_CLEAN_RC=$?
+  if [ "$P23_AUD_CLEAN_RC" -eq 0 ]; then
+    pass "audit-staged: clean ≤100-line @import-free file → exit 0 (RESTR-05/criterion 5)"
+  else
+    fail "audit-staged: clean file expected exit 0, got $P23_AUD_CLEAN_RC (RESTR-05/criterion 5)"
+  fi
+  # oversized (>200 lines, >CLAUDE_MD_CAP=100) → exit 2 (O-1 cap-breach block).
+  CONJURE_HOME="$CONJURE_HOME" bash "$P23_AUD" "$P23_FIXTURE/oversized.md" >/dev/null 2>&1
+  P23_AUD_BIG_RC=$?
+  if [ "$P23_AUD_BIG_RC" -eq 2 ]; then
+    pass "audit-staged: oversized (>200 lines) → exit 2 cap-breach BLOCK (O-1, RESTR-05/criterion 5)"
+  else
+    fail "audit-staged: oversized file expected exit 2, got $P23_AUD_BIG_RC (O-1, RESTR-05/criterion 5)"
+  fi
+fi
+
+# ── decision-scan gate (RESTR-06 / criterion 6) ─────────────────────────────
+if [ "$P23_GATES_OK" -ne 1 ]; then
+  fail "templates/skills/restructure/gates/decision-scan.sh not found — Wave 1 must create the gate helpers first (RESTR-06/criterion 6)"
+else
+  P23_DS="$P23_RESTR_DIR/gates/decision-scan.sh"
+  # decision vocabulary present → signal "individual" (over-flag is the SAFE direction).
+  P23_DS_DEC_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P23_DS" "$P23_FIXTURE/decision-doc.md" 2>&1)"
+  if printf '%s\n' "$P23_DS_DEC_OUT" | grep -qi 'individual'; then
+    pass "decision-scan: decision-vocabulary doc → signals 'individual' (D-11, RESTR-06/criterion 6)"
+  else
+    fail "decision-scan: decision doc expected 'individual' signal — got: $P23_DS_DEC_OUT (RESTR-06/criterion 6)"
+  fi
+  # no decision vocabulary → signal "bulk".
+  P23_DS_CLEAN_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P23_DS" "$P23_FIXTURE/clean-doc.md" 2>&1)"
+  if printf '%s\n' "$P23_DS_CLEAN_OUT" | grep -qi 'bulk'; then
+    pass "decision-scan: clean doc → signals 'bulk' (D-11, RESTR-06/criterion 6)"
+  else
+    fail "decision-scan: clean doc expected 'bulk' signal — got: $P23_DS_CLEAN_OUT (RESTR-06/criterion 6)"
+  fi
+fi
+
+# ── extract-invariants gate (RESTR-04) ──────────────────────────────────────
+if [ "$P23_GATES_OK" -ne 1 ]; then
+  fail "templates/skills/restructure/gates/extract-invariants.sh not found — Wave 1 must create the gate helpers first (RESTR-04)"
+else
+  P23_EX="$P23_RESTR_DIR/gates/extract-invariants.sh"
+  P23_EX_TARGET="$(mktemp -d)"
+  trap 'rm -rf "$P23_EX_TARGET"' EXIT
+  # Seed a source CLAUDE.md carrying obvious invariant signals (exit 2, @import).
+  printf '# CLAUDE\n\nHooks must exit 2 to block; never use a hard error code.\nNever use @import — it eager-loads.\nCLAUDE.md stays ≤100 lines.\n' \
+    > "$P23_EX_TARGET/CLAUDE.md"
+  mkdir -p "$P23_EX_TARGET/.conjure-adopt-state"
+  CONJURE_HOME="$CONJURE_HOME" bash "$P23_EX" "$P23_EX_TARGET/CLAUDE.md" "$P23_EX_TARGET" >/dev/null 2>&1
+  P23_EX_RC=$?
+  # The documented output is a non-empty candidates file under .conjure-adopt-state/.
+  P23_EX_CAND="$(find "$P23_EX_TARGET/.conjure-adopt-state" -name 'INVARIANTS.candidates' 2>/dev/null | head -1)"
+  if [ "$P23_EX_RC" -eq 0 ]; then
+    pass "extract-invariants: exits 0 on a valid source CLAUDE.md (RESTR-04)"
+  else
+    fail "extract-invariants: expected exit 0, got $P23_EX_RC (RESTR-04)"
+  fi
+  if [ -n "$P23_EX_CAND" ] && [ -s "$P23_EX_CAND" ]; then
+    pass "extract-invariants: writes a non-empty INVARIANTS.candidates under .conjure-adopt-state/ (D-06, RESTR-04)"
+  else
+    fail "extract-invariants: no non-empty INVARIANTS.candidates produced (D-06, RESTR-04)"
+  fi
+  if [ -n "$P23_EX_CAND" ] && grep -qi 'exit 2' "$P23_EX_CAND" 2>/dev/null; then
+    pass "extract-invariants: candidates capture the 'exit 2' invariant signal (D-06, RESTR-04)"
+  else
+    fail "extract-invariants: candidates missing the 'exit 2' signal (D-06, RESTR-04)"
+  fi
+  rm -rf "$P23_EX_TARGET"
+  trap - EXIT
+fi
+
+# ── criterion 1 scaffold: restructure skill installed by init-project.sh ─────
+if [ "$P23_RESTR_OK" -ne 1 ]; then
+  fail "templates/skills/restructure/SKILL.md not found — Wave 2 must create the restructure skill + scaffold edit (RESTR-01/02/criterion 1)"
+else
+  P23_SC_TARGET="$(mktemp -d)"
+  trap 'rm -rf "$P23_SC_TARGET"' EXIT
+  cp -r "$P22_FIXTURE/." "$P23_SC_TARGET/"
+  ( cd "$P23_SC_TARGET" \
+    && CONJURE_HOME="$CONJURE_HOME" bash "$CONJURE_HOME/scripts/init-project.sh" existing "$P23_SC_TARGET" >/dev/null 2>&1 ) || true
+  P23_SC_SKILL="$P23_SC_TARGET/.claude/skills/restructure/SKILL.md"
+  if [ -f "$P23_SC_SKILL" ]; then
+    pass "scaffold: .claude/skills/restructure/SKILL.md installed by init-project.sh (RESTR-01/criterion 1)"
+  else
+    fail "scaffold: restructure SKILL.md not scaffolded into target (RESTR-01/criterion 1)"
+  fi
+  if [ -f "$P23_SC_SKILL" ] && grep -qE 'allowed-tools:.*Read.*Bash' "$P23_SC_SKILL"; then
+    pass "scaffold: SKILL.md declares allowed-tools: [Read, Bash] (D-16/RESTR-02/criterion 1)"
+  else
+    fail "scaffold: SKILL.md missing 'allowed-tools: [Read, Bash]' (D-16/RESTR-02/criterion 1)"
+  fi
+  if [ -f "$P23_SC_SKILL" ] && [ "$(wc -l < "$P23_SC_SKILL" | tr -d ' ')" -le 200 ]; then
+    pass "scaffold: SKILL.md ≤200 lines (criterion 1 cap)"
+  else
+    fail "scaffold: SKILL.md exceeds the 200-line cap (criterion 1)"
+  fi
+  if [ -f "$P23_SC_TARGET/.claude/skills/restructure/gates/verify-invariants.sh" ]; then
+    pass "scaffold: gates/verify-invariants.sh ships alongside SKILL.md (whole-dir copy, A1) (criterion 1)"
+  else
+    fail "scaffold: gates/*.sh did not ship with the scaffolded skill (criterion 1)"
+  fi
+  rm -rf "$P23_SC_TARGET"
+  trap - EXIT
+fi
+
+# ── apply-step routing the skill rides (RESTR-02) ───────────────────────────
+# This re-exercises the SHIPPED Phase 22 seam from the skill's perspective; it
+# documents the RESTR-02 contract and passes immediately (no presence guard — the
+# adopt seam shipped in Phase 22). Guarded only by adopt.sh presence (P22_ADOPT_OK).
+if [ "$P22_ADOPT_OK" -ne 1 ]; then
+  fail "scripts/adopt.sh not found — Phase 22 must provide the adopt seam the skill rides (RESTR-02)"
+else
+  P23_AS_TARGET="$(mktemp -d)"
+  trap 'rm -rf "$P23_AS_TARGET"' EXIT
+  cp -r "$P22_FIXTURE/." "$P23_AS_TARGET/"
+  cp "$P23_MANIFEST" "$P23_AS_TARGET/adopt-manifest.json"
+  mkdir -p "$P23_AS_TARGET/.conjure-adopt-state/staging"
+  printf '# CLAUDE (condensed)\n\nProposed restructure content.\n' \
+    > "$P23_AS_TARGET/.conjure-adopt-state/staging/CLAUDE.md"
+  P23_AS_CLAUDE_BEFORE="$(p22_sha "$P23_AS_TARGET/CLAUDE.md" 2>/dev/null || echo NA)"
+  DRY_RUN=0 CONJURE_ADOPT_APPLY_STEP=step-1 CONJURE_HOME="$CONJURE_HOME" \
+    bash "$P22_ADOPT_SH" --apply-step step-1 "$P23_AS_TARGET" >/dev/null 2>&1
+  P23_AS_CLAUDE_AFTER="$(p22_sha "$P23_AS_TARGET/CLAUDE.md" 2>/dev/null || echo NA)"
+  if jq -e '.restructure_steps[] | select(.id=="step-1") | .status == "applied"' \
+       "$P23_AS_TARGET/adopt-manifest.json" >/dev/null 2>&1; then
+    pass "apply-step routing: skill rides --apply-step → status: applied (RESTR-02)"
+  else
+    fail "apply-step routing: step-1 status not applied via the adopt seam (RESTR-02)"
+  fi
+  if [ "$P23_AS_CLAUDE_BEFORE" != "$P23_AS_CLAUDE_AFTER" ]; then
+    pass "apply-step routing: dest mutated through mutate.sh (chokepoint, RESTR-02)"
+  else
+    fail "apply-step routing: dest unchanged — mutation did not route through the seam (RESTR-02)"
+  fi
+  rm -rf "$P23_AS_TARGET"
+  trap - EXIT
+fi
+
+# ── group-by: skill reads per-file classification from the manifest (RESTR-01) ─
+# The shipped fixture's files[] has exactly TWO entries (core, reference-doc);
+# .summary carries the aggregate counts (unknown=1). Assert from files[] — do NOT
+# conflate .summary.unknown (1) with the files[] selection (0).
+if [ ! -f "$P23_MANIFEST" ]; then
+  fail "tests/fixtures/_adopt-restructure-steps/adopt-manifest.json not found — group-by fixture missing (RESTR-01)"
+else
+  P23_GB_CORE="$(jq '[.files[]|select(.classification=="core")]|length' "$P23_MANIFEST" 2>/dev/null)"
+  P23_GB_REF="$(jq '[.files[]|select(.classification=="reference-doc")]|length' "$P23_MANIFEST" 2>/dev/null)"
+  P23_GB_UNK="$(jq '[.files[]|select(.classification=="unknown")]|length' "$P23_MANIFEST" 2>/dev/null)"
+  P23_GB_SUM_UNK="$(jq '.summary.unknown' "$P23_MANIFEST" 2>/dev/null)"
+  if [ "${P23_GB_CORE:-0}" = "1" ] && [ "${P23_GB_REF:-0}" = "1" ]; then
+    pass "group-by: files[] per-class buckets — core=1, reference-doc=1 (RESTR-01)"
+  else
+    fail "group-by: files[] buckets wrong — core=$P23_GB_CORE reference-doc=$P23_GB_REF (RESTR-01)"
+  fi
+  if [ "${P23_GB_UNK:-x}" = "0" ]; then
+    pass "group-by: files[] has zero 'unknown' entries (no unknown row in files[]) (RESTR-01)"
+  else
+    fail "group-by: files[] unknown selection expected 0, got $P23_GB_UNK (RESTR-01)"
+  fi
+  if [ "${P23_GB_SUM_UNK:-x}" = "1" ]; then
+    pass "group-by: .summary.unknown=1 (aggregate count, distinct from files[] selection) (RESTR-01)"
+  else
+    fail "group-by: .summary.unknown expected 1, got $P23_GB_SUM_UNK (RESTR-01)"
+  fi
+fi
+
+# ── archive-last sequencing in the skill's proposed plan (criterion 6) ───────
+if [ "$P23_RESTR_OK" -ne 1 ]; then
+  fail "templates/skills/restructure/SKILL.md not found — Wave 2 must encode archive-last proposal ordering (criterion 6)"
+else
+  # The skill's proposal logic must place op:archive after op:write/op:extract.
+  # Assert against the order the skill documents/emits (Wave 2 deliverable).
+  P23_AL_ORDER="$(grep -nE 'op[":= ]+archive|op[":= ]+write|op[":= ]+extract' "$P23_RESTR_DIR/SKILL.md" 2>/dev/null | grep -i archive | head -1)"
+  P23_AL_WRITE="$(grep -nE 'op[":= ]+write|op[":= ]+extract' "$P23_RESTR_DIR/SKILL.md" 2>/dev/null | head -1)"
+  P23_AL_ARCH_LINE="${P23_AL_ORDER%%:*}"
+  P23_AL_WRITE_LINE="${P23_AL_WRITE%%:*}"
+  if [ -n "$P23_AL_ARCH_LINE" ] && [ -n "$P23_AL_WRITE_LINE" ] && [ "$P23_AL_ARCH_LINE" -gt "$P23_AL_WRITE_LINE" ] 2>/dev/null; then
+    pass "archive-last: SKILL.md sequences op:archive after op:write/op:extract (criterion 6)"
+  else
+    fail "archive-last: SKILL.md must sequence archive ops last in the proposed plan (criterion 6)"
+  fi
+fi
+
+# ── non-TTY approval → exit 2 (RESTR-03 / criterion 3) ──────────────────────
+if [ "$P23_RESTR_OK" -ne 1 ]; then
+  fail "restructure approval driver not found — Wave 2 must ship the approval entry; non-TTY must exit 2 (D-12/RESTR-03/criterion 3)"
+else
+  P23_AP="$P23_RESTR_DIR/gates/approve.sh"
+  if [ ! -f "$P23_AP" ]; then
+    fail "restructure approval driver (gates/approve.sh) not found — Wave 2 must ship it (D-12/RESTR-03/criterion 3)"
+  else
+    P23_AP_TARGET="$(mktemp -d)"
+    trap 'rm -rf "$P23_AP_TARGET"' EXIT
+    cp -r "$P22_FIXTURE/." "$P23_AP_TARGET/"
+    # Drive the approval entry with non-TTY stdin (< /dev/null); expect exit 2.
+    CONJURE_HOME="$CONJURE_HOME" bash "$P23_AP" "$P23_AP_TARGET" < /dev/null >/dev/null 2>&1
+    P23_AP_RC=$?
+    if [ "$P23_AP_RC" -eq 2 ]; then
+      pass "non-TTY approval: stdin not a TTY → exit 2 (never auto-approve, D-12/RESTR-03/criterion 3)"
+    else
+      fail "non-TTY approval: expected exit 2, got $P23_AP_RC (D-12/RESTR-03/criterion 3)"
+    fi
+    rm -rf "$P23_AP_TARGET"
+    trap - EXIT
+  fi
+fi
+
+# ── bulk summary log: exactly ONE RESTRUCTURE summary line per bucket (RESTR-03) ─
+if [ "$P23_RESTR_OK" -ne 1 ]; then
+  fail "restructure approval driver not found — Wave 2 must emit ONE RESTRUCTURE bulk-summary line per bucket (D-09/RESTR-03/criterion 3)"
+else
+  P23_BL="$P23_RESTR_DIR/gates/approve.sh"
+  if [ ! -f "$P23_BL" ]; then
+    fail "restructure approval driver (gates/approve.sh) not found — Wave 2 must ship the bulk-summary log (D-09/RESTR-03/criterion 3)"
+  else
+    P23_BL_TARGET="$(mktemp -d)"
+    trap 'rm -rf "$P23_BL_TARGET"' EXIT
+    cp -r "$P22_FIXTURE/." "$P23_BL_TARGET/"
+    cp "$P23_MANIFEST" "$P23_BL_TARGET/adopt-manifest.json"
+    # Drive a bulk approve (force interactive, feed 'a' for each bucket); then count
+    # the RESTRUCTURE summary lines for the bucket — expect exactly one per bucket.
+    printf 'a\na\n' | CONJURE_FORCE_INTERACTIVE=1 CONJURE_HOME="$CONJURE_HOME" \
+      bash "$P23_BL" "$P23_BL_TARGET" >/dev/null 2>&1 || true
+    P23_BL_LINES="$(grep -c 'RESTRUCTURE' "$P23_BL_TARGET/RESTRUCTURE-LOG.md" 2>/dev/null || echo 0)"
+    if [ "${P23_BL_LINES:-0}" -ge 1 ]; then
+      pass "bulk summary: at least one RESTRUCTURE summary line logged for the bucket (D-09/RESTR-03)"
+    else
+      fail "bulk summary: no RESTRUCTURE summary line in RESTRUCTURE-LOG.md (D-09/RESTR-03)"
+    fi
+    rm -rf "$P23_BL_TARGET"
+    trap - EXIT
+  fi
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# End Phase 23 test block
+# ──────────────────────────────────────────────────────────────────────────────
+
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
