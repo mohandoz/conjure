@@ -1785,7 +1785,7 @@ if [ ! -f "$CONJURE_HOME/lib/snapshot.sh" ]; then
   fail "lib/snapshot.sh not found — Wave 1 must create it first (SC-2)"
 else
   P21_SNAP_OK=1
-  BF_FIXTURE="$CONJURE_HOME/tests/fixtures/brownfield-simple"
+  BF_FIXTURE="$CONJURE_HOME/tests/fixtures/_brownfield-simple"
 
   # DRY_RUN=1: should print dry-run message, no dir created
   P21_SNAP_DRY_BACKUP="$(mktemp -d)"
@@ -1854,7 +1854,7 @@ if [ ! -f "$CONJURE_HOME/lib/inventory.sh" ]; then
   fail "lib/inventory.sh not found — Wave 1 must create it first (INV-01..INV-04)"
 else
   P21_INV_OK=1
-  BF_FIXTURE="$CONJURE_HOME/tests/fixtures/brownfield-simple"
+  BF_FIXTURE="$CONJURE_HOME/tests/fixtures/_brownfield-simple"
 
   # Source all required libs
   source "$CONJURE_HOME/lib/mutate.sh"
@@ -2022,7 +2022,7 @@ else
   trap 'rm -rf "$P21_CAP_WORK"' EXIT
   mkdir -p "$P21_CAP_WORK/target"
   printf '# CLAUDE\n\nCap test fixture.\n' > "$P21_CAP_WORK/target/CLAUDE.md"
-  bash "$CONJURE_HOME/tests/fixtures/brownfield-simple/generate-large.sh" "$P21_CAP_WORK/target" >/dev/null 2>&1
+  bash "$CONJURE_HOME/tests/fixtures/_brownfield-simple/generate-large.sh" "$P21_CAP_WORK/target" >/dev/null 2>&1
   P21_MANIFEST="$P21_CAP_WORK/adopt-manifest.json"
   (
     source "$CONJURE_HOME/lib/mutate.sh"
@@ -2326,7 +2326,7 @@ if [ "$P21_INV_OK" -eq 1 ] || true; then
   trap 'rm -rf "$P21_PERF_WORK"' EXIT
   mkdir -p "$P21_PERF_WORK/target"
   printf '# CLAUDE\n\nPerf test.\n' > "$P21_PERF_WORK/target/CLAUDE.md"
-  bash "$CONJURE_HOME/tests/fixtures/brownfield-simple/generate-large.sh" "$P21_PERF_WORK/target" >/dev/null 2>&1
+  bash "$CONJURE_HOME/tests/fixtures/_brownfield-simple/generate-large.sh" "$P21_PERF_WORK/target" >/dev/null 2>&1
   if [ ! -f "$CONJURE_HOME/lib/inventory.sh" ]; then
     fail "perf gate skipped — lib/inventory.sh not found (CR-7)"
   else
@@ -2374,7 +2374,7 @@ P22_ADOPT_OK=0
 [ -f "$P22_ADOPT_SH" ] && P22_ADOPT_OK=1
 # Brownfield fixture all Phase 22 sandboxes copy from (21-line CLAUDE.md,
 # pre-existing .claude/skills/git/SKILL.md for the idempotency byte-check).
-P22_FIXTURE="$CONJURE_HOME/tests/fixtures/brownfield-simple"
+P22_FIXTURE="$CONJURE_HOME/tests/fixtures/_brownfield-simple"
 
 # p22_adopt — invoke scripts/adopt.sh with the cmd_adopt env-var contract.
 # Echoes nothing and returns 127 when adopt.sh is absent (callers gate on

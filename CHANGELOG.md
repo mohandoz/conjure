@@ -47,7 +47,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - 500-file `_brownfield-argus` integration fixture + end-to-end test block
   asserting dry-run perf (<30s) + zero writes, rollback zero-diff, idempotent
   re-run, SIGKILL recovery, and symlink-skip + `@import` pre-write block.
-  Test suite grows to **449 assertions, all green**.
+  Test suite grows to **439 assertions, all green** (Linux + Windows Git Bash + macOS).
 
 ### Changed — Safe Brownfield Adoption (v0.6.0)
 - `snapshot_create` excludes `.git` and `node_modules` (portable `tar --exclude`,
