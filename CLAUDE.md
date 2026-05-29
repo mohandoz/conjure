@@ -23,8 +23,9 @@ harness with one trustworthy command — and keep it healthy. If all else fails,
 <!-- GSD:stack-start source:research/STACK.md -->
 ## Technology Stack
 
-Current milestone: **v0.3.0 — Testing + Telemetry**. Full prescriptive detail in
-`.planning/research/STACK.md` (do not inline it here — it would breach the cap).
+Shipped through **v0.6.0 — Safe Brownfield Adoption** (`conjure adopt` + the
+human-gated `restructure` skill). Foundational stack decisions below still hold;
+full detail in `.planning/research/STACK.md` (do not inline — it breaches the cap).
 
 | Decision | Pick |
 |----------|------|
@@ -39,14 +40,20 @@ Runtime envelope: bash + stdlib-`.mjs` + `jq` + `shellcheck`. Keep `dependencies
 <!-- GSD:conventions-start source:CONVENTIONS.md -->
 ## Conventions
 
-Conventions not yet established. Will populate as patterns emerge during development.
+- All target-repo mutations route through `lib/mutate.sh` (dry-run enforced once); `snapshot_create` is the blessed raw-`cp`/`tar` exception (excludes `.git`/`node_modules`).
+- Hooks/CLI/scripts `exit 2`, never `exit 1`. Interactive prompts read `/dev/tty`; non-TTY → exit 2, never auto-mutate.
+- Split responsibility: the CLI owns all filesystem mutations; skills own LLM judgment and stay `[Read, Bash]` (mutate only via `conjure adopt --update-manifest`/`--apply-step`).
+- Test-first: a graceful-red `tests/run.sh` block lands before each feature; `_`-prefixed `tests/fixtures/` dirs are excluded from the generic audit/golden loops.
+- POSIX bash 3.2+ (no associative arrays / `mapfile` / `local -n`); inline `# shellcheck` directives; CI gate `shellcheck -S error -e SC2164,SC2044,SC2034,SC2155`. Interactive `/dev/tty` UX verified via `expect`/PTY.
 <!-- GSD:conventions-end -->
 
 <!-- GSD:architecture-start source:ARCHITECTURE.md -->
 ## Architecture
 
-Entrypoints in `cli/`, workers in `scripts/`, shared logic (new in v0.3.0) in `lib/`.
-Profiles in `profiles/`, overlays in `compliance/`, fixtures in `tests/fixtures/`.
+Entrypoint `cli/conjure`; workers in `scripts/` (adopt, init-project, audit-setup,
+resolve, …); shared libs in `lib/` (mutate, snapshot, inventory, log, caps).
+Profiles in `profiles/`, overlays in `compliance/`, skill templates in
+`templates/skills/` (incl. `restructure/` + its `gates/`), fixtures in `tests/fixtures/`.
 See `.planning/research/ARCHITECTURE.md` for component boundaries and build order.
 <!-- GSD:architecture-end -->
 

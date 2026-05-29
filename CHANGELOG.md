@@ -3,6 +3,74 @@
 All notable changes to Conjure. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-05-29
+
+### Added — Safe Brownfield Adoption (v0.6.0)
+- `conjure adopt` — one-command brownfield adoption: a deterministic 5-step
+  pipeline (preconditions → snapshot → inventory → scaffold → audit) that folds
+  an existing repo into the four-layer harness and prints an adoption report
+  (files inventoried, layers scaffolded, files archived, CLAUDE.md before/after
+  line count, snapshot path, audit before/after). Flags:
+  - `--dry-run` — runs read-only steps for real, writes **zero files** to the
+    target, emits `adopt-manifest.json` to a `mktemp` temp path so the plan is
+    inspectable.
+  - `--rollback` — restores from the filesystem snapshot, deletes scaffolded
+    files, and verifies the sha256 of every mutated file matches its pre-run
+    hash; logs a `[ROLLBACK]` entry.
+  - `--force` — proceed on a dirty git tree (logs a `WARN` that uncommitted
+    changes are in the snapshot; rollback is snapshot-based, not git).
+  - `--resume` / `--start-fresh` — non-interactive partial-run recovery.
+  - `--apply-step <id>` / `--update-manifest` — the executor seam the
+    `restructure` skill drives (propose ops via stdin, apply via the
+    `lib/mutate.sh` chokepoint).
+  - `--full-inventory` — lift the default 500-file inventory cap.
+- Crash-durable `.conjure-adopt-state` (atomic temp+mv per step). A SIGKILL
+  mid-run is recoverable: re-running `conjure adopt` detects the partial state
+  and offers `[r]ollback / [c]ontinue / [s]tart-fresh` (non-TTY → exit 2 with
+  the `--rollback`/`--resume`/`--start-fresh` flags, never auto-mutates).
+- `restructure` skill — scaffolded into `.claude/skills/restructure/` by
+  `conjure adopt`/`conjure init`. Human-gated, `allowed-tools: [Read, Bash]`
+  (never calls Write/Edit on project files). Condenses an oversized CLAUDE.md and
+  applies every change **only** through `conjure adopt --update-manifest` /
+  `--apply-step`. Pre-write safety gates run **before** any approval prompt:
+  invariant-verify (blocks a condensation that drops an invariant, listing the
+  missing ones) and `conjure audit` on the staged content (blocks `@import`
+  lines and size-cap breaches). Presents per-class grouped approvals
+  (`approve / skip / edit`), sequences archive steps last, and routes files
+  containing decision vocabulary (`decided` / `we chose` / `rationale` /
+  `do not` / `never`) to individual confirmation.
+- Foundation libs: `lib/snapshot.sh` (timestamped backup), `lib/inventory.sh`
+  (6-bucket markdown classifier, 500-file cap, skips symlinks/`.git`/
+  `node_modules`/vendored), `lib/log.sh` (`RESTRUCTURE-LOG.md` writer),
+  `lib/caps.sh`; `mutate_archive` / `mutate_rm` / `mutate_write_file` in
+  `lib/mutate.sh`; finalized draft-07 `adopt-manifest.json` schema.
+- 500-file `_brownfield-argus` integration fixture + end-to-end test block
+  asserting dry-run perf (<30s) + zero writes, rollback zero-diff, idempotent
+  re-run, SIGKILL recovery, and symlink-skip + `@import` pre-write block.
+  Test suite grows to **449 assertions, all green**.
+
+### Changed — Safe Brownfield Adoption (v0.6.0)
+- `snapshot_create` excludes `.git` and `node_modules` (portable `tar --exclude`,
+  preserves symlinks/perms/timestamps; `cp -a` fallback) — rollback no longer
+  overwrites read-only git objects, eliminating `Permission denied` noise on the
+  safety-critical path.
+- The adoption report prints `nothing to scaffold` on an idempotent zero-scaffold
+  re-run.
+
+### Fixed — Safe Brownfield Adoption (v0.6.0)
+- `conjure adopt` no longer wrongly refuses a **clean committed git repo**:
+  `precondition_git` ignores conjure's own in-flight artifacts
+  (`RESTRUCTURE-LOG.md`, `.conjure-adopt-state`, `.conjure-adopt-backups`,
+  `.conjure-archive-*`, `adopt-manifest.json`) when checking dirtiness; a
+  genuinely dirty user tree still exits 2.
+- `--apply-step` `write` op preserves a file's trailing newline (was stripped via
+  command substitution); `extract` archives the **old** destination, not the new
+  staging source; the per-class approval loop never applies an `archive` op
+  during a non-archive bucket (archive stays deferred to the archive-last pass).
+
+> Note: CHANGELOG entries for v0.3.0 and v0.4.0 were not backfilled at the time;
+> see `.planning/milestones/` for their archived roadmaps and audits.
+
 ## [0.5.0] — 2026-05-26
 
 ### Added — Auto-Update + Healthcheck (v0.5.0)

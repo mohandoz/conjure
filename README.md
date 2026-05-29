@@ -192,6 +192,35 @@ PHI pattern scan for HIPAA), and a controls checklist under `docs/compliance/`.
 ⚠️ Overlays make the AI less likely to produce non-compliant code. They do
 NOT make you compliant — that requires people + process + audit.
 
+## 🏗 Brownfield adoption — `conjure adopt`
+
+Fold an existing, grown-messy repo into the four-layer harness with one
+rollback-capable command. Every change is snapshotted, audited, and logged.
+
+```bash
+conjure adopt --dry-run .   # 5-step plan, zero writes, inspectable manifest
+conjure adopt .             # snapshot → inventory → scaffold → audit → report
+conjure adopt --rollback .  # sha256-verified restore + delete scaffolded files
+```
+
+- **Snapshot-backed + rollback.** Full timestamped backup before any mutation;
+  `--rollback` restores every mutated file (sha256-verified) and removes
+  scaffolded layers. State is crash-durable — a killed run, on re-run, offers
+  `[r]ollback / [c]ontinue / [s]tart-fresh` (non-TTY → exit 2, never auto-mutates).
+- **Never-delete.** Stale/oversized files are archived to `.conjure-archive-<ts>/`,
+  never deleted. Every step is appended to `RESTRUCTURE-LOG.md`.
+- **Human-gated `restructure` skill.** Installed into `.claude/skills/restructure/`.
+  Reads the inventory + an oversized `CLAUDE.md` and proposes a condensed
+  ≤100-line core. Pre-write gates block any proposal that **drops an invariant**
+  or **reintroduces `@import`** *before* you are asked to approve. Per-class
+  grouped approvals — you `approve / skip / edit` each step; archive steps come
+  last, and files holding active decisions are confirmed individually. The skill
+  is `[Read, Bash]`-only: it never writes project files directly — every change
+  routes through the audited `conjure adopt` chokepoint.
+
+Greenfield → `conjure init` · tool migrations → `conjure migrate` (below) ·
+brownfield adoption → `conjure adopt`.
+
 ## 🔄 Migration from other tools
 
 Backup-before-mutate is automatic. Rollback is `mv .claude.backup-<ts> .claude`.
@@ -212,7 +241,7 @@ See `MIGRATION-GUIDE.md` for details.
 ```bash
 $ bash tests/run.sh
 ═══════════════════════════════════════════════════════════════════
-PASS: 112    FAIL: 0
+PASS: 449    FAIL: 0
 ═══════════════════════════════════════════════════════════════════
 ```
 
@@ -277,10 +306,11 @@ PRs welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## 🛣 Roadmap
 
-- **v0.3.0** — test fixtures per profile, skill firing telemetry, cost estimator.
-- **v0.4.0** — marketplace publication, Homebrew formula, Docker image, `conjure publish-skill`.
-- **v0.5.0** — interactive 3-way merge for updates, drift detector, auto-PR bot.
-- **v0.6.0** — workspace mode, cross-repo graphify orchestration.
+- ✅ **v0.3.0** — test fixtures per profile, skill-firing telemetry, cost estimator.
+- ✅ **v0.4.0** — marketplace publication, Homebrew formula, Docker image, `conjure publish-skill`.
+- ✅ **v0.5.0** — interactive 3-way merge for updates, drift detector, auto-PR bot.
+- ✅ **v0.6.0** — safe brownfield adoption: `conjure adopt` (snapshot/inventory/scaffold/audit + rollback) + human-gated `restructure` skill.
+- **v0.7.0** — workspace mode, cross-repo graphify orchestration.
 - **v1.0.0** — frozen schemas, signed releases, ≥10 production teams.
 
 See [`planning/ROADMAP.md`](planning/ROADMAP.md).

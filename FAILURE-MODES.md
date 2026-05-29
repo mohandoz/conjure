@@ -202,6 +202,88 @@ conjure init existing
 # 5. graphify graph survives separately at graphify-out/.
 ```
 
+## `conjure adopt` refuses with "working tree is dirty"
+
+**Symptom**: `conjure adopt .` exits 2 at "Step 1/5 preconditions" on a repo you
+believe is clean.
+
+**Cause**: You have uncommitted changes (`git status --porcelain` is non-empty).
+adopt refuses a dirty tree so the snapshot/rollback can guarantee a clean restore.
+(Conjure's own in-flight artifacts — `RESTRUCTURE-LOG.md`, `.conjure-adopt-state`,
+`.conjure-adopt-backups`, `.conjure-archive-*`, `adopt-manifest.json` — are
+ignored by this check, so a genuinely clean repo is never blocked.)
+
+**Fix**:
+```bash
+git status --porcelain        # see what's uncommitted
+git stash    # or: git commit -am "wip"   — then retry
+conjure adopt .
+# Or include the uncommitted work in the snapshot (rollback is snapshot-based, not git):
+conjure adopt --force .
+```
+
+## A `conjure adopt` run was killed mid-way
+
+**Symptom**: adopt was interrupted (terminal closed, `kill -9`, crash). Re-running
+prints "partial run detected (last completed: <step>)".
+
+**Cause**: A partial `.conjure-adopt-state` exists. adopt never auto-mutates after
+an interrupted run — it asks you how to recover.
+
+**Fix** (interactive — choose at the `[r]ollback / [c]ontinue / [s]tart-fresh` prompt):
+```bash
+conjure adopt .          # re-run; pick r / c / s
+# Non-interactive (CI) — pass an explicit recovery flag instead:
+conjure adopt --rollback .      # undo everything from the snapshot
+conjure adopt --resume .        # continue at the next incomplete step (reuses the snapshot)
+conjure adopt --start-fresh .   # discard state and snapshot anew
+```
+
+## Undo an adoption — `conjure adopt --rollback`
+
+**Symptom**: You ran `conjure adopt` and want the repo back exactly as it was.
+
+**Fix**:
+```bash
+conjure adopt --rollback .
+# Restores every mutated file (sha256-verified against pre-run hashes), removes
+# scaffolded layers, and logs a [ROLLBACK] entry. Restore is from the FILESYSTEM
+# snapshot under .conjure-adopt-backups/, NOT from git — uncommitted work captured
+# in the snapshot is restored too. The snapshot + RESTRUCTURE-LOG.md are kept for
+# audit; only .conjure-adopt-state is cleared.
+```
+
+## The `restructure` skill blocks a proposal before you can approve it
+
+**Symptom**: During `restructure`, a proposed condensed `CLAUDE.md` is rejected
+with "missing required invariants" or audit output about `@import`/size caps —
+you never get an approve prompt.
+
+**Cause**: Working as designed. Pre-write gates run *before* approval: the
+invariant gate blocks a condensation that dropped a rule (e.g. "hooks must
+exit 2"), and `conjure audit` on the staged content blocks `@import` lines or a
+CLAUDE.md over the 100-line cap. This prevents an invalid harness from ever being
+written.
+
+**Fix**: Let the skill re-draft (choose `edit`) so the condensed `CLAUDE.md`
+keeps every listed invariant and contains no `@import`; it re-runs both gates and
+re-prompts. To inspect what was flagged, read the staged file under
+`.conjure-adopt-state/staging/` and `RESTRUCTURE-LOG.md`.
+
+## `conjure adopt --apply-step` rejects an op with exit 2
+
+**Symptom**: Applying a restructure op fails with a path/op error.
+
+**Cause**: The op-executor validates every op: `op` must be one of
+`write` / `archive` / `extract`, required fields `{id, op, status}` must be
+present, and a `write` `src` must resolve **under** `.conjure-adopt-state/staging/`
+with no `..` escape or protected-dir (`.git/`, `.conjure-*`) target. A malformed
+or unsafe op is refused without mutating anything.
+
+**Fix**: Re-propose the op via `conjure adopt --update-manifest` with a valid op
+type, the required fields, and a staging-relative `src`. The `restructure` skill
+generates these correctly; hand-authored manifests must match the same contract.
+
 ## Where to get help
 
 - `reference/ANTI-PATTERNS.md` — common mistakes and fixes.
