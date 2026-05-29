@@ -1,5 +1,30 @@
 # Milestones
 
+## v0.6.0 Safe Brownfield Adoption (Shipped: 2026-05-29)
+
+**Phases completed:** 4 phases, 12 plans, 25 tasks
+
+**Key accomplishments:**
+
+- Graceful-red `▸ Phase 22` test block (9 sections) in tests/run.sh plus a synthetic 2-op restructure_steps[] manifest fixture — the executable red→green contract that gates every later Phase 22 verification before scripts/adopt.sh exists.
+- `conjure adopt` command surface + the forward 5-step pipeline (preconditions → snapshot → inventory → scaffold → audit → report) with crash-durable atomic state, an INT/TERM trap, a `git status --porcelain` dirty-tree gate, dry-run zero-writes via a mktemp temp manifest, and a snapshot-outside-target self-copy guard.
+- Filled the four Wave 2 mode-dispatch stubs in `scripts/adopt.sh`: the D-01 3-step rollback (snapshot restore → delete created[] → sha256-verify) that yields Phase 24 zero-diff, the [r]/[c]/[s] partial-run recovery prompt + `--resume` snapshot-reuse, and the `--apply-step`/`--update-manifest` op-executor (the Phase 23 skill seam) with op-allowlist + staging-path + traversal validation.
+- Graceful-red `▸ Phase 23 — restructure gate helpers` block in tests/run.sh plus 8 canonical-token gate fixtures, locking the Nyquist contract so every Wave 1/2 deliverable verifies against a red→green signal that already exists.
+- Four deterministic bash gate helpers (verify-invariants = GATE A, audit-staged = GATE B, extract-invariants pre-pass, decision-scan archive guard) that block invalid LLM restructure proposals — dropped invariants, @imports, cap breaches, undocumented-decision archives — before any human approval, flipping all 12 Wave 0 gate-helper assertions green (406→418 PASS).
+- The thin `[Read, Bash]` restructure SKILL.md (110 lines), the per-class `/dev/tty` approve/skip/edit approval driver (non-TTY → exit 2, one RESTRUCTURE summary line per bucket), and the one-token init-project.sh scaffold edit — flipping the last 4 Wave 0 graceful-reds green (scaffold/criterion-1, archive-last, non-TTY approval, bulk summary) and closing Phase 23 at 427 PASS / 0 FAIL.
+- A `_brownfield-argus` generator that materializes 509 `.md` + a real `ln -s` symlink + a 127-line oversized CLAUDE.md + an `@import` seed into any target dir, plus a 1-line additive `report()` deviation so an idempotent adopt re-run emits the literal ROADMAP phrase "nothing to scaffold" — full suite stays PASS 429/0.
+- The `▸ Phase 24` block in `tests/run.sh` — five criterion sections (C1–C5) that
+
+drive the shipped `conjure adopt` + restructure-gate pipeline against the 500-file
+`_brownfield-argus` fixture and assert all five v0.6.0 ROADMAP success criteria
+end-to-end: <30s dry-run + zero writes, rollback zero-diff (per-file sha256 +
+`diff -r`), idempotent re-run ("nothing to scaffold"), SIGKILL-after-snapshot
+recovery (non-TTY exit 2 + auto-rollback zero-diff via a 3-attempt anti-flake
+relaunch loop), and symlink-skip + @import pre-write block — taking the full suite
+from PASS 429 to PASS 447, FAIL 0, shellcheck-clean.
+
+---
+
 ## v0.5.0 Auto-Update + Healthcheck (Shipped: 2026-05-28)
 
 **Phases completed:** 5 phases, 10 plans

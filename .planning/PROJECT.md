@@ -64,12 +64,16 @@ is LLM, human-gated and backup-guarded.
 - ✓ `conjure update --pr` + `--cron` — idempotent auto-PR + weekly workflow template (AUTPR-01–02) — v0.5.0
 - ✓ `conjure.ps1` native Windows entrypoint + windows-ps1-shim pwsh CI job (WIN-01–02) — v0.5.0
 - ✓ `mutate_rm` deletion primitive, publish-skill positional arg, ci-gate empty-check guard (INFRA-01, DEBT-01–02) — v0.5.0
+- ✓ Foundation libs — `lib/log.sh`/`snapshot.sh`/`inventory.sh`/`caps.sh` + `mutate_archive`, 6-bucket classifier, 500-file cap, finalized `adopt-manifest.json` schema (INV-01–04, SAFE-03, ADOPT-03) — v0.6.0
+- ✓ `conjure adopt` CLI — 5-step pipeline (preconditions→snapshot→inventory→scaffold→audit), `--dry-run` zero-writes, `--rollback` sha256 zero-diff, partial-run recovery, `--apply-step`/`--update-manifest` op-executor seam (ADOPT-01/02/04/05/06, SAFE-01/02/04/05/06/07) — v0.6.0
+- ✓ Human-gated `restructure` skill — `[Read, Bash]`-only, drives the adopt seam; pre-write invariant + `conjure audit` gates block invalid proposals before approval; per-class grouped approvals; archive-last + decision-vocabulary scan (RESTR-01–06) — v0.6.0
+- ✓ E2E verification — 500-file `_brownfield-argus` fixture + integration tests (dry-run perf <30s, rollback zero-diff, idempotent re-run, SIGKILL recovery, symlink-skip + @import-block); suite 449/0 — v0.6.0
 
 ### Active
 
 <!-- Requirements for the next milestone — defined fresh via /gsd-new-milestone. -->
 
-_v0.6.0 "Safe Brownfield Adoption" requirements being defined via `/gsd-new-milestone` — see `.planning/REQUIREMENTS.md`._
+_v0.6.0 shipped 2026-05-29. Next milestone requirements TBD — define via `/gsd-new-milestone` (candidate: v0.7.0 cross-repo / workspace orchestration, per Out of Scope)._
 
 ### Out of Scope
 
@@ -86,12 +90,16 @@ _v0.6.0 "Safe Brownfield Adoption" requirements being defined via `/gsd-new-mile
 
 ## Current State
 
-**In progress:** v0.6.0 — "Safe Brownfield Adoption"
+**Shipped:** v0.6.0 — "Safe Brownfield Adoption" (2026-05-29)
 
-- Phase 21 (Foundation Libs + Inventory) complete (2026-05-28) — `lib/caps.sh`, `lib/log.sh`, `lib/snapshot.sh`, `lib/inventory.sh` (6-bucket classifier + `adopt-manifest.json` emitter), `mutate_archive` (copy→sha256-verify→rm→ledger), finalized `adopt-manifest.schema.json` (draft-07); INV-01..04, SAFE-03, ADOPT-03 verified (15/15 must-haves); 359 test assertions green
-- Next: Phase 22 — `conjure adopt` CLI core + rollback
+- 23/23 requirements satisfied across 4 phases (21–24), 12 plans, 25 tasks
+- `conjure adopt` turns an existing repo into the four-layer harness: full snapshot backup → inventory/classify → scaffold missing layers → size-cap audit → adoption report, all rollback-capable with crash-durable `.conjure-adopt-state` and partial-run recovery
+- Human-gated `restructure` skill (`[Read, Bash]`) condenses an oversized CLAUDE.md through pre-write safety gates (invariant verify + `conjure audit`) that block invalid proposals before any approval; all mutation routes through the audited `conjure adopt` chokepoint
+- E2E verified against a 500-file `_brownfield-argus` fixture; full suite 449/0; CI shellcheck-clean
+- Audit found + fixed 2 real issues at close: `conjure adopt` refused a clean git repo (log-before-gate ordering, 86ca62b) and snapshot copied `.git` causing rollback stderr noise (tar-exclude, a1ff4ca)
+- Deferred hardening (non-blocking): SAFE-05 snapshot-flush-window rollback race (refuse-closed, safe); nyquist VALIDATION frontmatter flags for 22/23/24 (coverage real, flags stale)
 
-**Shipped:** v0.5.0 — "Auto-Update + Healthcheck" (2026-05-28)
+**Previous:** v0.5.0 — "Auto-Update + Healthcheck" (2026-05-28)
 
 - 11/11 requirements satisfied across 5 phases, 10 plans
 - Harness lifecycle loop closed: `conjure check` (drift) → `conjure resolve` (conflicts) → `conjure update --pr/--cron` (automated PRs)
@@ -130,10 +138,15 @@ _v0.6.0 "Safe Brownfield Adoption" requirements being defined via `/gsd-new-mile
 | `conjure update --pr`: deterministic branch (sha256 of kit version), idempotent via `gh pr list` | Re-runs must not open duplicate PRs | ✓ Good — AUTPR-01, v0.5.0 |
 | `conjure.ps1` is a shim (Git Bash → WSL → exit 2), not a PowerShell port | No subcommand logic duplicated; one source of truth | ✓ Good — WIN-01, v0.5.0 |
 | Test sandbox resets PATH but must resolve git/jq/python3 dirs dynamically | Hardcoded /usr/bin drops tools on Git Bash (usrmerge, /mingw64) | ⚠️ Revisit — fixed post-close; cross-platform test hygiene needs ongoing care |
+| Split responsibility: CLI owns ALL filesystem mutations; `restructure` skill owns ALL LLM judgment, restricted to `[Read, Bash]` | Determinism + auditability for file ops; human-gated judgment for content; the skill can never Write/Edit project files | ✓ Good — RESTR-02 chokepoint, v0.6.0 |
+| `snapshot_create` uses raw `cp`/`tar` (NOT `mutate_cp`) and excludes `.git`/`node_modules` | Snapshot is the safety primitive that precedes mutations (mutate_cp would suppress it under dry-run); excluding `.git` avoids rollback overwriting read-only objects | ✓ Good — SAFE-01/02, v0.6.0 (a1ff4ca) |
+| Pre-write safety gates (invariant verify + `conjure audit`) block BEFORE the user sees a proposal | Catch dropped invariants / `@import` / cap breaches before approval, not after a bad write | ✓ Good — RESTR-04/05, v0.6.0 |
+| `precondition_git` filters conjure's own artifacts from the dirty-tree check | A clean user repo must run the pipeline even after `log_init` writes RESTRUCTURE-LOG.md (found by milestone integration audit) | ✓ Good — ADOPT-03, v0.6.0 (86ca62b) |
+| Interactive `/dev/tty` prompts (recovery + approval) verified via PTY/`expect`, non-TTY path automated | TTY UX can't be driven by the plain harness; PTY UAT + non-TTY exit-2 automation covers both | ✓ Good — SAFE-05/RESTR-03, v0.6.0 |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-05-28 — Phase 21 complete (Foundation Libs + Inventory) — v0.6.0 Safe Brownfield Adoption*
+*Last updated: 2026-05-29 — after v0.6.0 "Safe Brownfield Adoption" milestone (shipped; 23/23 requirements, suite 449/0)*

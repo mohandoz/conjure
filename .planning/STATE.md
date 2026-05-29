@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.6.0
 milestone_name: Safe Brownfield Adoption
-status: milestone_complete
-last_updated: 2026-05-29T04:00:05.309Z
-last_activity: 2026-05-29
+status: Awaiting next milestone
+last_updated: "2026-05-29T09:29:06.109Z"
+last_activity: 2026-05-29 — Milestone v0.6.0 completed and archived
 progress:
   total_phases: 4
   completed_phases: 4
   total_plans: 12
   completed_plans: 12
   percent: 100
-stopped_at: Milestone complete (Phase 24 was final phase)
 ---
 
 # Project State
@@ -25,12 +24,10 @@ See: .planning/PROJECT.md (updated 2026-05-28)
 
 ## Current Position
 
-Phase: 24
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-05-29
-
-Progress: [██████████] 100%
+Phase: Milestone v0.6.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-29 — Milestone v0.6.0 completed and archived
 
 ## Performance Metrics
 
@@ -123,3 +120,7 @@ None.
 Last session: 2026-05-29T03:37:58.462Z
 Stopped at: Completed 24-01-PLAN.md (Phase 24 Wave 1)
 Resume file: None
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
