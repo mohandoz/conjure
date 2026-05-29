@@ -54,7 +54,7 @@ foot-guns, cross-platform Node.js hooks.
 - 🛡 **Safe migrations** — backup-before-mutate from Cursor, Aider, Continue, GitHub Copilot, Windsurf, and existing `.claude/` configs.
 - 🎯 **9 stack profiles** — Java-Spring, Python-FastAPI, TS-Next, Rust-Axum, Go-Gin, Node-Nest, Monorepo, Polyglot, Data Science.
 - 🔒 **4 compliance overlays** — HIPAA (with PHI scan hook), SOC 2, GDPR, PCI.
-- 🧪 **112 self-tests, all green** — change confidently; CI runs on every PR.
+- 🧪 **439 self-tests, all green** (Linux + Windows + macOS) — change confidently; CI runs on every PR.
 - 🌍 **Cross-platform** — bash hooks for POSIX, Node.js `.mjs` hooks for native Windows.
 - 📦 **Plugin-ready** — installable via Claude Code Marketplace.
 - 🔁 **Compound engineering** — Stop hook proposes new rules from session corrections.

@@ -16,6 +16,33 @@ without losing rules and without breaking running sessions.
 | `.github/copilot-instructions.md` | file exists | `from-copilot` | Instructions → CLAUDE.md non-negotiable rules. |
 | `.windsurfrules` | file exists | `from-windsurf` | Rules → CLAUDE.md. |
 
+## Adopting a whole repo — `conjure adopt`
+
+`conjure migrate` converts a **prior AI tool's config** into a Conjure `.claude/`.
+To fold an **entire existing repo** (oversized `CLAUDE.md`, scattered docs, prior
+GSD `.planning/`, or no AI config at all) into the four-layer harness, use
+`conjure adopt` — a rollback-capable, snapshot-backed pipeline:
+
+```bash
+conjure adopt --dry-run .   # 5-step plan, zero writes, inspectable manifest
+conjure adopt .             # snapshot → inventory → scaffold → audit → report
+conjure adopt --rollback .  # sha256-verified restore + delete scaffolded files
+```
+
+- Full timestamped snapshot before any mutation; `--rollback` restores every
+  mutated file (sha256-verified) and removes scaffolded layers. Crash-durable —
+  a killed run offers `[r]ollback / [c]ontinue / [s]tart-fresh` on re-run.
+- Never-delete: stale/oversized files are archived to `.conjure-archive-<ts>/`.
+- Refuses a dirty git tree (commit/stash, or `--force`); every step logged to
+  `RESTRUCTURE-LOG.md`.
+- Installs a human-gated `restructure` skill (`.claude/skills/restructure/`,
+  `[Read, Bash]`) that condenses an oversized `CLAUDE.md` through pre-write
+  invariant + `conjure audit` gates and applies changes only through the audited
+  `conjure adopt` chokepoint.
+
+Choose: greenfield → `conjure init` · convert another tool's config →
+`conjure migrate` (above) · adopt an existing repo → `conjure adopt`.
+
 ## Universal safety rules
 
 1. **Backup before mutate.** Every migration creates `<target>/.claude.backup-YYYYMMDD-HHMMSS/`

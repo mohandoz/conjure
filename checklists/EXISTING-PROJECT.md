@@ -2,6 +2,24 @@
 
 Use when adding Claude Code config to a repo that already has code.
 
+## Fast path — `conjure adopt`
+
+For most repos, one rollback-capable command does the brownfield onboarding:
+
+```bash
+conjure adopt --dry-run .   # inspect the 5-step plan (zero writes)
+conjure adopt .             # snapshot → inventory → scaffold → audit → report
+# Undo anytime: conjure adopt --rollback .   (sha256-verified restore)
+```
+
+It snapshots before mutating, scaffolds only missing harness layers (existing
+files untouched), archives (never deletes) stale files, and installs a
+human-gated `restructure` skill to condense an oversized `CLAUDE.md` through
+pre-write safety gates. Refuses a dirty git tree — commit/stash first (or
+`--force`). Then open Claude Code and run the `restructure` skill to approve the
+CLAUDE.md condensation step-by-step. The manual steps below remain useful for
+deep customization (knowledge graph, per-area skills).
+
 ## Pre-Claude (5-minute prep)
 
 - [ ] Confirm clean working tree (`git status`) or stash. Claude shouldn't fight uncommitted work.

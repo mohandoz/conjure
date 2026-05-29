@@ -38,7 +38,7 @@ updated: 2026-05-24.
 
 ### vs. Manual `.claude/`
 - **Manual**: total flexibility, total responsibility.
-- **Conjure**: opinionated defaults backed by Anthropic + community eval data; backup-before-mutate on every change; size caps enforced; cross-platform Node.js hooks; safe migration from other tools.
+- **Conjure**: opinionated defaults backed by Anthropic + community eval data; backup-before-mutate on every change; size caps enforced; cross-platform Node.js hooks; safe migration from other tools; one-command brownfield adoption (`conjure adopt`) with full snapshot + sha256-verified rollback.
 - **Trade-off**: manual is faster *for the first project*. Conjure pays back at scale (multiple projects, team handoffs, kit updates).
 
 ### vs. CursorRules → CLAUDE.md by hand
