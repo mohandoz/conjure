@@ -3279,6 +3279,168 @@ fi
 # End Phase 23 test block
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Phase 24 — v0.6.0 E2E verification against the _brownfield-argus fixture
+# Mirrors the green, battle-tested Phase 22 block idioms (mktemp sandboxes with
+# set/reset EXIT-trap discipline, p22_sha, diff -r with the D-03 excludes, the
+# SIGKILL background-launch + bounded-poll harness) pointed at the 500-file argus
+# fixture. Five sections, ONE per ROADMAP success criterion (C1–C5). Every section
+# is guarded behind `P22_ADOPT_OK -eq 1 && P24_ARGUS_OK -eq 1` so a missing
+# generator (Plan 01 / Wave 1) reports graceful RED instead of crashing.
+# Reuses the EXISTING P22_ADOPT_SH + p22_sha helpers defined in the Phase 22
+# preamble above (still in scope). This block PROVES the shipped Phases 21–23
+# pipeline holds together at 500-file scale — it modifies no product code.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Presence guard shared by every Phase 24 section (mirror P22_ADOPT_OK pattern).
+P24_ARGUS_GEN="$CONJURE_HOME/tests/fixtures/_brownfield-argus/generate-argus.sh"
+P24_ARGUS_OK=0
+[ -f "$P24_ARGUS_GEN" ] && P24_ARGUS_OK=1
+
+echo
+echo "▸ Phase 24 — dry-run perf + zero writes (criterion 1)"
+
+if [ "$P22_ADOPT_OK" -ne 1 ] || [ "$P24_ARGUS_OK" -ne 1 ]; then
+  fail "argus generator / adopt.sh missing — Plan 01 generator + Wave 1 adopt.sh must exist first (criterion 1)"
+else
+  P24_C1_TARGET="$(mktemp -d)"
+  trap 'rm -rf "$P24_C1_TARGET"' EXIT
+  bash "$P24_ARGUS_GEN" "$P24_C1_TARGET" >/dev/null 2>&1   # materialize ~500 .md
+  # Perf: date +%s integer-second delta, 30s ceiling (research measured ~6s).
+  P24_C1_START="$(date +%s)"
+  DRY_RUN=1 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$P24_C1_TARGET" >/dev/null 2>&1
+  P24_C1_END="$(date +%s)"
+  P24_C1_ELAPSED=$((P24_C1_END - P24_C1_START))
+  if [ "$P24_C1_ELAPSED" -lt 30 ]; then
+    pass "argus dry-run: 500-file dry-run completed in ${P24_C1_ELAPSED}s (< 30s) (criterion 1)"
+  else
+    fail "argus dry-run: 500-file dry-run took ${P24_C1_ELAPSED}s (>= 30s ceiling) (criterion 1)"
+  fi
+  # Zero writes under the target (non-git sandbox per O-2 → no porcelain; assert
+  # no adopt artifacts landed): no adopt-manifest.json AND no .conjure-adopt-state.
+  P24_C1_MANIFEST_COUNT="$(find "$P24_C1_TARGET" -name adopt-manifest.json 2>/dev/null | wc -l | tr -d ' ')"
+  P24_C1_STATE_COUNT="$(find "$P24_C1_TARGET" -name '.conjure-adopt-state' 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${P24_C1_MANIFEST_COUNT:-1}" -eq 0 ]; then
+    pass "argus dry-run: no adopt-manifest.json under target — zero writes (criterion 1)"
+  else
+    fail "argus dry-run: adopt-manifest.json leaked into target — not zero writes (criterion 1)"
+  fi
+  if [ "${P24_C1_STATE_COUNT:-1}" -eq 0 ]; then
+    pass "argus dry-run: no .conjure-adopt-state under target — zero writes (criterion 1)"
+  else
+    fail "argus dry-run: .conjure-adopt-state leaked into target — not zero writes (criterion 1)"
+  fi
+  rm -rf "$P24_C1_TARGET"
+  trap - EXIT
+fi
+
+echo
+echo "▸ Phase 24 — live adopt + rollback zero-diff (criterion 2)"
+
+if [ "$P22_ADOPT_OK" -ne 1 ] || [ "$P24_ARGUS_OK" -ne 1 ]; then
+  fail "argus generator / adopt.sh missing — Plan 01 generator + Wave 1 adopt.sh must exist first (criterion 2)"
+else
+  P24_RB_TARGET="$(mktemp -d)"
+  P24_RB_PRE="$(mktemp -d)"   # pristine pre-adopt copy for the zero-diff comparison
+  P24_RB_HASHES="$(mktemp)"   # hash record OUTSIDE both trees (Pitfall 4 — else it pollutes the diff)
+  trap 'rm -rf "$P24_RB_TARGET" "$P24_RB_PRE"; rm -f "$P24_RB_HASHES"' EXIT
+  # Generate into PRE, then cp -aR into TARGET to guarantee identical pre-state
+  # (cp -aR preserves the real ln -s symlink — never dereference it).
+  bash "$P24_ARGUS_GEN" "$P24_RB_PRE" >/dev/null 2>&1
+  cp -aR "$P24_RB_PRE/." "$P24_RB_TARGET/"
+  # Record sha256 of every pre-adopt regular file (relative paths); skip the
+  # symlink (sha of its target is irrelevant) and any .git.
+  ( cd "$P24_RB_TARGET" && find . -type f -not -path './.git/*' | sort | while IFS= read -r f; do
+      printf '%s  %s\n' "$(p22_sha "$f")" "$f"
+    done ) > "$P24_RB_HASHES" 2>/dev/null
+  # Live adopt, then rollback.
+  DRY_RUN=0 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$P24_RB_TARGET" >/dev/null 2>&1
+  DRY_RUN=0 CONJURE_ADOPT_ROLLBACK=1 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" --rollback "$P24_RB_TARGET" >/dev/null 2>&1
+  # Per-file sha256: every pre-adopt file restored to its recorded before-hash.
+  P24_RB_MISMATCH=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    _h="${line%%  *}"; _f="${line##*  }"
+    _now="$(p22_sha "$P24_RB_TARGET/$_f" 2>/dev/null || echo MISSING)"
+    [ "$_h" = "$_now" ] || P24_RB_MISMATCH=$((P24_RB_MISMATCH + 1))
+  done < "$P24_RB_HASHES"
+  if [ "$P24_RB_MISMATCH" -eq 0 ]; then
+    pass "argus rollback: every pre-adopt file sha256 == recorded before-hash (criterion 2)"
+  else
+    fail "argus rollback: $P24_RB_MISMATCH file(s) differ from recorded before-hash (criterion 2)"
+  fi
+  # [ROLLBACK] entry logged.
+  if [ -f "$P24_RB_TARGET/RESTRUCTURE-LOG.md" ] && grep -q '\[ROLLBACK\]' "$P24_RB_TARGET/RESTRUCTURE-LOG.md" 2>/dev/null; then
+    pass "argus rollback: [ROLLBACK] entry in RESTRUCTURE-LOG.md (criterion 2)"
+  else
+    fail "argus rollback: no [ROLLBACK] entry in RESTRUCTURE-LOG.md (criterion 2)"
+  fi
+  # Zero-diff pre-adopt vs post-rollback, excluding conjure's own dirs (D-03).
+  P24_RB_DIFF="$(diff -r \
+    -x '.conjure-adopt-backups' -x '.conjure-archive-*' \
+    -x 'RESTRUCTURE-LOG.md' -x 'adopt-manifest.json' -x '.conjure-adopt-state' \
+    "$P24_RB_PRE" "$P24_RB_TARGET" 2>&1)"
+  if [ -z "$P24_RB_DIFF" ]; then
+    pass "argus rollback: diff -r pre-adopt vs post-rollback empty (excl. D-03 dirs) (criterion 2)"
+  else
+    fail "argus rollback: post-rollback diff not empty — got: $P24_RB_DIFF (criterion 2)"
+  fi
+  rm -rf "$P24_RB_TARGET" "$P24_RB_PRE"
+  rm -f "$P24_RB_HASHES"
+  trap - EXIT
+fi
+
+echo
+echo "▸ Phase 24 — idempotent re-run (criterion 3)"
+
+if [ "$P22_ADOPT_OK" -ne 1 ] || [ "$P24_ARGUS_OK" -ne 1 ]; then
+  fail "argus generator / adopt.sh missing — Plan 01 generator + Wave 1 adopt.sh must exist first (criterion 3)"
+else
+  P24_ID_TARGET="$(mktemp -d)"
+  P24_ID_RUN1="$(mktemp -d)"   # snapshot of post-run-1 target OUTSIDE the target (for the run1-vs-run2 diff)
+  trap 'rm -rf "$P24_ID_TARGET" "$P24_ID_RUN1"' EXIT
+  bash "$P24_ARGUS_GEN" "$P24_ID_TARGET" >/dev/null 2>&1
+  # First live adopt (the scaffolding run).
+  DRY_RUN=0 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$P24_ID_TARGET" >/dev/null 2>&1
+  # Snapshot the post-run-1 state (cp -aR preserves the symlink) for the zero-mutation diff.
+  cp -aR "$P24_ID_TARGET/." "$P24_ID_RUN1/"
+  # Clear the durable state (the :2896 idiom) so the second run is a clean
+  # idempotent scaffold, not a recovery prompt.
+  rm -rf "$P24_ID_TARGET/.conjure-adopt-state"
+  P24_ID_OUT="$(DRY_RUN=0 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$P24_ID_TARGET" 2>&1)"
+  # Signal (a): the report says zero layers scaffolded.
+  if printf '%s\n' "$P24_ID_OUT" | grep -Eq 'Scaffolded:[[:space:]]*0[[:space:]]+layer'; then
+    pass "argus idempotent: re-run reports 'Scaffolded: 0 layer files' (criterion 3)"
+  else
+    fail "argus idempotent: re-run missing 'Scaffolded: 0 layer' — got: $P24_ID_OUT (criterion 3)"
+  fi
+  # Signal (b): created[] count is 0 on the second run.
+  P24_ID_CREATED="$(jq -r '.created | length' "$P24_ID_TARGET/.conjure-adopt-state/state.json" 2>/dev/null || echo NA)"
+  if [ "$P24_ID_CREATED" = "0" ]; then
+    pass "argus idempotent: state.json .created|length == 0 — zero scaffold (criterion 3)"
+  else
+    fail "argus idempotent: state.json .created|length == $P24_ID_CREATED (expected 0) (criterion 3)"
+  fi
+  # Signal (c): zero mutations — run1-after vs run2-after diff empty (excl. D-03).
+  P24_ID_DIFF="$(diff -r \
+    -x '.conjure-adopt-backups' -x '.conjure-archive-*' \
+    -x 'RESTRUCTURE-LOG.md' -x 'adopt-manifest.json' -x '.conjure-adopt-state' \
+    "$P24_ID_RUN1" "$P24_ID_TARGET" 2>&1)"
+  if [ -z "$P24_ID_DIFF" ]; then
+    pass "argus idempotent: diff -r run1-after vs run2-after empty — zero mutations (criterion 3)"
+  else
+    fail "argus idempotent: run1-vs-run2 diff not empty — got: $P24_ID_DIFF (criterion 3)"
+  fi
+  # Signal (d): the literal ROADMAP phrase (Plan 01 O-1 report() deviation).
+  if printf '%s\n' "$P24_ID_OUT" | grep -qi 'nothing to scaffold'; then
+    pass "argus idempotent: re-run emits literal 'nothing to scaffold' (O-1, criterion 3)"
+  else
+    fail "argus idempotent: re-run missing literal 'nothing to scaffold' — got: $P24_ID_OUT (O-1, criterion 3)"
+  fi
+  rm -rf "$P24_ID_TARGET" "$P24_ID_RUN1"
+  trap - EXIT
+fi
+
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
