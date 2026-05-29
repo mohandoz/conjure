@@ -1,6 +1,6 @@
 ---
 slug: adopt-rollback-windows
-status: fix_applied_pending_ci
+status: resolved
 trigger: "conjure adopt --rollback aborts on native Windows Git Bash (windows-test CI). snapshot_rollback fails so scaffolded .claude files survive, no [ROLLBACK] log entry, post-rollback diff non-empty. 5 remaining CI failures (adopt rollback x3 + argus rollback x2). macOS/Linux green at 439/0."
 created: 2026-05-29
 updated: 2026-05-29
@@ -186,3 +186,28 @@ push ONE windows-test cycle (~21 min), read got/want + (a/b/c) from the windows-
 ## Eliminated (cont.)
 
 - hypothesis: the tar snapshot↔restore round-trip is not byte-faithful on Windows (fix #2's premise) — ELIMINATED (CI run 26657033420): the test `every pre-adopt file sha256 == recorded before-hash` PASSED, proving restored == pristine bytes exactly. The tar temp-file fix DID make the round-trip byte-faithful. The step-3 abort is an INTERNAL compare problem (recorded before-hash vs verify-hash), not a restore-fidelity problem.
+
+## RESOLVED 2026-05-29 (CI run 26662221307, commit 8a4934d) — windows-test 439/0
+
+CONFIRMED ROOT CAUSE: a Windows Git Bash (MSYS) carriage return surfaced on the READ
+side and poisoned string operations, Windows-only. Fix #3 (`tr -d '\r'` in sha_of +
+`${var%$'\r'}` strips at the step-3 verify, manifest-read, and created[]-delete loops)
+cleared ALL 5 failing assertions in one cycle:
+- adopt rollback: scaffolded created[] files removed ✓ (was ✗)
+- adopt rollback: [ROLLBACK] entry in RESTRUCTURE-LOG.md ✓ (was ✗)
+- adopt rollback: diff -r pre-adopt vs post-rollback empty ✓ (was ✗)
+- argus rollback: [ROLLBACK] entry ✓ (was ✗)
+- argus rollback: diff empty ✓ (was ✗)
+
+The bracketed `got=[...] want=[...]` diagnostic printed NOTHING (no mismatch occurred),
+confirming the CR — not a real byte divergence — was the gremlin. windows-test PASS 439 /
+FAIL 0; macOS 439/0; Linux green. Full cross-platform parity restored.
+
+The earlier fixes still stand and were necessary prerequisites: tar PIPE → temp file made
+the round-trip byte-faithful (so the CR was the *last* remaining divergence), and the
+manifest-driven created[] gave an authoritative scaffold list (so once the CR was stripped,
+every scaffold path — including the gitignored COMPOUND-CANDIDATES.md — was deleted).
+
+Diagnostics left in place as permanent guards (no-ops on macOS/Linux, only surface on
+failure): the `got=[...] want=[...]` abort message and `CONJURE_ADOPT_ROLLBACK_DIAG=1` in
+the P22/P24 rollback tests — cheap early-warning for any future Windows regression.
