@@ -113,7 +113,7 @@ Plans:
 
 **Wave 1** *(blocked on Wave 0)*
 
-- [ ] 23-02-PLAN.md — Wave 1: the 4 gate helpers — verify-invariants (GATE A, D-05/07/08), audit-staged (GATE B, D-13/O-1 shim), extract-invariants (D-03/06), decision-scan (D-11)
+- [x] 23-02-PLAN.md — Wave 1: the 4 gate helpers — verify-invariants (GATE A, D-05/07/08), audit-staged (GATE B, D-13/O-1 shim), extract-invariants (D-03/06), decision-scan (D-11)
 
 **Wave 2** *(blocked on Wave 1)*
 
@@ -145,5 +145,5 @@ Plans:
 | 20. Windows + CI Gate | v0.5.0 | 2/2 | Complete | 2026-05-28 |
 | 21. Foundation Libs + Inventory | v0.6.0 | 4/4 | Complete    | 2026-05-28 |
 | 22. `conjure adopt` CLI Core + Rollback | v0.6.0 | 3/3 | Complete    | 2026-05-28 |
-| 23. Restructure Skill + Safety Gates | v0.6.0 | 1/3 | In Progress|  |
+| 23. Restructure Skill + Safety Gates | v0.6.0 | 2/3 | In Progress|  |
 | 24. Integration Tests + Argus Fixture | v0.6.0 | 0/TBD | Not started | - |

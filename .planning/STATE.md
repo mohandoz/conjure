@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v0.6.0
 milestone_name: Safe Brownfield Adoption
 status: executing
-last_updated: "2026-05-29T01:38:06.014Z"
+last_updated: "2026-05-29T02:05:42.858Z"
 last_activity: 2026-05-29
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 9
   percent: 50
 ---
 
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-05-28)
 ## Current Position
 
 Phase: 23 (restructure-skill-safety-gates) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-05-29
 
-Progress: [████████░░] 80%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [████████░░] 80%
 | Phase 22 P22-02 | 35 | 2 tasks | 4 files |
 | Phase 22 P22-03 | 40 | 2 tasks | 2 files |
 | Phase 23 P23-01 | 14 | 2 tasks | 9 files |
+| Phase 23 P23-02 | 35 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,7 @@ Full decision log in PROJECT.md Key Decisions table. Key v0.6.0 design decisions
 - [Phase ?]: Phase 23 Wave 0: graceful-red Phase 23 test block in tests/run.sh gates every Wave 1/2 deliverable (4 gate helpers, SKILL.md scaffold, approval driver) before any of them exist
 - [Phase ?]: Phase 23 fixtures live under tests/fixtures/_restructure-gates/ (leading underscore) to dodge the generic tests/fixtures/[^_]*/ audit + golden-EXPECT loops at run.sh:326/368/390
 - [Phase ?]: Phase 23 INVARIANTS.txt holds 5 canonical tokens (exit 2, @import, ≤100, mutate.sh, do not delete), proven against case/whitespace-mangled reflowed-invariant.md for the D-07 normalized-substring contract
+- [Phase ?]: Phase 23 Wave 1: 4 deterministic gate helpers shipped (verify-invariants/audit-staged/extract-invariants/decision-scan); all exit 2 never exit 1, shellcheck-clean; audit-staged BLOCK keys on named conditions not audit rc; fixed check.sh to skip SKILL.md-less skill dirs
 
 ### Pending Todos
 
@@ -106,6 +108,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-05-29T01:37:55.113Z
+Last session: 2026-05-29T02:04:25.946Z
 Stopped at: Completed 23-01-PLAN.md (Phase 23 Wave 0 test-first foundation)
 Resume file: None
