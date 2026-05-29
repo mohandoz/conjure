@@ -158,8 +158,16 @@ precondition_git() {
     echo "preconditions: not a git repo — skipping dirty-tree gate (snapshot still backs up the filesystem)"
     return 0
   fi
+  # Ignore conjure's OWN in-flight artifacts: log_init may have already written
+  # RESTRUCTURE-LOG.md, and a prior/interrupted run may have left .conjure-adopt-state,
+  # .conjure-adopt-backups, .conjure-archive-*, or adopt-manifest.json. These are NOT
+  # the user's uncommitted work — a clean USER tree must pass the gate even though
+  # conjure has touched the directory. (Without this filter, a clean committed repo is
+  # wrongly reported dirty on the first run because log_init runs before this gate.)
   local dirty
-  dirty="$(git -C "$TARGET" status --porcelain 2>/dev/null)"
+  dirty="$(git -C "$TARGET" status --porcelain 2>/dev/null \
+    | grep -vE '(RESTRUCTURE-LOG\.md|adopt-manifest\.json|\.conjure-adopt-state|\.conjure-adopt-backups|\.conjure-archive-)' \
+    || true)"
   if [ -n "$dirty" ]; then
     if [ "${CONJURE_ADOPT_FORCE:-0}" != "1" ]; then
       echo "✗ preconditions: working tree is dirty — commit/stash first, or pass --force" >&2

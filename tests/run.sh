@@ -3579,6 +3579,49 @@ else
   trap - EXIT
 fi
 
+echo
+echo "▸ Phase 24 — clean git repo runs the full pipeline (milestone-audit gap-closure)"
+
+# Regression: the milestone integration audit found `conjure adopt` refused a CLEAN
+# committed git repo (the headline user flow) because log_init writes RESTRUCTURE-LOG.md
+# before precondition_git checks `git status --porcelain`, so the untracked log made the
+# tree look dirty. precondition_git now filters conjure's own artifacts. Every other
+# pipeline test uses a NON-git mktemp target (the gate self-skips), so this is the only
+# test that exercises the clean-git path. Skips silently if git is unavailable.
+if [ "$P22_ADOPT_OK" -ne 1 ]; then
+  fail "adopt.sh missing — Wave 1 must create scripts/adopt.sh first (clean-git gate)"
+elif ! command -v git >/dev/null 2>&1; then
+  pass "clean-git gate: git unavailable — skipping (environment, not a failure)"
+else
+  P24_CG_TARGET="$(mktemp -d)"
+  trap 'rm -rf "$P24_CG_TARGET"' EXIT
+  cp -r "$P22_FIXTURE/." "$P24_CG_TARGET/"
+  ( cd "$P24_CG_TARGET" && git init -q && git add -A \
+    && git -c user.email=test@conjure -c user.name=test commit -qm init ) >/dev/null 2>&1
+  # CLEAN committed tree → adopt MUST run the full pipeline (not exit 2 at preconditions).
+  P24_CG_OUT="$(DRY_RUN=0 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$P24_CG_TARGET" 2>&1)"
+  P24_CG_RC=$?
+  if [ "$P24_CG_RC" -eq 0 ] && [ -f "$P24_CG_TARGET/adopt-manifest.json" ] \
+     && printf '%s' "$P24_CG_OUT" | grep -q 'git clean'; then
+    pass "clean-git gate: clean committed repo runs full pipeline (preconditions pass, manifest emitted)"
+  else
+    fail "clean-git gate: clean repo blocked (rc=$P24_CG_RC) — precondition_git misfired on conjure's own artifacts"
+  fi
+  # Genuinely dirty USER file → adopt MUST still exit 2 (the gate must not over-filter).
+  echo "user uncommitted work" > "$P24_CG_TARGET/user-wip.txt"
+  rm -rf "$P24_CG_TARGET/.conjure-adopt-state" "$P24_CG_TARGET/.conjure-adopt-backups" \
+         "$P24_CG_TARGET/RESTRUCTURE-LOG.md" "$P24_CG_TARGET/adopt-manifest.json" 2>/dev/null
+  DRY_RUN=0 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$P24_CG_TARGET" >/dev/null 2>&1
+  P24_CG_DIRTY_RC=$?
+  if [ "$P24_CG_DIRTY_RC" -eq 2 ]; then
+    pass "clean-git gate: a genuinely dirty user file still exits 2 (gate not over-filtered)"
+  else
+    fail "clean-git gate: dirty user tree got rc=$P24_CG_DIRTY_RC (expected 2) — gate over-filters real changes"
+  fi
+  rm -rf "$P24_CG_TARGET"
+  trap - EXIT
+fi
+
 # ──────────────────────────────────────────────────────────────────────────────
 # End Phase 24 test block
 # ──────────────────────────────────────────────────────────────────────────────
