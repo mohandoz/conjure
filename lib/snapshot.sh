@@ -27,13 +27,22 @@ snapshot_create() {
     return 0
   fi
 
-  # Create snapshot directory and copy contents preserving symlinks + timestamps (M-4)
+  # Create snapshot directory and copy contents preserving symlinks + timestamps (M-4).
+  # Exclude .git and node_modules: adopt never mutates them, so they need no rollback
+  # coverage — and copying read-only .git objects makes rollback's overwrite emit
+  # "Permission denied" noise on the safety-critical path (milestone-audit WR). tar gives
+  # portable exclusion (BSD + GNU) while preserving symlinks/perms/timestamps; the
+  # `cd && tar` guards a bad target dir. cp -a is the no-exclusion fallback if tar fails
+  # (rare — a stray .git copy is then cosmetic-only, never a correctness problem).
   mkdir -p "${snap_dir}"
-  if ! cp -a "${target}/." "${snap_dir}/"; then
-    # Pitfall 5 cross-platform fallback: cp -Rp (POSIX)
-    if ! cp -Rp "${target}" "${snap_dir}/"; then
-      printf '%s\n' "[snapshot_create] ERROR: cp failed for ${target} → ${snap_dir}" >&2
-      return 1
+  if ! { ( cd "${target}" && tar -cf - --exclude='./.git' --exclude='./node_modules' . ) \
+         | ( cd "${snap_dir}" && tar -xpf - ); }; then
+    if ! cp -a "${target}/." "${snap_dir}/"; then
+      # Pitfall 5 cross-platform fallback: cp -Rp (POSIX)
+      if ! cp -Rp "${target}" "${snap_dir}/"; then
+        printf '%s\n' "[snapshot_create] ERROR: copy failed for ${target} → ${snap_dir}" >&2
+        return 1
+      fi
     fi
   fi
 
