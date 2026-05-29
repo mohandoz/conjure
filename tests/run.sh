@@ -2583,7 +2583,9 @@ else
     done ) > "$P22_RB_HASHES" 2>/dev/null
   # Live adopt, then rollback.
   DRY_RUN=0 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" "$P22_RB_TARGET" >/dev/null 2>&1
-  DRY_RUN=0 CONJURE_ADOPT_ROLLBACK=1 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" --rollback "$P22_RB_TARGET" >/dev/null 2>&1
+  P22_RB_OUT="$(DRY_RUN=0 CONJURE_ADOPT_ROLLBACK=1 CONJURE_HOME="$CONJURE_HOME" bash "$P22_ADOPT_SH" --rollback "$P22_RB_TARGET" 2>&1)"
+  P22_RB_RC=$?
+  [ "$P22_RB_RC" -ne 0 ] && printf '  [diag] adopt rollback rc=%s out=%s\n' "$P22_RB_RC" "$P22_RB_OUT" >&2
   # Per-file sha256: every pre-adopt file restored to its recorded before-hash.
   P22_RB_MISMATCH=0
   while IFS= read -r line; do
