@@ -49,6 +49,9 @@ reference-doc unknown` (see `adopt-manifest.schema.json`).
    <.conjure-adopt-state>` to grep candidate constraints, then (LLM judgement)
    confirm the canonical token list into `.conjure-adopt-state/INVARIANTS.txt`
    (D-03/05/06). These are the non-negotiable rules the condensed core must keep.
+   WR-03: GATE A is a substring backstop, NOT a semantic checker — confirm
+   **distinctive multi-word** tokens (e.g. `hooks exit 2`, `do not delete user files`),
+   never short/common ones (`exit 2`, `delete`), so the match cannot pass incidentally.
 3. **Draft + stage proposals.** Draft the condensed `CLAUDE.md`, any extracted
    skill/reference files, and the archive list. Stage each draft to
    `.conjure-adopt-state/staging/<file>` (Bash redirect), then register the op over

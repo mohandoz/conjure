@@ -8,6 +8,18 @@
 # `≤100`, `mutate.sh`, `do not delete`). The proposed CLAUDE.md is normalized
 # (lowercase + whitespace-collapse + trim) into a single haystack line so that
 # reflowed/condensed/case-mangled-but-content-complete files still pass (D-07).
+#
+# WR-03 / RESEARCH CR-1 (KNOWN LIMITATION — residual MEDIUM risk, accepted):
+#   The present-check is a normalized SUBSTRING test (case "$HAYSTACK" in *"$needle"*),
+#   so it is (a) granularity-blind: a short/common token (e.g. `exit 2`, `never`) can
+#   match incidentally in unrelated prose or a code fence, and (b) POLARITY-blind: the
+#   token `exit 2` is also satisfied by "do NOT exit 2", so an inverted rule passes.
+#   No NLP negation detection is attempted here — it would risk false-BLOCKS on
+#   invariants whose canonical token legitimately embeds a negation (e.g. the shipped
+#   `do not delete`) and add complexity for little gain. The LLM proposer is the PRIMARY
+#   safeguard (it must confirm distinctive multi-word tokens, e.g. `hooks exit 2` not
+#   `exit 2`); this deterministic gate is the BACKSTOP that catches a wholesale dropped
+#   invariant, not a semantic-inversion detector.
 
 set -uo pipefail
 
