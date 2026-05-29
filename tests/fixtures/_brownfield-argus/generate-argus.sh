@@ -30,7 +30,18 @@ if [ -z "$TARGET" ]; then
   exit 2
 fi
 
-mkdir -p "${TARGET}/docs" "${TARGET}/generated-docs"
+# Fail closed on an unusable target (existing regular file, path under a file,
+# or any unwritable location). Without this the bare mkdir + ~509 redirects
+# would flood stderr yet the script would still exit 0 — a silent, unusable
+# fixture and a violation of the project lock "exit 2 never exit 1".
+if ! mkdir -p "${TARGET}/docs" "${TARGET}/generated-docs" 2>/dev/null; then
+  echo "generate-argus.sh: cannot create target dir '${TARGET}' (not a writable directory)" >&2
+  exit 2
+fi
+if [ ! -d "${TARGET}/docs" ] || [ ! -w "${TARGET}/docs" ]; then
+  echo "generate-argus.sh: target '${TARGET}' is not a writable directory" >&2
+  exit 2
+fi
 
 # (1) Oversized/sprawling CLAUDE.md (>100 lines) at the target root.
 {
@@ -45,7 +56,9 @@ mkdir -p "${TARGET}/docs" "${TARGET}/generated-docs"
   done
 } > "${TARGET}/CLAUDE.md"
 
-# (2) ~500 bulk .md files (505 total: 255 under docs/, 250 under generated-docs/).
+# (2) bulk .md files: 255 doc-NNN.md + real.md (256) under docs/, 250 gen-NNN.md
+# under generated-docs/; with root CLAUDE.md + with-import.md = 509 .md total
+# (the docs/linked.md symlink adds a 510th .md entry but points at real.md).
 i=1
 while [ "$i" -le 255 ]; do
   NUM="$(printf '%03d' "$i")"
@@ -65,7 +78,7 @@ done
 # (3) A REAL symlink (docs/linked.md -> real.md), relative target for portability.
 printf '# Real linked target\n\nThe genuine file the symlink points at.\n' \
   > "${TARGET}/docs/real.md"
-ln -s real.md "${TARGET}/docs/linked.md"
+ln -sf real.md "${TARGET}/docs/linked.md"
 
 # (4) An @import staged seed — first content line is an @-import.
 printf '# Proposed CLAUDE\n@.claude/skills/x/SKILL.md\n' > "${TARGET}/with-import.md"
