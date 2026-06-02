@@ -3839,6 +3839,82 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
+# v0.6.1 FIX-03: --cron template uses pinned actions/checkout, not curl|bash
+# ──────────────────────────────────────────────────────────────────────────────
+
+echo
+echo "▸ v0.6.1 FIX-03: --cron template uses pinned actions/checkout, not curl|bash"
+
+FIX03_DIR="$(mktemp -d)"
+CONJURE_HOME="$CONJURE_HOME" cli/conjure update --cron "$FIX03_DIR" >/dev/null 2>&1
+CRON_YML="$FIX03_DIR/.github/workflows/conjure-update.yml"
+
+# 1. curl|bash must NOT be present
+if ! grep -qE 'curl.*install\.sh.*\|.*bash' "$CRON_YML" 2>/dev/null; then
+  pass "FIX-03: cron template does not contain curl|bash foot-gun"
+else
+  fail "FIX-03: cron template still contains curl|bash foot-gun"
+fi
+
+# 2. actions/checkout@ SHA pin must be present
+if grep -q 'actions/checkout@' "$CRON_YML" 2>/dev/null; then
+  pass "FIX-03: cron template uses actions/checkout@ (pinned)"
+else
+  fail "FIX-03: cron template missing actions/checkout@ pin"
+fi
+
+# 3. SHA pin comment (# v) must be present
+if grep -q '# v' "$CRON_YML" 2>/dev/null; then
+  pass "FIX-03: cron template has SHA pin comment (# v...)"
+else
+  fail "FIX-03: cron template missing SHA pin comment"
+fi
+
+# 4. conjure update --pr must still be present (AUTPR-02 compatibility)
+if grep -q 'conjure update --pr' "$CRON_YML" 2>/dev/null; then
+  pass "FIX-03: cron template still invokes conjure update --pr (AUTPR-02 compat)"
+else
+  fail "FIX-03: cron template missing conjure update --pr (AUTPR-02 regression)"
+fi
+
+# 5. cp to /usr/local/bin must NOT be present (CONJURE_HOME resolution safety)
+if ! grep -qE 'cp.*conjure.*/usr/local/bin' "$CRON_YML" 2>/dev/null; then
+  pass "FIX-03: cron template does not cp conjure to /usr/local/bin"
+else
+  fail "FIX-03: cron template still cp-to-usr-local-bin (breaks CONJURE_HOME resolution)"
+fi
+
+# 6. CONJURE_HOME=conjure-src must be set on invocation lines
+if grep -q 'CONJURE_HOME=conjure-src' "$CRON_YML" 2>/dev/null; then
+  pass "FIX-03: cron template sets CONJURE_HOME=conjure-src on invocation"
+else
+  fail "FIX-03: cron template missing CONJURE_HOME=conjure-src on invocation lines"
+fi
+
+rm -rf "$FIX03_DIR"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# v0.6.1 FIX-04: inventory.sh DRY_RUN uses mktemp, not hardcoded /tmp path
+# ──────────────────────────────────────────────────────────────────────────────
+
+echo
+echo "▸ v0.6.1 FIX-04: inventory.sh DRY_RUN uses mktemp, not hardcoded /tmp path"
+
+# 1. Hardcoded /tmp path must be gone
+if grep -q '/tmp/adopt-manifest-dryrun.json' "$CONJURE_HOME/lib/inventory.sh"; then
+  fail "FIX-04: hardcoded /tmp/adopt-manifest-dryrun.json still present in lib/inventory.sh"
+else
+  pass "FIX-04: hardcoded /tmp path removed from lib/inventory.sh"
+fi
+
+# 2. mktemp must appear near the DRY_RUN branch
+if grep -A5 'DRY_RUN' "$CONJURE_HOME/lib/inventory.sh" | grep -q 'mktemp'; then
+  pass "FIX-04: mktemp found in DRY_RUN branch of lib/inventory.sh"
+else
+  fail "FIX-04: mktemp not found in DRY_RUN branch of lib/inventory.sh"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
