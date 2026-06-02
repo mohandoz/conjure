@@ -318,17 +318,16 @@ jobs:
   conjure-update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install conjure
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/mohandoz/conjure/main/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: mohandoz/conjure
+          path: conjure-src
       - name: Check drift
         id: drift
-        run: conjure check || echo "drift=1" >> "$GITHUB_OUTPUT"
+        run: CONJURE_HOME=conjure-src conjure-src/cli/conjure check || echo "drift=1" >> "$GITHUB_OUTPUT"
       - name: Open update PR
         if: steps.drift.outputs.drift == '1'
-        run: conjure update --pr
+        run: CONJURE_HOME=conjure-src conjure-src/cli/conjure update --pr
 CRONEOF
     echo "▸ Cron template written: $wf_file"
     return 0

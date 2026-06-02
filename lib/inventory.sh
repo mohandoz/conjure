@@ -246,7 +246,7 @@ inventory_scan() {
 # inventory_emit_manifest <target_abs> <output_path>
 # Builds and emits adopt-manifest.json with all required top-level keys.
 # Calls inventory_scan if CONJURE_INVENTORY_ITEMS is empty.
-# DRY_RUN=1: writes to /tmp/adopt-manifest-dryrun.json instead of output_path.
+# DRY_RUN=1: writes to a portable mktemp path instead of output_path.
 # Calls log_step INVENTORY after writing.
 inventory_emit_manifest() {
   local target="$1"
@@ -413,10 +413,11 @@ inventory_emit_manifest() {
 
   rm -f "${_items_jsonl}" "${_violations_jsonl}" "${_missing_layers_jsonl}" "${links_file}"
 
-  # DRY_RUN=1: redirect to /tmp path; otherwise use caller-supplied output_path
+  # DRY_RUN=1: redirect to a portable temp path; otherwise use caller-supplied output_path
+  # Use mktemp fallback for cross-platform portability (BSD/GNU differ on -t interpretation)
   local actual_output_path="${output_path}"
   if [ "${DRY_RUN:-0}" = "1" ]; then
-    actual_output_path="/tmp/adopt-manifest-dryrun.json"
+    actual_output_path="$(mktemp 2>/dev/null || mktemp -t conjure-adopt-dryrun.XXXXXX)"
   fi
 
   mutate_write "${actual_output_path}" "${manifest_content}"
