@@ -3786,6 +3786,59 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
+# v0.6.1 FIX-01: post-edit-format.mjs stdin contract
+# ──────────────────────────────────────────────────────────────────────────────
+
+echo
+echo "▸ v0.6.1 FIX-01: post-edit-format.mjs stdin contract"
+
+FMT_MJS="$CONJURE_HOME/templates/hooks-nodejs/post-edit-format.mjs"
+
+# 1. STDIN contract — file_path extracted from stdin JSON, hook exits 0
+FMT_TMP="$(mktemp --suffix=.sh 2>/dev/null || mktemp -t tmp.XXXXXX.sh)"
+printf '#!/bin/sh\necho hello\n' > "$FMT_TMP"
+FMT_PAYLOAD="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$FMT_TMP\"},\"session_id\":\"s1\"}"
+FMT_RC=0
+printf '%s' "$FMT_PAYLOAD" | node "$FMT_MJS" >/dev/null 2>&1 || FMT_RC=$?
+rm -f "$FMT_TMP"
+if [ "$FMT_RC" -eq 0 ]; then
+  pass "post-edit hook runs without error via stdin JSON (FIX-01)"
+else
+  fail "post-edit hook crashed on stdin JSON file_path — got rc=$FMT_RC (FIX-01)"
+fi
+
+# 2. STDIN contract — nonexistent file exits 0 (no crash)
+FMT_NOFILE_RC=0
+printf '%s' "{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/tmp/conjure-nonexistent-$$\"},\"session_id\":\"s1\"}" | \
+  node "$FMT_MJS" >/dev/null 2>&1 || FMT_NOFILE_RC=$?
+if [ "$FMT_NOFILE_RC" -eq 0 ]; then
+  pass "post-edit hook exits 0 on nonexistent file via stdin JSON (FIX-01)"
+else
+  fail "post-edit hook crashed on nonexistent file via stdin JSON — got rc=$FMT_NOFILE_RC (FIX-01)"
+fi
+
+# 3. Empty stdin exits 0
+FMT_EMPTY_RC=0
+printf '%s' '{}' | node "$FMT_MJS" >/dev/null 2>&1 || FMT_EMPTY_RC=$?
+if [ "$FMT_EMPTY_RC" -eq 0 ]; then
+  pass "post-edit hook exits 0 on empty stdin JSON (FIX-01)"
+else
+  fail "post-edit hook crashed on empty stdin JSON — got rc=$FMT_EMPTY_RC (FIX-01)"
+fi
+
+# 4. Legacy fallback — argv[2] still works
+FMT_ARGV_TMP="$(mktemp --suffix=.sh 2>/dev/null || mktemp -t tmp.XXXXXX.sh)"
+printf '#!/bin/sh\necho hello\n' > "$FMT_ARGV_TMP"
+FMT_ARGV_RC=0
+node "$FMT_MJS" "$FMT_ARGV_TMP" >/dev/null 2>&1 || FMT_ARGV_RC=$?
+rm -f "$FMT_ARGV_TMP"
+if [ "$FMT_ARGV_RC" -eq 0 ]; then
+  pass "post-edit hook exits 0 with argv[2] file path (legacy fallback) (FIX-01)"
+else
+  fail "post-edit hook crashed on argv[2] file path — got rc=$FMT_ARGV_RC (FIX-01)"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
