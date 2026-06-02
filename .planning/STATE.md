@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-05-28)
 Phase: Milestone v0.6.0 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-05-29 — Milestone v0.6.0 completed and archived
+Last activity: 2026-06-02 — Completed quick task 260603-302: v0.6.1 hardening patch
 
 ## Performance Metrics
 
@@ -102,6 +102,12 @@ None.
 - Phase 22 open question: step-id format (slug vs UUID) — decide during planning before coding `adopt.sh`
 - Phase 22 open question: `--apply-step` / `--update-manifest` callback contract JSON schema validation depth
 - Phase 23 open question: skill body must fit in ≤200 lines while covering manifest load, invariant check, plan proposal, approval loop, patch write, final audit — may need a planning spike
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260603-302 | v0.6.1 hardening patch: dead stdin hooks, gitleaks branch, curl-pipe cron, predictable temp, exit 1→2, rm-rf regex | 2026-06-02 | 076aca5 | Verified | [260603-302-v0-6-1-hardening-patch-fix-dead-hooks-st](./quick/260603-302-v0-6-1-hardening-patch-fix-dead-hooks-st/) |
 
 ## Deferred Items
 
