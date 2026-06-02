@@ -8,8 +8,7 @@
 #
 # Exit codes:
 #   0 = success
-#   1 = validation error (empty URL, clone failure)
-#   2 = hard prerequisite failure (git not installed, lib/mutate.sh missing)
+#   2 = any failure (empty URL, clone failure, missing prerequisites)
 
 set -euo pipefail
 
@@ -27,7 +26,7 @@ DRY_RUN="${DRY_RUN:-0}"
 OVERLAY_URL="${1:-}"
 TARGET="${2:-$(pwd)}"
 
-[ -z "$OVERLAY_URL" ] && { echo "✗ Usage: init-overlay.sh <overlay-url> <target>" >&2; exit 1; }
+[ -z "$OVERLAY_URL" ] && { echo "✗ Usage: init-overlay.sh <overlay-url> <target>" >&2; exit 2; }
 
 # Prerequisite checks
 if ! command -v git >/dev/null 2>&1; then
@@ -44,7 +43,7 @@ CLONE_TMP="$(mktemp -d)"
 trap 'rm -rf "$CLONE_TMP"' EXIT
 
 git clone --depth 1 -- "$OVERLAY_URL" "$CLONE_TMP" 2>/dev/null \
-  || { echo "✗ git clone failed for: $DISPLAY_URL" >&2; exit 1; }
+  || { echo "✗ git clone failed for: $DISPLAY_URL" >&2; exit 2; }
 
 CLONE_SHA="$(git -C "$CLONE_TMP" rev-parse HEAD)"
 

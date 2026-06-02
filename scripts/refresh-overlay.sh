@@ -8,8 +8,7 @@
 #
 # Exit codes:
 #   0 = success
-#   1 = user-fixable error (no marker configured, clone failure)
-#   2 = hard prerequisite failure (git not installed, lib/mutate.sh missing)
+#   2 = any failure (no marker configured, clone failure, missing prerequisites)
 
 set -euo pipefail
 
@@ -30,11 +29,11 @@ if ! command -v git >/dev/null 2>&1; then
   exit 2
 fi
 
-# Marker-not-found guard (D-04: exit 1, not 2)
+# Marker-not-found guard
 OVERLAY_MARKER="$TARGET/.claude/.conjure-org-overlay"
 if [ ! -f "$OVERLAY_MARKER" ]; then
   echo "✗ No org overlay configured. Run conjure init --overlay <git-url> first." >&2
-  exit 1
+  exit 2
 fi
 
 OVERLAY_URL="$(grep '^url=' "$OVERLAY_MARKER" | cut -d= -f2-)"
@@ -49,7 +48,7 @@ if [ "${DRY_RUN:-0}" = "0" ]; then
     backup="$TARGET/.claude.backup-${ts}"
     echo "▸ Backing up existing .claude/ → $backup"
     cp -R "$TARGET/.claude" "$backup" \
-      || { echo "✗ Backup failed — aborting" >&2; exit 1; }
+      || { echo "✗ Backup failed — aborting" >&2; exit 2; }
   fi
 fi
 
@@ -58,7 +57,7 @@ trap 'rm -rf "$CLONE_TMP"' EXIT
 echo "▸ Re-cloning overlay: $DISPLAY_URL"
 
 git clone --depth 1 -- "$OVERLAY_URL" "$CLONE_TMP" 2>/dev/null \
-  || { echo "✗ git clone failed for: $DISPLAY_URL" >&2; exit 1; }
+  || { echo "✗ git clone failed for: $DISPLAY_URL" >&2; exit 2; }
 
 NEW_SHA="$(git -C "$CLONE_TMP" rev-parse HEAD)"
 
