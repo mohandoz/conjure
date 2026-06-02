@@ -3717,6 +3717,75 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
+# v0.6.1 FIX-01/FIX-02: pre-commit-quality-gate.mjs stdin contract + gitleaks branch
+# ──────────────────────────────────────────────────────────────────────────────
+
+echo
+echo "▸ v0.6.1 FIX-01/FIX-02: pre-commit-quality-gate.mjs stdin contract + gitleaks branch"
+
+GATE_MJS="$CONJURE_HOME/templates/hooks-nodejs/pre-commit-quality-gate.mjs"
+GATE_STDIN_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"test\""},"session_id":"s1"}'
+
+# 1. STDIN contract — git commit payload is processed (exits 0 without gitleaks)
+GATE_STDIN_RC=0
+printf '%s' "$GATE_STDIN_PAYLOAD" | node "$GATE_MJS" >/dev/null 2>&1 || GATE_STDIN_RC=$?
+if [ "$GATE_STDIN_RC" -eq 0 ]; then
+  pass "pre-commit hook processes git commit via stdin JSON (FIX-01)"
+else
+  fail "pre-commit hook errored on git commit stdin JSON — got rc=$GATE_STDIN_RC (FIX-01)"
+fi
+
+# 2. STDIN contract — non-commit is filtered out (exits 0)
+GATE_LS_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls -la"},"session_id":"s1"}'
+GATE_LS_RC=0
+printf '%s' "$GATE_LS_PAYLOAD" | node "$GATE_MJS" >/dev/null 2>&1 || GATE_LS_RC=$?
+if [ "$GATE_LS_RC" -eq 0 ]; then
+  pass "pre-commit hook allows non-commit command via stdin JSON (FIX-01)"
+else
+  fail "pre-commit hook incorrectly blocked non-commit command — got rc=$GATE_LS_RC (FIX-01)"
+fi
+
+# 3. gitleaks exit 1 (finding) must BLOCK (exit 2) — FIX-02
+GATE_STUB_BIN1="$(mktemp -d)"
+printf '#!/bin/sh\nexit 1\n' > "$GATE_STUB_BIN1/gitleaks"
+chmod +x "$GATE_STUB_BIN1/gitleaks"
+GATE_STUB1_RC=0
+printf '%s' "$GATE_STDIN_PAYLOAD" | PATH="$GATE_STUB_BIN1:$PATH" node "$GATE_MJS" >/dev/null 2>&1 || GATE_STUB1_RC=$?
+rm -rf "$GATE_STUB_BIN1"
+if [ "$GATE_STUB1_RC" -eq 2 ]; then
+  pass "pre-commit hook BLOCKS on gitleaks exit 1 (finding) (FIX-02)"
+else
+  fail "pre-commit hook did not block on gitleaks exit 1 — got rc=$GATE_STUB1_RC (FIX-02)"
+fi
+
+# 4. gitleaks exit 2 (tool error) must NOT block (exit 0)
+GATE_STUB_BIN2="$(mktemp -d)"
+printf '#!/bin/sh\nexit 2\n' > "$GATE_STUB_BIN2/gitleaks"
+chmod +x "$GATE_STUB_BIN2/gitleaks"
+GATE_STUB2_RC=0
+printf '%s' "$GATE_STDIN_PAYLOAD" | PATH="$GATE_STUB_BIN2:$PATH" node "$GATE_MJS" >/dev/null 2>&1 || GATE_STUB2_RC=$?
+rm -rf "$GATE_STUB_BIN2"
+if [ "$GATE_STUB2_RC" -ne 2 ]; then
+  pass "pre-commit hook does NOT false-block on gitleaks exit 2 (tool error) (FIX-02)"
+else
+  fail "pre-commit hook false-blocked on gitleaks exit 2 (tool error) (FIX-02)"
+fi
+
+# 5. gitleaks signal-kill (status null) must NOT block
+GATE_STUB_BIN3="$(mktemp -d)"
+# A script that kills itself → Node sees status=null, signal='SIGKILL'
+printf '#!/bin/sh\nkill -9 $$\n' > "$GATE_STUB_BIN3/gitleaks"
+chmod +x "$GATE_STUB_BIN3/gitleaks"
+GATE_STUB3_RC=0
+printf '%s' "$GATE_STDIN_PAYLOAD" | PATH="$GATE_STUB_BIN3:$PATH" node "$GATE_MJS" >/dev/null 2>&1 || GATE_STUB3_RC=$?
+rm -rf "$GATE_STUB_BIN3"
+if [ "$GATE_STUB3_RC" -ne 2 ]; then
+  pass "pre-commit hook does NOT false-block on gitleaks signal-kill (FIX-02)"
+else
+  fail "pre-commit hook false-blocked on gitleaks signal-kill (FIX-02)"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
