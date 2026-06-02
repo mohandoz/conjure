@@ -3649,6 +3649,74 @@ fi
 # End Phase 24 test block
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# v0.6.1 FIX-01/FIX-06: pre-bash-block-destructive.mjs stdin contract + rm-rf regex
+# ──────────────────────────────────────────────────────────────────────────────
+
+echo
+echo "▸ v0.6.1 FIX-01/FIX-06: pre-bash-block-destructive.mjs stdin contract + rm-rf regex"
+
+DESTRUCT_MJS="$CONJURE_HOME/templates/hooks-nodejs/pre-bash-block-destructive.mjs"
+
+# 1. STDIN contract — block path: rm -rf via stdin JSON must exit 2 (BLOCK)
+DESTRUCT_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/test"},"session_id":"s1"}'
+BLOCK_RC=0
+printf '%s' "$DESTRUCT_PAYLOAD" | node "$DESTRUCT_MJS" >/dev/null 2>&1 || BLOCK_RC=$?
+if [ "$BLOCK_RC" -eq 2 ]; then
+  pass "pre-bash hook BLOCKS rm -rf via stdin JSON (FIX-01)"
+else
+  fail "pre-bash hook did not BLOCK rm -rf via stdin JSON — got rc=$BLOCK_RC (FIX-01)"
+fi
+
+# 2. STDIN contract — allow path: safe command via stdin JSON must exit 0
+ALLOW_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls -la"},"session_id":"s1"}'
+ALLOW_RC=0
+printf '%s' "$ALLOW_PAYLOAD" | node "$DESTRUCT_MJS" >/dev/null 2>&1 || ALLOW_RC=$?
+if [ "$ALLOW_RC" -eq 0 ]; then
+  pass "pre-bash hook ALLOWS safe command via stdin JSON (FIX-01)"
+else
+  fail "pre-bash hook incorrectly blocked safe command via stdin JSON — got rc=$ALLOW_RC (FIX-01)"
+fi
+
+# 3. Legacy fallback — argv[2] still blocks rm -rf
+LEGACY_RC=0
+node "$DESTRUCT_MJS" "rm -rf /tmp/test" >/dev/null 2>&1 || LEGACY_RC=$?
+if [ "$LEGACY_RC" -eq 2 ]; then
+  pass "pre-bash hook BLOCKS rm -rf via argv fallback (FIX-01 legacy)"
+else
+  fail "pre-bash hook did not BLOCK rm -rf via argv fallback — got rc=$LEGACY_RC (FIX-01 legacy)"
+fi
+
+# 4. rm -fr variant: must exit 2 (FIX-06)
+RMFR_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -fr /tmp/test"},"session_id":"s1"}'
+RMFR_RC=0
+printf '%s' "$RMFR_PAYLOAD" | node "$DESTRUCT_MJS" >/dev/null 2>&1 || RMFR_RC=$?
+if [ "$RMFR_RC" -eq 2 ]; then
+  pass "pre-bash hook BLOCKS rm -fr variant (FIX-06)"
+else
+  fail "pre-bash hook did not BLOCK rm -fr variant — got rc=$RMFR_RC (FIX-06)"
+fi
+
+# 5. rm -r -f variant: must exit 2 (FIX-06)
+RMRF2_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -r -f /tmp/test"},"session_id":"s1"}'
+RMRF2_RC=0
+printf '%s' "$RMRF2_PAYLOAD" | node "$DESTRUCT_MJS" >/dev/null 2>&1 || RMRF2_RC=$?
+if [ "$RMRF2_RC" -eq 2 ]; then
+  pass "pre-bash hook BLOCKS rm -r -f variant (FIX-06)"
+else
+  fail "pre-bash hook did not BLOCK rm -r -f variant — got rc=$RMRF2_RC (FIX-06)"
+fi
+
+# 6. Empty stdin (no tool_input): must exit 0 (allow)
+EMPTY_RC=0
+printf '%s' '{}' | node "$DESTRUCT_MJS" >/dev/null 2>&1 || EMPTY_RC=$?
+if [ "$EMPTY_RC" -eq 0 ]; then
+  pass "pre-bash hook ALLOWS when stdin JSON has no tool_input (FIX-01)"
+else
+  fail "pre-bash hook incorrectly blocked on empty stdin JSON — got rc=$EMPTY_RC (FIX-01)"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
