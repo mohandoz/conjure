@@ -1290,16 +1290,16 @@ else
   fail "marker sha= mismatch: got=$MARKER_SHA expected=$OVLY_EXPECTED_SHA (OVLY-02)"
 fi
 
-# OVLY-03: refresh-overlay without marker exits 1 with correct message
+# OVLY-03: refresh-overlay without marker exits 2 with correct message (FIX-05: was exit 1)
 NO_MARKER_DIR="$(mktemp -d)"
 mkdir -p "$NO_MARKER_DIR/.claude"
 NOMK_RC=0
 NOMK_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$CONJURE_HOME/scripts/refresh-overlay.sh" \
   "$NO_MARKER_DIR" 2>&1)" || NOMK_RC=$?
-if [ "$NOMK_RC" -eq 1 ]; then
-  pass "refresh-overlay exits 1 when no marker (OVLY-03)"
+if [ "$NOMK_RC" -eq 2 ]; then
+  pass "refresh-overlay exits 2 when no marker (OVLY-03)"
 else
-  fail "refresh-overlay did not exit 1 on missing marker — got rc=$NOMK_RC (OVLY-03)"
+  fail "refresh-overlay did not exit 2 on missing marker — got rc=$NOMK_RC (OVLY-03)"
 fi
 if printf '%s\n' "$NOMK_OUT" | grep -q 'No org overlay configured'; then
   pass "refresh-overlay prints 'No org overlay configured' message (OVLY-03)"
@@ -3912,6 +3912,66 @@ if grep -A5 'DRY_RUN' "$CONJURE_HOME/lib/inventory.sh" | grep -q 'mktemp'; then
   pass "FIX-04: mktemp found in DRY_RUN branch of lib/inventory.sh"
 else
   fail "FIX-04: mktemp not found in DRY_RUN branch of lib/inventory.sh"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# v0.6.1 FIX-05: exit 1 → exit 2 in dispatcher + cmd_publish + overlay scripts
+# ──────────────────────────────────────────────────────────────────────────────
+
+echo
+echo "▸ v0.6.1 FIX-05: exit 1 → exit 2 in dispatcher + cmd_publish + overlay scripts"
+
+# 1. Dispatcher unknown command exits 2
+DISPATCH_RC=0
+cli/conjure totally-unknown-command >/dev/null 2>&1 || DISPATCH_RC=$?
+if [ "$DISPATCH_RC" -eq 2 ]; then
+  pass "dispatcher unknown command exits 2 (FIX-05)"
+else
+  fail "dispatcher unknown command exits $DISPATCH_RC — expected 2 (FIX-05)"
+fi
+
+# 2. cmd_publish unknown option exits 2
+PUBLISH_RC=0
+cli/conjure publish --totally-unknown-flag >/dev/null 2>&1 || PUBLISH_RC=$?
+if [ "$PUBLISH_RC" -eq 2 ]; then
+  pass "cmd_publish unknown option exits 2 (FIX-05)"
+else
+  fail "cmd_publish unknown option exits $PUBLISH_RC — expected 2 (FIX-05)"
+fi
+
+# 3. init-overlay.sh empty URL exits 2
+IOVERLAY_RC=0
+IOVERLAY_DIR="$(mktemp -d)"
+CONJURE_HOME="$CONJURE_HOME" bash scripts/init-overlay.sh "" "$IOVERLAY_DIR" >/dev/null 2>&1 || IOVERLAY_RC=$?
+rm -rf "$IOVERLAY_DIR"
+if [ "$IOVERLAY_RC" -eq 2 ]; then
+  pass "init-overlay exits 2 on empty URL (FIX-05)"
+else
+  fail "init-overlay exits $IOVERLAY_RC on empty URL — expected 2 (FIX-05)"
+fi
+
+# 4. init-overlay.sh bad URL exits 2
+IOVERLAY_BAD_RC=0
+IOVERLAY_BAD_DIR="$(mktemp -d)"
+CONJURE_HOME="$CONJURE_HOME" bash scripts/init-overlay.sh "file:///nonexistent-repo-xyz" "$IOVERLAY_BAD_DIR" >/dev/null 2>&1 || IOVERLAY_BAD_RC=$?
+rm -rf "$IOVERLAY_BAD_DIR"
+if [ "$IOVERLAY_BAD_RC" -eq 2 ]; then
+  pass "init-overlay exits 2 on bad URL (FIX-05)"
+else
+  fail "init-overlay exits $IOVERLAY_BAD_RC on bad URL — expected 2 (FIX-05)"
+fi
+
+# 5. refresh-overlay exits 2 when no marker (already tested in OVLY-03 above; explicit assertion)
+FIX05_NOMK_DIR="$(mktemp -d)"
+mkdir -p "$FIX05_NOMK_DIR/.claude"
+FIX05_NOMK_RC=0
+CONJURE_HOME="$CONJURE_HOME" bash "$CONJURE_HOME/scripts/refresh-overlay.sh" \
+  "$FIX05_NOMK_DIR" >/dev/null 2>&1 || FIX05_NOMK_RC=$?
+rm -rf "$FIX05_NOMK_DIR"
+if [ "$FIX05_NOMK_RC" -eq 2 ]; then
+  pass "refresh-overlay exits 2 when no marker (FIX-05)"
+else
+  fail "refresh-overlay exits $FIX05_NOMK_RC on no marker — expected 2 (FIX-05)"
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
