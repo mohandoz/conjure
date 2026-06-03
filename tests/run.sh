@@ -5582,6 +5582,41 @@ fi
 rm -rf "$P28_NOCFGDIR"
 trap - EXIT
 
+# WR-01-eval05-relative-target: EVAL-05 must find the eval config when audit is
+# invoked with a RELATIVE target arg. Pre-fix, "$TARGET/.conjure/..." doubled the
+# path after `cd "$TARGET"`, so a config-present harness was misreported as
+# "no eval config" and the coverage report was silently disabled.
+P28_RELBASE="$(mktemp -d)"
+trap 'rm -rf "$P28_RELBASE"' EXIT
+mkdir -p "$P28_RELBASE/relrepo/.conjure/eval"
+mkdir -p "$P28_RELBASE/relrepo/.claude/skills/sample-skill"
+printf '## Project\n\nRelative-target harness.\n\n- Always run shellcheck.\n' > "$P28_RELBASE/relrepo/CLAUDE.md"
+printf -- '---\nname: sample-skill\ndescription: Sample skill\nallowed-tools:\n  - Read\n---\nSample skill body.\n' > "$P28_RELBASE/relrepo/.claude/skills/sample-skill/SKILL.md"
+# Eval config WITH a skill-used assertion for sample-skill (so the config exists
+# and is non-empty; EVAL-05 should report full coverage, NOT "no eval config").
+printf 'tests:\n  - assert:\n      - type: skill-used\n        value: '"'"'sample-skill'"'"'\n' > "$P28_RELBASE/relrepo/.conjure/eval/promptfooconfig.yaml"
+git -C "$P28_RELBASE/relrepo" init -q
+git -C "$P28_RELBASE/relrepo" config user.email "test@conjure"
+git -C "$P28_RELBASE/relrepo" config user.name "conjure-test"
+git -C "$P28_RELBASE/relrepo" add -A 2>/dev/null || true
+git -C "$P28_RELBASE/relrepo" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_AUDIT_OK" -eq 1 ]; then
+  P28_REL_RC=0
+  # Invoke from $P28_RELBASE with the RELATIVE arg "relrepo" — the bug only
+  # surfaces with a relative (not absolute) target.
+  P28_REL_OUT="$(cd "$P28_RELBASE" && CONJURE_HOME="$CONJURE_HOME" bash "$P28_AUDIT_SH" relrepo 2>&1)" || P28_REL_RC=$?
+  if [ "$P28_REL_RC" -ne 2 ] && \
+     ! printf '%s\n' "$P28_REL_OUT" | grep -qi "no eval config"; then
+    pass "audit with relative target finds eval config (no path-doubling) (WR-01-eval05-relative-target)"
+  else
+    fail "audit rc=$P28_REL_RC — relative target misreported 'no eval config' (path-doubling) (WR-01-eval05-relative-target)"
+  fi
+else
+  fail "audit-setup.sh EVAL section not implemented — Wave 3 must add it (WR-01-eval05-relative-target)"
+fi
+rm -rf "$P28_RELBASE"
+trap - EXIT
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done

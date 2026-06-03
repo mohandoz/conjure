@@ -509,7 +509,12 @@ _eval_extract_skill_used() {
   ' "$1"
 }
 
-_eval_cfg="$TARGET/.conjure/eval/promptfooconfig.yaml"
+# cwd is already $TARGET (the `cd "$TARGET"` on line 19), so reference the config
+# relative to cwd. Using "$TARGET/..." here doubled the path for RELATIVE target
+# args (e.g. `audit-setup.sh myrepo` → myrepo/myrepo/.conjure/...), silently
+# disabling the whole EVAL-05 coverage report with a misleading "no eval config"
+# note. This matches the sibling cwd-relative `find .claude/skills` call below (WR-01).
+_eval_cfg=".conjure/eval/promptfooconfig.yaml"
 if [ ! -f "$_eval_cfg" ]; then
   note "no eval config — run \`conjure eval init\` (EVAL-05)"
   json_check "EVAL-05-no-config" "note" "no eval config — run conjure eval init"
