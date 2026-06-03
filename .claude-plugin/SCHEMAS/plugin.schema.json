@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://conjure.dev/schemas/plugin.schema.json",
+  "title": "Claude Code plugin.json",
+  "description": "Validates .claude-plugin/plugin.json. Only 'name' is required; all other fields are optional.",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name":        { "type": "string" },
+    "displayName": { "type": "string" },
+    "version":     { "type": "string" },
+    "description": { "type": "string" },
+    "author":      { "type": ["object", "string"] },
+    "homepage":    { "type": "string" },
+    "repository":  { "type": ["object", "string"] },
+    "license":     { "type": "string" },
+    "keywords":    { "type": "array", "items": { "type": "string" } },
+    "defaultEnabled": { "type": "boolean" },
+    "skills":      { "type": "string" },
+    "commands":    { "type": "array", "items": { "type": "string" } },
+    "agents":      { "type": "array", "items": { "type": "string" } },
+    "hooks":       { "type": "object" },
+    "mcpServers":  { "type": "object" }
+  }
+}
