@@ -153,7 +153,7 @@ Plans:
 
 **Wave 1** *(blocked on Wave 0 completion)*
 
-- [ ] 28-01-PLAN.md — Wave 1: scripts/eval.sh (cmd_eval_init + cmd_eval_run) + cli/conjure cmd_eval dispatch (EVAL-01, EVAL-02)
+- [x] 28-01-PLAN.md — Wave 1: scripts/eval.sh (cmd_eval_init + cmd_eval_run) + cli/conjure cmd_eval dispatch (EVAL-01, EVAL-02)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -207,6 +207,6 @@ Plans:
 | 25. Plugin + Marketplace Emission | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 1/4 | In Progress|  |
+| 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 2/4 | In Progress|  |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/? | Not started | - |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |
