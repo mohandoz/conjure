@@ -24,11 +24,11 @@ Build order (research consensus): **A plugin → B policy → C eval → D schem
 
 ### Policy: Sandbox + Managed-Settings / MDM (POL)
 
-- [ ] **POL-01**: each compliance overlay emits a regime-specific `sandbox{}` block (`denyRead`/`denyWrite`/`network.allowedDomains`) merged into `.claude/settings.json` via `jq` + `mutate_write`
-- [ ] **POL-02**: every `sandbox.filesystem.denyRead` path is mirrored into `permissions.deny` as `Read(<path>)` (closes the Read-tool enforcement gap #32226)
-- [ ] **POL-03**: each overlay emits `managed-settings.json` with `disableBypassPermissionsMode:"disable"` (string, not boolean), `allowManagedPermissionRulesOnly`, `forceLoginOrgUUID` placeholder, and the sandbox block
-- [ ] **POL-04**: MDM artifact generation — macOS plist (`com.anthropic.claudecode`) + Windows PowerShell/registry (`Set-ClaudeCodePolicy.ps1` → `HKLM\SOFTWARE\Policies\ClaudeCode`) written to a caller-specified output dir (never auto-placed at system paths)
-- [ ] **POL-05**: `conjure audit` flags (a) overlay active but missing/`enabled:false` sandbox, (b) `denyRead` path with no mirrored `Read(...)` deny, (c) `disableBypassPermissionsMode` wrong type
+- [x] **POL-01**: each compliance overlay emits a regime-specific `sandbox{}` block (`denyRead`/`denyWrite`/`network.allowedDomains`) merged into `.claude/settings.json` via `jq` + `mutate_write`
+- [x] **POL-02**: every `sandbox.filesystem.denyRead` path is mirrored into `permissions.deny` as `Read(<path>)` (closes the Read-tool enforcement gap #32226)
+- [x] **POL-03**: each overlay emits `managed-settings.json` with `disableBypassPermissionsMode:"disable"` (string, not boolean), `allowManagedPermissionRulesOnly`, `forceLoginOrgUUID` placeholder, and the sandbox block
+- [x] **POL-04**: MDM artifact generation — macOS plist (`com.anthropic.claudecode`) + Windows PowerShell/registry (`Set-ClaudeCodePolicy.ps1` → `HKLM\SOFTWARE\Policies\ClaudeCode`) written to a caller-specified output dir (never auto-placed at system paths)
+- [x] **POL-05**: `conjure audit` flags (a) overlay active but missing/`enabled:false` sandbox, (b) `denyRead` path with no mirrored `Read(...)` deny, (c) `disableBypassPermissionsMode` wrong type
 
 ### Eval: promptfoo + Context-Budget Linter (EVAL)
 
@@ -116,11 +116,11 @@ Which phases cover which requirements. Populated during roadmap creation.
 | PLUG-03 | Phase 25 | Complete |
 | PLUG-04 | Phase 25 | Complete |
 | PLUG-05 | Phase 25 | Complete |
-| POL-01 | Phase 26 | Pending |
-| POL-02 | Phase 26 | Pending |
-| POL-03 | Phase 26 | Pending |
-| POL-04 | Phase 26 | Pending |
-| POL-05 | Phase 26 | Pending |
+| POL-01 | Phase 26 | Complete |
+| POL-02 | Phase 26 | Complete |
+| POL-03 | Phase 26 | Complete |
+| POL-04 | Phase 26 | Complete |
+| POL-05 | Phase 26 | Complete |
 | SCHM-01 | Phase 27 | Pending |
 | SCHM-02 | Phase 27 | Pending |
 | SCHM-03 | Phase 27 | Pending |
