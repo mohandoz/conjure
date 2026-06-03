@@ -48,8 +48,12 @@ Non-goals (locked, from REQUIREMENTS):
 - `conjure eval --emit-workflow` WRITES `.github/workflows/conjure-eval.yml` via `mutate_write`
   (backup-before-mutate); it is a `pull_request`-triggered gate using `promptfoo/promptfoo-action`
   with `fail-on-threshold`, path-triggered on `.claude/**` and `CLAUDE.md`.
-- `fail-on-threshold` defaults to `0.8` (documented constant — high adherence without being
-  brittle on the 3×/minPassCount-2 rubric flakiness).
+- `fail-on-threshold` defaults to **`80`** (integer percent — high adherence without being
+  brittle on the 3×/minPassCount-2 rubric flakiness). **Decision override (D-28-THRESH):** the
+  original intent was "0.8" but RESEARCH (Pitfall 9) established `promptfoo/promptfoo-action`'s
+  `fail-on-threshold` input is an INTEGER 0–100, not a float — passing `0.8` is read as <1% and
+  the gate would never fail. The emitted workflow therefore uses `fail-on-threshold: 80`
+  (== the intended 80% adherence). This supersedes the "0.8" wording.
 
 ### Context-Budget Linter (`conjure audit --budget`)
 - `--budget` is a NEW flag on `conjure audit` (alongside existing `--json`/`--cost`/`--exact`/
