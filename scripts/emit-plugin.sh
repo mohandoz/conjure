@@ -85,13 +85,53 @@ validate_plugin_json "$PLUGIN_JSON" || exit 2
 mutate_mkdir "$TARGET/.claude-plugin"
 mutate_write "$TARGET/.claude-plugin/plugin.json" "$PLUGIN_JSON"
 
-# --marketplace path: implemented in Phase 25 Plan 02
-# DO_MARKETPLACE and DO_ENABLE variables are parsed and stored but the marketplace
-# emit block is a stub that prevents unknown-argument errors during Wave 1 tests.
+# --marketplace path (D-13: only when --marketplace is passed)
 if [ "$DO_MARKETPLACE" = "1" ]; then
-  # --marketplace path implemented in Phase 25 Plan 02
-  # Stub: prevent unknown-argument error when flag is passed during Wave 1 tests
-  echo "WARN: --marketplace emit not yet implemented (Phase 25 Plan 02)" >&2
+  # Step 1: Derive marketplace name
+  if [ -z "$MKT_NAME" ]; then
+    # Attempt auto-detect from git remote
+    OWNER_REPO="$(detect_github_source "$TARGET" 2>/dev/null)" || OWNER_REPO=""
+    if [ -n "$OWNER_REPO" ]; then
+      # Derive from repo basename: lowercase, replace _ and . with -, strip other non-alphanum
+      MKT_NAME="$(basename "$OWNER_REPO" | tr '[:upper:]' '[:lower:]' | tr '_.' '-' | tr -cd 'a-z0-9-')"
+    else
+      # Fallback: use basename of TARGET directory, kebab-cased
+      MKT_NAME="$(basename "$TARGET" | tr '[:upper:]' '[:lower:]' | tr '_.' '-' | tr -cd 'a-z0-9-')"
+    fi
+  fi
+  # Validate kebab-case: only a-z, 0-9, hyphens
+  # shellcheck disable=SC2016
+  if ! printf '%s' "$MKT_NAME" | grep -qE '^[a-z0-9][a-z0-9-]*$'; then
+    echo "✗ Marketplace name '$MKT_NAME' is not valid kebab-case (a-z, 0-9, hyphens only)" >&2
+    exit 2
+  fi
+
+  # Step 2: Reserved-name guard (D-07, PLUG-02) — BEFORE any writes
+  reserved_name_check "$MKT_NAME" || exit 2
+
+  # Step 3: Derive owner name
+  OWNER_REPO="${OWNER_REPO:-$(detect_github_source "$TARGET" 2>/dev/null || echo "")}"
+  OWNER_NAME="$(git -C "$TARGET" config user.name 2>/dev/null || echo "")"
+  if [ -z "$OWNER_NAME" ] && [ -n "$OWNER_REPO" ]; then
+    OWNER_NAME="$(dirname "$OWNER_REPO" | tr '/' '\n' | tail -1)"
+  fi
+  OWNER_NAME="${OWNER_NAME:-unknown}"
+
+  # Step 4: Build marketplace JSON
+  MKT_JSON="$(plugin_build_marketplace_json "$TARGET" "$MKT_NAME" "$RESOLVED_VERSION" "$OWNER_NAME")" || exit 2
+
+  # Step 5: Security gates (D-08) — scan full manifest before ANY write
+  secret_scan "$MKT_JSON" "marketplace.json" || exit 2
+  validate_marketplace_json "$MKT_JSON" || exit 2
+
+  # Step 6: Write marketplace.json
+  mutate_write "$TARGET/.claude-plugin/marketplace.json" "$MKT_JSON"
+
+  # Step 7: Settings.json wiring (D-13, D-14, D-15)
+  # Extract source object from marketplace.json plugins[0].source for the wire
+  SOURCE_OBJ="$(printf '%s' "$MKT_JSON" | jq -c '.plugins[0].source')"
+  PLUGIN_KEY="${MKT_NAME}@${MKT_NAME}"
+  plugin_wire_settings "$TARGET/.claude/settings.json" "$MKT_NAME" "$SOURCE_OBJ" "$PLUGIN_KEY" "$DO_ENABLE"
 fi
 
 # --validate: run_cli_validate (exits 2 if claude absent per D-10)
@@ -102,6 +142,14 @@ fi
 # Success report (D-04): print files written + copy-pasteable verification commands
 echo "▸ conjure publish-plugin: files written"
 echo "  ✓ .claude-plugin/plugin.json"
+if [ "$DO_MARKETPLACE" = "1" ]; then
+  echo "  ✓ .claude-plugin/marketplace.json"
+  if [ "$DO_ENABLE" = "1" ]; then
+    echo "  ✓ .claude/settings.json (enabledPlugins)"
+  else
+    echo "  ✓ .claude/settings.json (extraKnownMarketplaces — use --enable to activate)"
+  fi
+fi
 echo ""
 echo "▸ To verify the plugin loads:"
 echo "  claude plugin validate ."
