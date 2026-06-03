@@ -1,27 +1,28 @@
 # Architecture Research
 
-**Domain:** Open-source init kit for Claude Code — POSIX bash CLI + Node `.mjs` hooks (Conjure v0.6.0 "Safe Brownfield Adoption")
-**Researched:** 2026-05-28
-**Confidence:** HIGH (full codebase read directly from repo; all integration points derived from live source)
+**Domain:** Open-source init kit for Claude Code — POSIX bash CLI + Node `.mjs` hooks (Conjure v0.7.0 "Plugin-native + Policy-grade")
+**Researched:** 2026-06-03
+**Confidence:** HIGH (live codebase read; official Claude Code docs fetched this session; all integration points derived from source)
 
-> **Scope note (subsequent milestone):** This file extends the v0.5.0 ARCHITECTURE.md in place.
-> The v0.5.0 architecture is taken as fixed and fully shipped. Everything below is
-> additive or a targeted modification to existing files. The core invariant holds:
-> **every filesystem write routes through `lib/mutate.sh`**. All new components must
-> honor this without exception.
+> **Scope note (subsequent milestone):** This file extends the v0.6.0 ARCHITECTURE.md in place.
+> The v0.6.0 architecture is taken as fixed and fully shipped (467 passing tests). Everything below
+> is additive or a targeted modification to existing components. The core invariant holds:
+> **every filesystem write routes through `lib/mutate.sh`**. All new components must honor this
+> without exception. Hooks/scripts exit 2, never exit 1.
 
 ---
 
-## Existing Architecture (v0.5.0, fixed baseline)
+## Existing Architecture Baseline (v0.6.0, fixed)
 
 ```
-cli/conjure               — dispatcher: parse flags, call scripts/*, source lib/*
+cli/conjure               — dispatcher: parse flags, set env vars, delegate to scripts/
   ├── cmd_init            — init|migrate; --profile; --overlay; --dry-run
   ├── cmd_migrate         — calls migrations/<source>/migrate.sh
   ├── cmd_audit           — calls scripts/audit-setup.sh; --cost; --retire-list
   ├── cmd_update          — --check / --apply / --pr / --cron
   ├── cmd_check           — calls scripts/check.sh; --porcelain; exit 0/1
   ├── cmd_resolve         — calls scripts/resolve.sh; --dry-run
+  ├── cmd_adopt           — calls scripts/adopt.sh; full brownfield pipeline
   ├── cmd_refresh_graph   — calls scripts/refresh-graph.sh
   ├── cmd_refresh_overlay — calls scripts/refresh-overlay.sh
   ├── cmd_install_mcp     — calls scripts/install-mcp-stack.sh
@@ -30,791 +31,586 @@ cli/conjure               — dispatcher: parse flags, call scripts/*, source li
   └── cmd_publish_skill   — calls scripts/publish-skill.sh
 
 lib/mutate.sh             — write chokepoint (ALL filesystem mutations go here)
-                            mutate_mkdir / mutate_cp / mutate_write / mutate_rm
-lib/merge.sh              — 3-way merge; writes conflict sidecars (.conjure-conflict-*)
-lib/cost.sh               — char→token→$ estimation
+lib/snapshot.sh           — snapshot_create / snapshot_rollback / snapshot_list
+lib/inventory.sh          — inventory_scan / inventory_classify / inventory_emit_manifest
+lib/log.sh                — log_init / log_step / log_fail → RESTRUCTURE-LOG.md
+lib/merge.sh              — 3-way merge; writes conflict sidecars
+lib/caps.sh               — CLAUDE_MD_CAP / SKILL_MD_CAP / AGENT_MD_CAP constants
 lib/exact-count.mjs       — opt-in exact token counter (Node.js)
 lib/prices.json           — per-model price table
 
-scripts/init-project.sh   — scaffold .claude/
+scripts/adopt.sh          — 5-step brownfield adoption pipeline
 scripts/audit-setup.sh    — health-check; size caps; schema validation
 scripts/check.sh          — drift detection; read-only; exit 0/1
 scripts/resolve.sh        — guided interactive sidecar walker
-scripts/preflight.sh      — dependency verification
-scripts/update-pr.sh      — PR automation for conjure update --pr
+scripts/init-project.sh   — scaffold .claude/ (idempotent)
 scripts/publish-plugin.sh — marketplace.json update + submission snippet
 scripts/publish-skill.sh  — 4-gate skill validation + PR flow
-scripts/refresh-graph.sh  — knowledge graph rebuild
-scripts/refresh-overlay.sh— org overlay refresh
+scripts/preflight.sh      — dependency verification
 
 templates/                — kit templates (CLAUDE.md.tmpl, skills/, agents/, hooks-nodejs/)
 profiles/                 — 9 stack profiles (apply.sh per profile)
-compliance/               — 4 compliance overlays
-tests/
-  run.sh               — hand-rolled regression suite (302+ assertions)
-  lib/sandbox.sh       — test helper
-  fixtures/<profile>/  — committed scaffolds per stack profile
+compliance/               — 4 compliance overlays (hipaa/ soc2/ gdpr/ pci/ — apply.sh + fragments)
+.claude-plugin/           — plugin manifest (marketplace.json, plugin.json, SCHEMAS/)
+tests/run.sh              — hand-rolled regression suite (467 assertions)
 ```
-
-Key invariant: **every filesystem write in the kit routes through `lib/mutate.sh`**
-(mutate_mkdir / mutate_cp / mutate_write / mutate_rm). All new commands must honor this.
 
 ---
 
-## v0.6.0 Design Overview
+## v0.7.0 Design Overview: Five Capability Areas
 
-The new capability = "Safe Brownfield Adoption" with two cooperating halves:
+The five areas integrate as follows and must share the invariants above:
 
-1. **`conjure adopt` (deterministic CLI)** — pure shell, no LLM judgment. Does:
-   git-clean gate → full timestamped snapshot backup → inventory + classify all
-   markdown → emit `adopt-manifest.json` → scaffold missing harness layers →
-   size-cap audit → log all steps to `RESTRUCTURE-LOG.md` → support `--dry-run`
-   and `--rollback`.
+1. **Plugin + marketplace emission** — `conjure emit-plugin` generates a well-formed plugin dir
+   from the scaffolded harness; updates marketplace.json for the harness-as-plugin distribution
+   channel; wires `extraKnownMarketplaces` into `.claude/settings.json`.
 
-2. **`restructure` skill (Claude in-session, human-gated)** — LLM judgment only.
-   Reads the manifest + source docs → proposes a restructure plan → presents each
-   step for human approval → each approved step calls back into `conjure adopt
-   --apply-step <step-id>` which executes through `lib/mutate.sh`. The skill
-   never touches the filesystem directly.
+2. **Sandbox + managed-settings/MDM** — compliance overlays gain a second emit target: in addition
+   to their current `apply.sh` (mutate CLAUDE.md + hooks), they emit a `sandbox{}` block into
+   settings.json and a `managed-settings.json` artifact + optional MDM fragments (plist, registry).
 
-**Key tension resolved:** Conjure's core value is deterministic + auditable, but
-condensing a 21KB/180-line CLAUDE.md requires LLM judgment. Resolution = split
-responsibility. The CLI owns all mutations. The skill owns all judgment. The skill
-calls the CLI; the CLI never calls the skill.
+3. **promptfoo eval + budget linter** — `conjure eval` runs promptfoo via `npx promptfoo` (no
+   install dep); test specs live in `templates/evals/`; eval gates a CI job. Budget linter added
+   to `conjure audit` as a new flag.
 
----
+4. **Schema-version-aware audit** — audit reads a bundled schema table (`lib/cc-schema.json`)
+   keyed by CC version ranges; validates known hook event names, settings keys, and disallowed
+   patterns against the installed CC version.
 
-## New Components
-
-### 1. `lib/snapshot.sh` (NEW)
-
-**What:** Snapshot and rollback primitives. Creates a full timestamped backup of
-every path that `conjure adopt` will touch. Provides a rollback function to restore
-from that snapshot. Used exclusively by `scripts/adopt.sh`.
-
-**Why a lib, not inline:** Snapshot logic is reusable across `adopt` and any future
-commands that need pre-operation backups. Follows the same lib pattern as `mutate.sh`
-and `merge.sh` — sourced, not dispatched.
-
-**Functions:**
-
-```bash
-# snapshot_create <target_dir> <backup_root>
-# Creates: <backup_root>/conjure-adopt-<YYYYMMDD-HHMMSS>/
-# Copies the entire working state: CLAUDE.md + .claude/ + any RESTRUCTURE-LOG.md
-# Returns the snapshot path in CONJURE_SNAPSHOT_PATH (module-level var).
-# In dry-run: prints [dry-run] would snapshot <target_dir>, skips actual copy.
-snapshot_create() { ... }
-
-# snapshot_rollback <snapshot_path> <target_dir>
-# Restores from snapshot: replaces CLAUDE.md, .claude/, RESTRUCTURE-LOG.md
-# with the snapshotted versions. Appends a "ROLLBACK" entry to RESTRUCTURE-LOG.md.
-# In dry-run: prints [dry-run] would rollback from <snapshot_path>.
-snapshot_rollback() { ... }
-
-# snapshot_list <target_dir> <backup_root>
-# Prints available snapshots sorted newest-first. Used by --rollback flag.
-snapshot_list() { ... }
-```
-
-**Module-level state:**
-```bash
-CONJURE_SNAPSHOT_PATH=""   # set by snapshot_create; read by --rollback
-```
-
-**Backup location:** `<target_dir>/.conjure-adopt-backups/conjure-adopt-<timestamp>/`
-Not `.claude/` — keeps it separate from the harness content. Gitignore entry added
-by `adopt.sh` on first run.
-
-**Implementation notes:**
-- Uses `cp -R` for the copy (not mutate_cp) because snapshot_create is itself the
-  safety primitive that precedes all mutate_* calls. If snapshot_create fails, no
-  mutations proceed.
-- Rollback uses `mutate_write` for RESTRUCTURE-LOG.md entry; uses `cp -R` for
-  directory restore (mutate_cp does not recurse atomically enough for restore).
-- `set -e` guard: any failure in snapshot_create exits the `adopt.sh` pipeline
-  immediately via `|| { log_fail "Snapshot failed — aborting"; exit 1; }`.
-
-**New file:** `lib/snapshot.sh`
+5. **Cross-repo / workspace orchestration** — `conjure workspace` reads a `conjure-workspace.json`
+   manifest; iterates repos; reuses `lib/snapshot.sh` per-repo; introduces `lib/workspace.sh`
+   with aggregate rollback semantics.
 
 ---
 
-### 2. `lib/inventory.sh` (NEW)
+## New and Modified Components
 
-**What:** Walk the target repo and classify every markdown file into one of five
-categories. Emit a JSON manifest (`adopt-manifest.json`) that the restructure skill
-reads to understand the current doc ecosystem without needing to walk the filesystem
-itself.
+### Area 1: Plugin + Marketplace Emission
 
-**Why a lib:** Inventory is read-only (no mutations). Separating it from `adopt.sh`
-makes it independently testable and reusable. The restructure skill also calls
-`conjure adopt --inventory` to refresh the manifest mid-session.
+#### `cmd_emit_plugin` in `cli/conjure` (NEW dispatcher entry)
 
-**Functions:**
-
-```bash
-# inventory_scan <target_dir>
-# Walks <target_dir> for all .md files (find, POSIX, depth-limited to avoid
-# .git, node_modules, .conjure-adopt-backups).
-# Classifies each file and populates CONJURE_INVENTORY_ITEMS (newline-delimited
-# internal state for POSIX bash 3.2 compat — no associative arrays).
-# Returns count of files found in CONJURE_INVENTORY_COUNT.
-inventory_scan() { ... }
-
-# inventory_classify <filepath> <target_dir>
-# Returns a classification tag via stdout. One of:
-#   harness-core       — CLAUDE.md, .claude/settings.json
-#   harness-skill      — .claude/skills/*/SKILL.md
-#   harness-agent      — .claude/agents/*.md
-#   harness-hook       — .claude/hooks/*.mjs
-#   planning-gsd       — .planning/**/*.md
-#   reference-linked   — explicitly linked from CLAUDE.md via [text](path)
-#   candidate-skill    — >20 lines, domain-specific, not already a skill
-#   candidate-agent    — contains "subagent" or "agent:" in frontmatter
-#   doc-reference      — docs/, README.md, ADRs, runbooks
-#   stale-candidate    — not linked, not referenced in 90+ days git log,
-#                         or explicitly named stale/archive/deprecated in path
-#   unclassified       — anything else
-inventory_classify() { ... }
-
-# inventory_emit_manifest <target_dir> <output_path>
-# Writes adopt-manifest.json to <output_path>.
-# In dry-run: prints [dry-run] would write <output_path>, writes to /tmp instead
-#   so the skill can still read it without modifying the working tree.
-inventory_emit_manifest() { ... }
+```
+conjure emit-plugin [--plugin-dir <path>] [--marketplace-url <url>] [--dry-run] [target]
 ```
 
-**Manifest JSON schema** (see dedicated section below).
+Thin wrapper: parse flags → env vars → `bash scripts/emit-plugin.sh`.
 
-**Classification logic:**
-- `harness-core`: path matches `CLAUDE.md` (root) or `.claude/settings.json`
-- `harness-skill`: path matches `.claude/skills/*/SKILL.md`
-- `harness-agent`: path matches `.claude/agents/*.md`
-- `harness-hook`: path matches `.claude/hooks/*.mjs`
-- `planning-gsd`: path has `.planning/` prefix
-- `reference-linked`: grep CLAUDE.md for `](path)` markdown link to this file
-- `candidate-skill`: wc -l > 20 AND not already harness-skill AND not planning-gsd
-  AND file contains at least one heading (`^#`) — heuristic; skill surfaces for judgment
-- `candidate-agent`: grep frontmatter for `subagent:` or path is `*/agents/*`
-- `doc-reference`: path is `docs/`, `README.md`, `CHANGELOG.md`, `*.adr.md`,
-  `ARCHITECTURE.md` outside `.claude/`
-- `stale-candidate`: `git log --since=90.days -- <path>` returns no commits AND
-  path is not `reference-linked` AND not `harness-*`
-- `unclassified`: fallback
+#### `scripts/emit-plugin.sh` (NEW worker)
 
-**Stale detection dependency:** `git log` (already a hard dep in the repo). If target
-is not a git repo, stale-candidate detection is skipped; files fall through to
-`unclassified`.
+**What it does:**
+- Reads the scaffolded harness at `$target/.claude/` (skills/, agents/, hooks/, settings.json)
+- Generates a self-contained plugin directory at `$target/.claude-plugin/` (if absent) or
+  updates the existing one (it already exists in Conjure itself — the same pattern applies
+  to harnesses emitted for other repos)
+- Writes/updates `plugin.json` with skills paths, agents paths, hooks config
+- Updates `marketplace.json` with current HEAD SHA and version (reuses publish-plugin.sh logic)
+- Injects `extraKnownMarketplaces` into `.claude/settings.json` (via `mutate_write`)
+- Optionally writes `strictKnownMarketplaces` into `.claude/settings.json` when `--strict` passed
 
-**New file:** `lib/inventory.sh`
+**Reuse decision:** Do NOT duplicate `scripts/publish-plugin.sh`. Instead:
+- `publish-plugin.sh` remains the Conjure-self publish path (updates Conjure's own marketplace.json)
+- `emit-plugin.sh` is the target-repo path: generates/updates the target repo's `.claude-plugin/`
+  from its scaffolded harness
+- Both share a `lib/plugin-helpers.sh` that houses the jq transforms for marketplace.json + plugin.json
+
+#### `lib/plugin-helpers.sh` (NEW shared lib)
+
+Functions extracted from `publish-plugin.sh` and reused by `emit-plugin.sh`:
+- `plugin_update_marketplace <marketplace_json> <version> <sha>` — jq transform
+- `plugin_update_plugin_json <plugin_json> <version>` — jq transform
+- `plugin_inject_extra_marketplace <settings_json> <marketplace_url>` — injects `extraKnownMarketplaces`
+- `plugin_inject_strict_marketplace <settings_json> <marketplaces_json>` — injects `strictKnownMarketplaces`
+
+All writes via `mutate_write`. Dry-run honored.
+
+**Template reuse rationale:** The existing `templates/skills/`, `templates/agents/`, `templates/hooks-nodejs/`
+are already referenced by `plugin.json` via relative paths (`"skills": "./templates/skills"` etc.).
+`emit-plugin.sh` reads those existing paths from the target's `.claude/` and writes them into the
+generated `plugin.json` without duplicating template content. The plugin dir is a view over the
+harness, not a copy.
+
+#### `marketplace.json` settings wiring
+
+Official CC settings keys (confirmed from docs):
+- `extraKnownMarketplaces`: array of marketplace source objects — registers marketplaces for the project
+- `strictKnownMarketplaces`: array — restricts what users can add (MDM/managed-settings only for enforcement)
+
+`emit-plugin.sh` writes `extraKnownMarketplaces` into `.claude/settings.json` via `mutate_write`
+so that team members who clone the repo automatically have the harness marketplace registered.
 
 ---
 
-### 3. Manifest JSON Schema (`adopt-manifest.json`)
+### Area 2: Sandbox + Managed-Settings / MDM
 
-Written to `<target_dir>/adopt-manifest.json` by `inventory_emit_manifest`. Read by
-the restructure skill. Not written into `.claude/` — lives at repo root so the skill
-can reference it with a simple `Read` tool call.
+#### Modified: `compliance/<overlay>/apply.sh` (all 4 overlays — MODIFIED)
+
+Current overlays write:
+- CLAUDE.md fragment (appended)
+- A hook script
+- A CONTROLS.md doc
+
+**v0.7.0 addition:** Each overlay's `apply.sh` gains a `--emit-policy` flag path that writes:
+- A `sandbox{}` block into `.claude/settings.json` (per-overlay allowWrite/denyRead/network values)
+- A `managed-settings.json` artifact in a configurable output dir
+- MDM fragments (optional, behind `--mdm` flag)
+
+This is an additive flag, not a redesign. The existing `apply.sh` behavior (without `--emit-policy`)
+is unchanged.
+
+#### `lib/policy-helpers.sh` (NEW shared lib)
+
+Shared functions for all 4 compliance overlays:
+- `policy_emit_sandbox <settings_json> <sandbox_json_fragment>` — merges sandbox{} into settings.json via jq + mutate_write
+- `policy_emit_managed_settings <output_dir> <policy_json>` — writes managed-settings.json via mutate_write
+- `policy_emit_plist <output_dir> <policy_json>` — writes macOS plist (managed-settings MDM artifact)
+- `policy_emit_registry_hive <output_dir> <policy_json>` — writes Windows .reg fragment
+- `policy_emit_drop_in <output_dir> <filename> <fragment_json>` — writes managed-settings.d/ fragment
+
+All writes via `mutate_write`. Dry-run honored.
+
+#### Sandbox block structure (from official CC docs, HIGH confidence)
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {
+      "allowWrite": ["/tmp/build"],
+      "denyWrite": ["/etc", "/usr/local/bin"],
+      "denyRead": ["~/.aws/credentials"]
+    },
+    "network": {
+      "allowedDomains": ["*.internal.example.com"]
+    }
+  }
+}
+```
+
+Each overlay defines its own sandbox fragment in `compliance/<overlay>/sandbox.json.tmpl`
+(new template file, processed by `policy_emit_sandbox`).
+
+#### Managed-settings platform paths (from official CC docs, HIGH confidence)
+
+| Platform | Path |
+|----------|------|
+| macOS | `/Library/Application Support/ClaudeCode/managed-settings.json` |
+| Linux/WSL | `/etc/claude-code/managed-settings.json` |
+| Windows | `C:\Program Files\ClaudeCode\managed-settings.json` |
+| Drop-in dir | same location + `managed-settings.d/` (alphabetically merged) |
+
+`conjure audit --policy-check` verifies that the target's `.claude/settings.json` sandbox block
+matches the overlay's expected policy fragment (drift detection for compliance policy).
+
+#### New template files per overlay
+
+Each of the 4 overlays gains:
+```
+compliance/<overlay>/
+  apply.sh              — MODIFIED: add --emit-policy flag path
+  sandbox.json.tmpl     — NEW: sandbox block for this overlay
+  managed-settings.json.tmpl — NEW: managed-settings artifact template
+  plist.tmpl            — NEW: macOS MDM plist (--mdm flag)
+```
+
+---
+
+### Area 3: promptfoo Eval + Budget Linter
+
+#### `cmd_eval` in `cli/conjure` (NEW dispatcher entry)
+
+```
+conjure eval [--suite <name>] [--gate] [--dry-run] [target]
+```
+
+Thin wrapper → `bash scripts/eval.sh`.
+
+#### `scripts/eval.sh` (NEW worker)
+
+**What it does:**
+- Checks for `npx` (already expected — Node.js is a runtime dep for hooks)
+- Runs `npx --yes promptfoo@latest eval -c <spec>` where `<spec>` is one of:
+  - A named suite from `templates/evals/<suite>/promptfooconfig.yaml`
+  - The target repo's `.claude/evals/promptfooconfig.yaml` (installed by `conjure init`)
+- `--gate` flag: exit 2 if any assertions fail (for CI use)
+- Results written to `.claude/evals/results/` (gitignored by convention)
+- All writes via `mutate_write` (results output dir creation)
+
+**No new runtime dep.** `npx --yes promptfoo` is invoked on demand; promptfoo is not added to
+`dependencies`. This matches the existing `npx --yes ctx7@latest` pattern used in documentation
+lookups and keeps `dependencies: {}` empty.
+
+#### `templates/evals/` (NEW directory)
+
+```
+templates/evals/
+  promptfoo/             — core eval suite (installed to .claude/evals/ by conjure init)
+    promptfooconfig.yaml — base config: providers, prompts, assertions
+    tests/               — YAML test case files
+      skill-adherence.yaml     — tests skills fire correctly for trigger phrases
+      hook-blocking.yaml       — tests destructive-bash hook blocks known patterns
+      size-cap-adherence.yaml  — tests CLAUDE.md stays within cap after edits
+  hipaa/                 — compliance eval suite
+    promptfooconfig.yaml
+    tests/phi-no-leak.yaml
+  soc2/
+    promptfooconfig.yaml
+    tests/audit-log.yaml
+```
+
+`conjure init` installs `templates/evals/promptfoo/` into `$target/.claude/evals/`.
+`conjure eval --suite hipaa` runs the HIPAA-specific suite.
+
+#### Budget linter added to `scripts/audit-setup.sh` (MODIFIED)
+
+New flag: `conjure audit --budget-check [--budget-tokens N]`
+
+When `CONJURE_BUDGET_CHECK=1`:
+- Counts estimated tokens for CLAUDE.md + all skills (existing chars/4 heuristic)
+- Compares against per-turn budget threshold (default 20K tokens, configurable)
+- Warns if any skill exceeds 5K tokens (high single-skill load)
+- Outputs budget report section in audit output
+
+No new lib; adds ~40 lines to `audit-setup.sh` in the existing audit loop, reusing the
+`$TOTAL_CHARS` and chars/4 estimation already present.
+
+#### CI job structure
+
+Eval is designed as a CI job, not a pre-commit hook (too slow for per-commit). The
+`conjure update --cron` template (already written to `.github/workflows/conjure-update.yml`)
+gets a sibling `conjure eval --gate` step added to the generated workflow template.
+
+```yaml
+# Fragment added to templates/workflows/conjure-eval.yml.tmpl
+jobs:
+  conjure-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run eval suite
+        run: CONJURE_HOME=conjure-src conjure-src/cli/conjure eval --gate
+```
+
+---
+
+### Area 4: Schema-Version-Aware Audit
+
+#### `lib/cc-schema.json` (NEW bundled schema table)
+
+A JSON file maintained in the kit (not fetched at runtime) mapping CC version ranges to:
+- Known hook events
+- Known settings keys
+- Known `disallowed-tools` values
+- Minimum-version-required features
 
 ```json
 {
   "schema_version": "1",
-  "generated_at": "2026-05-28T14:23:00Z",
-  "conjure_version": "0.6.0",
-  "target": "/abs/path/to/repo",
-  "snapshot_path": "/abs/path/to/.conjure-adopt-backups/conjure-adopt-20260528-142300",
-  "summary": {
-    "total_files": 2180,
-    "harness_core": 1,
-    "harness_skill": 17,
-    "harness_agent": 6,
-    "harness_hook": 5,
-    "planning_gsd": 35,
-    "reference_linked": 12,
-    "candidate_skill": 48,
-    "candidate_agent": 3,
-    "doc_reference": 94,
-    "stale_candidate": 203,
-    "unclassified": 1756
+  "updated": "2026-06-03",
+  "known_hook_events": [
+    "PreToolUse", "PostToolUse", "Stop", "SessionStart",
+    "UserPromptExpansion", "ConfigChange", "Notification",
+    "SubagentStop", "PreCompact"
+  ],
+  "known_settings_keys": [
+    "permissions", "hooks", "env", "sandbox", "mcpServers",
+    "includeCoAuthoredBy", "cleanupPeriodDays", "disabledMcpjsonServers",
+    "deniedMcpServers", "policyHelper", "allowManagedHooksOnly",
+    "extraKnownMarketplaces", "strictKnownMarketplaces",
+    "skillOverrides", "enabledPlugins"
+  ],
+  "version_gates": {
+    "policyHelper": "2.1.136",
+    "skillOverrides": "2.1.129",
+    "displayName": "2.1.143",
+    "defaultEnabled": "2.1.154"
   },
-  "files": [
+  "minimum_conjure_cc_version": "2.1.117"
+}
+```
+
+**Why bundled, not fetched:** Runtime network fetches violate the zero-egress-in-CI constraint
+and the no-curl-sh safety rule. The schema table is small (~2KB), human-auditable, and versioned
+with the kit. It is updated at Conjure release time when new CC schema changes are detected.
+
+**Update path:** `conjure update` includes a check against a published schema manifest
+(same mechanism as kit updates) and emits a warning if `cc-schema.json` is older than 30 days.
+This is advisory only; the audit still runs.
+
+#### Modified: `scripts/audit-setup.sh` (MODIFIED)
+
+New section: schema-version-aware validation. Added when `CONJURE_SCHEMA_CHECK=1`
+(or default-on after a flag stabilization period):
+
+```bash
+# Schema-aware audit (sourced from lib/cc-schema.json via jq)
+# 1. Detect installed CC version: claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'
+# 2. Load cc-schema.json known_hook_events, known_settings_keys
+# 3. For each hook event in settings.json: warn if not in known_hook_events
+# 4. For each top-level settings key: warn if not in known_settings_keys
+# 5. For version-gated features: compare CC version vs version_gates[key]
+# 6. Check for disallowed-tools / disabledMcpjsonServers drift
+```
+
+CC version detection:
+```bash
+CC_VERSION="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo 'unknown')"
+```
+
+If `claude` not on PATH (CI without CC installed), schema check is skipped with a warning,
+not a failure. This matches the existing `jq` skip pattern.
+
+#### `lib/cc-schema.json` update cadence
+
+`scripts/audit-setup.sh` compares the `updated` field in `lib/cc-schema.json` against
+`date +%Y-%m-%d` (90-day threshold). If stale, emits advisory: "cc-schema.json is >90 days
+old — run `conjure update` to refresh." This is a WARN (exit 1), not an ERR (exit 2).
+
+---
+
+### Area 5: Cross-Repo / Workspace Orchestration
+
+This is the most complex area. The architecture must address:
+- Per-repo snapshot using existing `lib/snapshot.sh` primitives
+- Aggregate rollback semantics: partial failure in repo N must roll back repos 0..N-1
+- State durability: a SIGKILL mid-workspace-run must allow `--resume` recovery
+- Reporting: per-repo status + aggregate summary
+
+#### `conjure-workspace.json` (NEW per-workspace manifest)
+
+Not stored in any single repo — lives in a workspace root directory alongside all repo dirs:
+
+```json
+{
+  "schema_version": "1",
+  "name": "my-org-workspace",
+  "conjure_version": "0.7.0",
+  "repos": [
     {
-      "path": "CLAUDE.md",
-      "classification": "harness-core",
-      "line_count": 180,
-      "size_bytes": 21504,
-      "cap_exceeded": true,
-      "cap_limit": 100,
-      "git_age_days": 14,
-      "linked_from": [],
-      "links_to": [
-        ".claude/skills/architecture/SKILL.md",
-        "docs/ARCHITECTURE.md"
-      ]
+      "name": "api",
+      "path": "./api",
+      "profile": "node",
+      "overlay": null,
+      "conjure_ops": ["init", "adopt", "audit"]
     },
     {
-      "path": ".claude/skills/architecture/SKILL.md",
-      "classification": "harness-skill",
-      "line_count": 87,
-      "size_bytes": 3200,
-      "cap_exceeded": false,
-      "cap_limit": 200,
-      "git_age_days": 30,
-      "linked_from": ["CLAUDE.md"],
-      "links_to": []
+      "name": "web",
+      "path": "./web",
+      "profile": "react",
+      "overlay": "soc2",
+      "conjure_ops": ["init", "audit"]
     }
   ],
-  "size_cap_violations": [
+  "rollback_policy": "all-or-nothing",
+  "parallel": false
+}
+```
+
+`rollback_policy` values:
+- `all-or-nothing`: if any repo fails, roll back all previously-applied repos (the hard default)
+- `best-effort`: continue on failure, report failed repos, no rollback (for audit-only runs)
+
+`parallel: false` is the default and only supported value in v0.7.0. True parallel would require
+snapshot/rollback coordination across concurrent bash processes which introduces race conditions
+on shared `lib/mutate.sh` state. Parallel is `best-effort` mode only and deferred.
+
+#### `cmd_workspace` in `cli/conjure` (NEW dispatcher entry)
+
+```
+conjure workspace [--file <conjure-workspace.json>] [--dry-run] [--rollback] [--resume] [--porcelain]
+```
+
+Thin wrapper → `bash scripts/workspace.sh`.
+
+#### `scripts/workspace.sh` (NEW worker)
+
+**Pipeline:**
+
+```
+Step 0: Load + validate workspace manifest (jq schema check)
+  write .conjure-workspace-state.json (durable crash state)
+
+Step 1: Pre-flight all repos
+  for each repo in manifest:
+    verify path exists
+    cmd_preflight for repo
+  abort if any preflight fails (before any mutations)
+
+Step 2: Snapshot all repos
+  for each repo in manifest:
+    source lib/snapshot.sh
+    snapshot_create $repo_path $workspace_root/.conjure-workspace-backups/$repo_name/
+    record CONJURE_SNAPSHOT_PATH in .conjure-workspace-state.json
+    (failures here abort entire workspace run — no partial state)
+
+Step 3: Execute ops per repo (sequential)
+  for each repo in manifest:
+    for each op in repo.conjure_ops:
+      execute: CONJURE_HOME=$CONJURE_HOME DRY_RUN=$DRY_RUN \
+               bash $CONJURE_HOME/cli/conjure $op [flags] $repo_path
+      record result in .conjure-workspace-state.json
+      if op exits 2: trigger aggregate_rollback; exit 2
+
+Step 4: Aggregate report
+  print per-repo status table
+  print overall result: PASS / PARTIAL / FAIL
+  write workspace-report.json
+```
+
+**Aggregate rollback (the deferred hard part):**
+
+```
+aggregate_rollback() is called when Step 3 fails on repo N:
+  for each repo that has status=applied in .conjure-workspace-state.json (repos 0..N-1):
+    snapshot_rollback $recorded_snapshot_path $repo_path
+    record status=rolled-back in .conjure-workspace-state.json
+  repo N itself: snapshot_rollback if snapshot was taken; else skip (no mutations)
+  print: "Workspace rolled back. All repos restored to pre-workspace state."
+  exit 2
+```
+
+Key design: `snapshot_create` for each repo happens in Step 2 (before ANY op execution),
+so a failure in repo 3 can always roll back repos 0, 1, 2 from their pre-Step-2 snapshots.
+This is the same snapshot-before-mutate invariant as `scripts/adopt.sh` Step 1, applied
+at workspace scale.
+
+**Durable state file (crash recovery):**
+
+`.conjure-workspace-state.json` is written before each repo operation and updated after:
+
+```json
+{
+  "schema_version": "1",
+  "workspace": "my-org-workspace",
+  "started_at": "2026-06-03T10:00:00Z",
+  "phase": "ops",
+  "repos": [
     {
-      "path": "CLAUDE.md",
-      "line_count": 180,
-      "cap": 100,
-      "overage": 80
+      "name": "api",
+      "snapshot_path": "/abs/.conjure-workspace-backups/api/conjure-adopt-20260603T100001Z",
+      "status": "applied",
+      "ops_applied": ["init", "adopt"],
+      "op_failed": null
+    },
+    {
+      "name": "web",
+      "snapshot_path": "/abs/.conjure-workspace-backups/web/conjure-adopt-20260603T100030Z",
+      "status": "running",
+      "ops_applied": ["init"],
+      "op_failed": null
     }
-  ],
-  "at_imports_detected": false,
-  "harness_missing_layers": ["hooks"],
-  "restructure_steps": []
+  ]
 }
 ```
 
-**Field notes:**
-- `summary.*` counts match the classification enum values (snake_case, not hyphenated)
-- `files[].cap_exceeded`: true if `line_count > cap_limit` for the known type
-- `files[].cap_limit`: 100 for harness-core (CLAUDE.md), 200 for harness-skill, 80 for harness-agent
-- `harness_missing_layers`: populated by adopt.sh after comparing installed .claude/
-  against expected four-layer structure; used to scaffold
-- `restructure_steps`: empty at inventory time; populated by the restructure skill
-  before returning it to the human for approval; CLI reads steps from this field
-  when `--apply-step` is called
-- `at_imports_detected`: true if `grep -q '^@' CLAUDE.md` (anti-pattern detection,
-  reuses audit-setup.sh logic)
-- `git_age_days`: days since last commit touching this file; -1 if no git history
+`--resume` reads this file and skips repos with `status: applied`; re-runs from the first
+`status: running` or `status: failed` entry. `--rollback` reads all `snapshot_path` values
+and calls `snapshot_rollback` for each repo with `status: applied`.
+
+#### `lib/workspace.sh` (NEW shared lib)
+
+Functions sourced by `scripts/workspace.sh`:
+- `workspace_load <manifest_path>` — parse + validate conjure-workspace.json via jq
+- `workspace_state_init <workspace_root>` — write initial .conjure-workspace-state.json
+- `workspace_state_update <repo_name> <phase> <status>` — atomic append via mutate_write
+- `workspace_aggregate_rollback <state_file>` — iterate applied repos, call snapshot_rollback
+- `workspace_report <state_file>` — print per-repo table + aggregate result
+
+`lib/workspace.sh` sources `lib/snapshot.sh` (for snapshot_rollback) and `lib/log.sh`
+(for workspace-level log entries). All writes via `mutate_write`.
+
+#### Backup location for workspace snapshots
+
+`$workspace_root/.conjure-workspace-backups/<repo-name>/conjure-adopt-<ts>/`
+
+Separate from the per-repo `.conjure-adopt-backups/` to avoid confusion when a repo is also
+managed individually. `.conjure-workspace-backups/` is added to the workspace root's `.gitignore`.
 
 ---
 
-### 4. `scripts/adopt.sh` (NEW)
-
-**What:** Main worker for `conjure adopt`. Orchestrates the full adopt pipeline.
-Sourced `lib/mutate.sh`, `lib/snapshot.sh`, `lib/inventory.sh`. Dispatches to
-`scripts/audit-setup.sh` for size-cap reuse. Called by `cmd_adopt` in `cli/conjure`.
-
-**Interface (called by cmd_adopt):**
+## Component Interaction Map (v0.7.0 complete)
 
 ```
-conjure adopt [--dry-run] [--rollback [<snapshot>]] [--force] [target]
-conjure adopt --inventory [--dry-run] [target]      # re-run inventory only; refresh manifest
-conjure adopt --apply-step <step-id> [--dry-run] [target]   # apply one restructure step
-conjure adopt --status [target]                     # print current log tail + available rollbacks
-```
-
-**Main adopt pipeline (when no special flag):**
-
-```
-Step 0: Preconditions
-  git -C $target diff --quiet && git -C $target diff --cached --quiet
-    → dirty tree → abort unless --force
-  [ -d $target/.claude ] or CLAUDE.md exists → brownfield confirmed
-  (if neither → suggest conjure init instead)
-
-Step 1: Snapshot backup
-  source lib/snapshot.sh
-  snapshot_create $target $target/.conjure-adopt-backups
-  → CONJURE_SNAPSHOT_PATH set
-  → log_step SNAPSHOT "created at $CONJURE_SNAPSHOT_PATH"
-
-Step 2: Inventory + manifest
-  source lib/inventory.sh
-  inventory_scan $target
-  inventory_emit_manifest $target $target/adopt-manifest.json
-  → log_step INVENTORY "scanned $CONJURE_INVENTORY_COUNT files; manifest at adopt-manifest.json"
-
-Step 3: Scaffold missing harness layers
-  Read harness_missing_layers from manifest
-  For each missing layer: call the appropriate scaffold fragment
-    (reuses logic from init-project.sh — don't duplicate, source a shared fragment)
-  All scaffolding via mutate_mkdir + mutate_cp
-  → log_step SCAFFOLD "added missing layers: <list>"
-
-Step 4: Size-cap audit
-  CONJURE_HOME=$CONJURE_HOME bash $CONJURE_HOME/scripts/audit-setup.sh $target
-  Capture exit code: 0 = pass, 1 = warnings, 2 = errors
-  → log_step AUDIT "exit=$rc; $n violations"
-  (adopt continues regardless — restructure skill handles remediation)
-
-Step 5: Summary + next steps
-  Print: manifest location, snapshot location, violation summary, how to run restructure skill
-  → log_step COMPLETE "adopt phase 1 done; run restructure skill next"
-```
-
-**`--rollback` flag:**
-
-```
-conjure adopt --rollback [<snapshot-path>] [target]
-
-If <snapshot-path> omitted: call snapshot_list to show available snapshots, prompt user to select.
-If <snapshot-path> given: call snapshot_rollback $snapshot_path $target.
-Always writes ROLLBACK entry to RESTRUCTURE-LOG.md.
-```
-
-**`--apply-step <step-id>` flag (called by restructure skill):**
-
-```
-conjure adopt --apply-step <step-id> [target]
-
-Reads adopt-manifest.json → finds step with id=<step-id> in restructure_steps[].
-Validates: step.status == "approved" (else exit 1 with error)
-Executes the step's operation (see step schema below).
-Writes result back to adopt-manifest.json restructure_steps[].status = "applied".
-Appends to RESTRUCTURE-LOG.md.
-```
-
-**Step operation types (executed by `--apply-step`):**
-- `write-file`: `mutate_write <path> <content>` — write new content to a file
-- `move-to-skill`: `mutate_mkdir` + `mutate_write` + `mutate_rm` — extract section
-  from CLAUDE.md into a new skill; remove from CLAUDE.md
-- `archive-file`: `mutate_mkdir .claude/archive` + `mutate_cp src archive/` +
-  `mutate_rm src` — archive instead of delete (never-delete rule)
-- `scaffold-skill`: `mutate_mkdir` + `mutate_write` — create a new skill stub
-- `update-claude-md`: `mutate_write CLAUDE.md <new-content>` — replace CLAUDE.md
-  entirely with a new condensed version
-
-**New file:** `scripts/adopt.sh`
-
-**Reuse from existing scripts:**
-- `scripts/audit-setup.sh` — called as subprocess for size-cap audit (Step 4);
-  not re-implemented
-- `scripts/init-project.sh` scaffold fragments — adopt.sh sources the same
-  mutate_mkdir/mutate_cp patterns; for missing layer scaffolding, it calls
-  `bash $CONJURE_HOME/scripts/init-project.sh existing $target` with guards
-  (init-project.sh already skips existing files, so safe to re-run)
-
----
-
-### 5. `lib/log.sh` (NEW)
-
-**What:** Append-only RESTRUCTURE-LOG.md writer. All steps in the adopt pipeline
-and all --apply-step executions write through this lib.
-
-**Why a lib:** The log is written from both `adopt.sh` (pipeline steps) and from
-the `--apply-step` handler. Centralizing it ensures consistent format, timestamp,
-and dry-run behavior.
-
-**Functions:**
-
-```bash
-# log_init <target_dir>
-# Writes the RESTRUCTURE-LOG.md header if the file does not yet exist.
-# Header includes: conjure version, timestamp, target path, snapshot path.
-log_init() { ... }
-
-# log_step <phase> <message>
-# Appends one structured line to RESTRUCTURE-LOG.md.
-# Format: [YYYY-MM-DD HH:MM:SS] [PHASE] message
-# All writes via mutate_write --append.
-log_step() { ... }
-
-# log_fail <message>
-# Appends a FAIL entry and exits 1. Used for abort conditions.
-log_fail() { ... }
-```
-
-**RESTRUCTURE-LOG.md format:**
-
-```markdown
-# RESTRUCTURE-LOG — conjure adopt
-
-conjure: 0.6.0
-target: /abs/path/to/repo
-started: 2026-05-28T14:23:00Z
-snapshot: /abs/path/to/.conjure-adopt-backups/conjure-adopt-20260528-142300
-
----
-
-[2026-05-28 14:23:01] [SNAPSHOT] created at .conjure-adopt-backups/conjure-adopt-20260528-142300
-[2026-05-28 14:23:02] [INVENTORY] scanned 2180 files; manifest at adopt-manifest.json
-[2026-05-28 14:23:03] [SCAFFOLD] added missing layers: hooks
-[2026-05-28 14:23:04] [AUDIT] exit=1; 3 violations (see adopt-manifest.json size_cap_violations)
-[2026-05-28 14:23:05] [COMPLETE] adopt phase 1 done; run restructure skill next
-
-[2026-05-28 15:01:12] [APPLY] step=condense-claude-md status=applied op=update-claude-md
-[2026-05-28 15:01:13] [APPLY] step=extract-skill-architecture status=applied op=move-to-skill
-[2026-05-28 15:02:44] [APPLY] step=archive-stale-docs status=applied op=archive-file path=docs/old-notes.md
-
-[2026-05-28 16:30:00] [ROLLBACK] restored from .conjure-adopt-backups/conjure-adopt-20260528-142300
-```
-
-**Why RESTRUCTURE-LOG.md and not RESTRUCTURE-LOG.jsonl:**
-Markdown is human-readable in any editor, diffs cleanly in git, and is consistent
-with conjure's existing audit artifacts. The structured `[TIMESTAMP] [PHASE] message`
-format is machine-parseable with awk if needed, without requiring jq at read time.
-
-**New file:** `lib/log.sh`
-
----
-
-### 6. `templates/skills/restructure/SKILL.md` (NEW)
-
-**What:** The in-session restructure skill. Loaded by Claude Code when the user
-invokes restructure-related work. Reads the manifest and source docs; proposes a
-restructure plan as numbered steps; requires human approval of each step before
-executing; calls `conjure adopt --apply-step <id>` for each approved step.
-
-**Location:** `templates/skills/restructure/SKILL.md`
-
-**Why in `templates/skills/`:** This is a kit skill that `conjure adopt` installs
-into `.claude/skills/restructure/SKILL.md` in the target project (as part of Step 3
-scaffold). It lives in templates so that future `conjure update` 3-way merges can
-propagate improvements to installed copies.
-
-**Install path:** `scripts/adopt.sh` Step 3 copies it to
-`$target/.claude/skills/restructure/SKILL.md` via `mutate_cp`. It is not part of
-the standard `init-project.sh` scaffold (restructure is brownfield-only).
-
-**Frontmatter:**
-
-```yaml
----
-name: restructure
-description: >
-  Restructure an oversized or cluttered repo into a clean conjure four-layer harness.
-  Invoke when the user asks to tidy CLAUDE.md, consolidate docs, extract skills from
-  existing docs, archive stale files, or run conjure adopt after init.
-allowed-tools: [Read, Bash]
----
-```
-
-**Skill body structure (what the SKILL.md instructs Claude to do):**
-
-1. **Load context:** Read `adopt-manifest.json`; if absent, tell user to run
-   `conjure adopt` first. Read `RESTRUCTURE-LOG.md` to check for existing state.
-2. **Read oversized files:** For each file in `files[]` with `cap_exceeded: true`,
-   use the `Read` tool to load it.
-3. **Propose restructure plan:** Emit a numbered list of steps. Each step specifies:
-   - A human-readable description of what will change
-   - The `op` type (write-file, move-to-skill, archive-file, scaffold-skill,
-     update-claude-md)
-   - The affected paths
-   - Why (rationale referencing manifest data)
-4. **Wait for human approval per step:** Present step N, wait for user to type
-   "approve", "skip", or "edit". Never batch-approve; never proceed without
-   explicit approval.
-5. **Execute approved step:** Run `conjure adopt --apply-step <step-id> <target>`
-   via the `Bash` tool. The step-id is written into `adopt-manifest.json`
-   restructure_steps[] by the skill before calling the CLI.
-6. **Report result:** Read `RESTRUCTURE-LOG.md` tail to confirm step applied;
-   show diff summary.
-7. **Repeat** for next step.
-8. **Final audit:** Run `conjure audit <target>` to confirm clean state.
-
-**Skill↔CLI callback path (how determinism is preserved):**
-
-```
-restructure skill (Claude in-session)
-  → computes step content and id purely in-session (no FS writes)
-  → writes step definition into adopt-manifest.json via:
-       conjure adopt --update-manifest --step-json '<json>' <target>
-       (single CLI call; all writes via mutate_write)
-  → sets step status to "approved" in manifest via same primitive
-  → calls: conjure adopt --apply-step <step-id> <target>
-  → the CLI reads the step from manifest, validates status="approved",
-    executes via mutate_* primitives, writes log entry
-  → skill reads RESTRUCTURE-LOG.md to confirm and report result
-
-The skill NEVER:
-  - calls Write tool directly on project files
-  - calls Edit tool directly on project files
-  - calls Bash with direct cp/mv/rm commands
-  - bypasses the CLI for any filesystem operation
-```
-
-**Why `Bash` tool but not `Write`/`Edit` tools in `allowed-tools`:**
-Restricting to `[Read, Bash]` forces all mutations through the CLI, not through
-Claude Code's own file-write tools. The CLI enforces DRY_RUN, logging, and the
-mutate.sh chokepoint.
-
-**New file:** `templates/skills/restructure/SKILL.md`
-
----
-
-### 7. `--update-manifest` helper in `cmd_adopt`
-
-**What:** A sub-operation of `conjure adopt` that lets the restructure skill write
-a step definition into `adopt-manifest.json` without needing direct file access.
-Accepts `--step-json '<json>'` and merges it into `restructure_steps[]`.
-
-**Why needed:** The skill must communicate step definitions (content, op type,
-affected paths) into the manifest atomically. A CLI-mediated write ensures:
-- The step JSON is schema-validated before being written
-- The write is logged
-- The write respects DRY_RUN
-- The skill cannot corrupt the manifest with a bad write
-
-**Implementation:** Part of `cmd_adopt` dispatch in `cli/conjure`. Reads manifest
-with `jq`, appends the step, writes back via `mutate_write`. Requires `jq` (already
-a hard dep in preflight).
-
----
-
-## Modified Components
-
-### `cli/conjure` — MODIFIED (add `cmd_adopt`)
-
-**Change — Add `cmd_adopt` function:**
-
-```bash
-cmd_adopt() {
-  local target dryrun rollback_path apply_step force inventory_only
-  local update_manifest step_json status_only
-  target="$(pwd)"
-  dryrun=0; rollback_path=""; apply_step=""; force=0
-  inventory_only=0; update_manifest=0; step_json=""; status_only=0
-
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --dry-run)         dryrun=1 ;;
-      --force)           force=1 ;;
-      --rollback)        shift; rollback_path="${1:-latest}" ;;
-      --inventory)       inventory_only=1 ;;
-      --apply-step)      shift; apply_step="${1:-}" ;;
-      --update-manifest) update_manifest=1 ;;
-      --step-json)       shift; step_json="${1:-}" ;;
-      --status)          status_only=1 ;;
-      --help|-h)         echo "Usage: conjure adopt [--dry-run] [--force] [--rollback [<snapshot>]] [--inventory] [--apply-step <id>] [--status] [target]"; return 0 ;;
-      *)                 target="$1" ;;
-    esac
-    shift
-  done
-
-  cmd_preflight || return 1
-  DRY_RUN="$dryrun" CONJURE_ADOPT_FORCE="$force" \
-    CONJURE_ADOPT_ROLLBACK="$rollback_path" \
-    CONJURE_ADOPT_APPLY_STEP="$apply_step" \
-    CONJURE_ADOPT_INVENTORY_ONLY="$inventory_only" \
-    CONJURE_ADOPT_UPDATE_MANIFEST="$update_manifest" \
-    CONJURE_ADOPT_STEP_JSON="$step_json" \
-    CONJURE_ADOPT_STATUS="$status_only" \
-    CONJURE_HOME="$CONJURE_HOME" \
-    bash "$CONJURE_HOME/scripts/adopt.sh" "$target"
-}
-```
-
-Add dispatch: `adopt) shift; cmd_adopt "$@" ;;`
-Add `conjure adopt` to the usage() heredoc.
-
-**Change — `cmd_init` / `init-project.sh` scaffold fragment extraction:**
-`init-project.sh` already skips existing files. `adopt.sh` can call
-`bash $CONJURE_HOME/scripts/init-project.sh existing $target` to scaffold missing
-layers. No change to `init-project.sh` needed — idempotency is already the
-contract. This is CONFIRMED by reading lines 42-82 of `scripts/init-project.sh`
-(all writes are guarded with `[ ! -f ... ]` or `[ ! -d ... ]`).
-
----
-
-### `lib/mutate.sh` — NO CHANGE
-
-`mutate_rm` was added in v0.5.0 and is already present (confirmed at read time:
-lines 67-77 of `lib/mutate.sh`). The v0.6.0 components source `lib/mutate.sh`
-and use the existing four functions unchanged. No additions needed.
-
----
-
-### `scripts/audit-setup.sh` — NO CHANGE
-
-Called as a subprocess by `adopt.sh` (Step 4) to perform size-cap and schema
-validation. The existing interface (`bash audit-setup.sh [target]`, exit 0/1/2)
-is sufficient. No modifications needed.
-
----
-
-### `templates/` directory structure — MODIFIED (add restructure skill)
-
-Add: `templates/skills/restructure/SKILL.md`
-
-This is the only template addition. The restructure skill is not added to the
-standard init scaffold (it is brownfield-only). It is installed by `adopt.sh`
-Step 3 via `mutate_cp`.
-
----
-
-### `.gitignore` / `.claudeignore` — MODIFIED
-
-`adopt.sh` adds `.conjure-adopt-backups/` to `.gitignore` and `.claudeignore`
-if not already present. Uses `mutate_write --append`. This prevents snapshot
-backup directories from being committed or read by Claude.
-
----
-
-## Data Flow: End-to-End
-
-```
-USER: conjure adopt [--dry-run] [target]
-  │
-  ▼
-cli/conjure cmd_adopt
-  │  parse flags → set env vars
-  │  cmd_preflight (verify jq, git, bash deps)
-  ▼
-scripts/adopt.sh $target
-  │
-  ├─ Step 0: Preconditions
-  │    git diff --quiet && git diff --cached --quiet
-  │    (dirty tree → abort unless --force)
-  │    confirm brownfield: CLAUDE.md or .claude/ exists
-  │
-  ├─ Step 1: Snapshot
-  │    source lib/snapshot.sh
-  │    source lib/log.sh
-  │    log_init $target                           → create RESTRUCTURE-LOG.md header
-  │    snapshot_create $target .conjure-adopt-backups
-  │      cp -R CLAUDE.md .claude/ → backup dir
-  │    log_step SNAPSHOT "created at $path"       → mutate_write --append RESTRUCTURE-LOG.md
-  │
-  ├─ Step 2: Inventory
-  │    source lib/inventory.sh
-  │    inventory_scan $target
-  │      find $target -name '*.md' (POSIX, skip .git node_modules .conjure-adopt-backups)
-  │      inventory_classify each file
-  │    inventory_emit_manifest $target adopt-manifest.json
-  │      jq construct → mutate_write adopt-manifest.json
-  │    log_step INVENTORY "scanned N files"
-  │
-  ├─ Step 3: Scaffold missing layers
-  │    read harness_missing_layers from manifest (jq)
-  │    bash $CONJURE_HOME/scripts/init-project.sh existing $target
-  │      (idempotent; skips existing; uses mutate_mkdir + mutate_cp)
-  │    mutate_cp templates/skills/restructure/SKILL.md
-  │              $target/.claude/skills/restructure/SKILL.md
-  │    log_step SCAFFOLD "added: <layers>"
-  │
-  ├─ Step 4: Audit
-  │    bash $CONJURE_HOME/scripts/audit-setup.sh $target
-  │    log_step AUDIT "exit=$rc; $n violations"
-  │
-  └─ Step 5: Summary + next steps
-       print: manifest path, snapshot path, violations, how to invoke restructure skill
-       log_step COMPLETE "adopt phase 1 done"
-
-
-USER: [opens Claude Code in target, restructure skill fires]
-  │
-  ▼
-restructure skill (Claude in-session)
-  │
-  ├─ Read adopt-manifest.json                     → Bash: conjure adopt --inventory $target
-  │    (or just Read tool if manifest is current) → Read: adopt-manifest.json
-  │
-  ├─ Read oversized CLAUDE.md + key source docs   → Read tool (allowed)
-  │
-  ├─ Propose restructure plan (N steps)
-  │    [step 1] condense CLAUDE.md to ≤100 lines
-  │    [step 2] extract architecture section → .claude/skills/architecture/SKILL.md
-  │    [step 3] archive 203 stale files       → .claude/archive/<origname>
-  │    ...
-  │
-  ├─ For each step, WAIT for human "approve" / "skip" / "edit"
-  │
-  ├─ On "approve":
-  │    Build step JSON (id, op, content, paths)
-  │    → Bash: conjure adopt --update-manifest --step-json '<json>' $target
-  │         read manifest → jq append step → mutate_write adopt-manifest.json
-  │         log_step UPDATE-MANIFEST "step=<id> registered"
-  │    → Bash: conjure adopt --apply-step <id> $target
-  │         read manifest → find step by id → validate status="approved"
-  │         execute via mutate_* primitives (write-file / move-to-skill / archive-file / etc.)
-  │         write step status="applied" to manifest (jq + mutate_write)
-  │         log_step APPLY "step=<id> status=applied op=<op>"
-  │    → Read: RESTRUCTURE-LOG.md (last 5 lines) to confirm
-  │
-  └─ Final: conjure audit $target
-       → Bash: conjure audit $target
-       → print result
-
-
-USER: conjure adopt --rollback [target]
-  │
-  ▼
-scripts/adopt.sh --rollback
-  source lib/snapshot.sh
-  source lib/log.sh
-  snapshot_list $target .conjure-adopt-backups   → print available snapshots
-  prompt (if no snapshot arg given): select snapshot
-  snapshot_rollback $selected $target
-    rm -rf CLAUDE.md .claude/ (live mode only)
-    cp -R backup/CLAUDE.md backup/.claude/ → restore
-  log_step ROLLBACK "restored from $path"
-  echo "Rollback complete. Verify with: conjure audit $target"
-```
-
----
-
-## Component Interaction Map
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│  ENTRYPOINTS                                                                     │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │  cli/conjure (bash dispatcher)                    [existing + MODIFIED]   │   │
-│  │   ... all v0.5.0 subcommands unchanged ...                               │   │
-│  │   adopt [--dry-run|--force|--rollback|--inventory|                       │   │
-│  │          --apply-step|--update-manifest|--status]  [NEW — ADPT-*]       │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│  WORKER SCRIPTS (subprocess via bash scripts/*.sh)                              │
-│  ┌─────────────────────┐  ┌─────────────────────────────────────────────────┐  │
-│  │ ... v0.5.0 workers  │  │ adopt.sh                              [NEW]      │  │
-│  │ (unchanged)         │  │  orchestrates full adopt pipeline               │  │
-│  │                     │  │  sources: lib/mutate.sh lib/snapshot.sh         │  │
-│  │                     │  │           lib/inventory.sh lib/log.sh           │  │
-│  │                     │  │  calls:   scripts/init-project.sh (idempotent)  │  │
-│  │                     │  │           scripts/audit-setup.sh (subprocess)   │  │
-│  │                     │  │  writes:  adopt-manifest.json (via mutate_write) │  │
-│  │                     │  │           RESTRUCTURE-LOG.md (via lib/log.sh)   │  │
-│  │                     │  │  flags:   --dry-run --force --rollback          │  │
-│  │                     │  │           --inventory --apply-step              │  │
-│  │                     │  │           --update-manifest --status            │  │
-│  └─────────────────────┘  └─────────────────────────────────────────────────┘  │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│  SHARED LIB (sourced, not dispatched)                                           │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │ lib/mutate.sh    [existing — UNCHANGED for v0.6.0]                       │   │
-│  │  mutate_mkdir / mutate_cp / mutate_write / mutate_rm / mutate_summary    │   │
-│  │  ALL filesystem mutations route here — invariant preserved               │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │ lib/snapshot.sh  [NEW]                                                   │   │
-│  │  snapshot_create / snapshot_rollback / snapshot_list                    │   │
-│  │  cp -R for create (pre-mutate safety) / mutate_write for log entry      │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │ lib/inventory.sh [NEW]                                                   │   │
-│  │  inventory_scan / inventory_classify / inventory_emit_manifest           │   │
-│  │  read-only scan + jq emit; mutate_write for manifest output              │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │ lib/log.sh       [NEW]                                                   │   │
-│  │  log_init / log_step / log_fail                                          │   │
-│  │  all writes via mutate_write --append (DRY_RUN honored)                  │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │ lib/merge.sh / lib/cost.sh / lib/exact-count.mjs [existing — unchanged] │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│  IN-SESSION SKILL (Claude Code, human-gated)                                    │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │ templates/skills/restructure/SKILL.md  [NEW]                             │   │
-│  │  installed to: .claude/skills/restructure/SKILL.md by adopt.sh Step 3   │   │
-│  │  allowed-tools: [Read, Bash] — NO Write or Edit tool access              │   │
-│  │  all mutations via: conjure adopt --update-manifest / --apply-step       │   │
-│  │  human-gated: approve/skip/edit per step before any Bash call            │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│  ARTIFACTS (per-repo, not in conjure kit)                                       │
-│  adopt-manifest.json         — inventory output; restructure_steps[] state      │
-│  RESTRUCTURE-LOG.md          — append-only step audit trail                     │
-│  .conjure-adopt-backups/     — snapshot backups (gitignored)                    │
-│  .claude/skills/restructure/ — installed restructure skill (gitignored optional)│
-└─────────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│  ENTRYPOINTS                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │  cli/conjure  (bash dispatcher)                         [existing + MODIFIED]    │   │
+│  │   ... all v0.6.0 subcommands unchanged ...                                     │   │
+│  │   emit-plugin [--plugin-dir] [--strict] [--dry-run]     [NEW — v0.7.0]        │   │
+│  │   eval [--suite] [--gate] [--dry-run]                   [NEW — v0.7.0]        │   │
+│  │   workspace [--file] [--dry-run] [--rollback] [--resume][NEW — v0.7.0]        │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│  WORKER SCRIPTS (subprocess via bash scripts/*.sh)                                      │
+│  ┌──────────────────────────────────┐  ┌──────────────────────────────────────────┐   │
+│  │  v0.6.0 workers (unchanged)       │  │  emit-plugin.sh            [NEW]         │   │
+│  │  adopt.sh                        │  │   reads .claude/ → writes .claude-plugin/ │   │
+│  │  audit-setup.sh ── MODIFIED ──┐  │  │   lib/plugin-helpers.sh sourced           │   │
+│  │  check.sh                     │  │  │   mutate_write for all outputs            │   │
+│  │  resolve.sh                   │  │  ├──────────────────────────────────────────┤   │
+│  │  publish-plugin.sh ─extract→  │  │  │  eval.sh                   [NEW]         │   │
+│  │  publish-skill.sh              │  │  │   npx promptfoo eval -c <spec>           │   │
+│  │  init-project.sh               │  │  │   --gate flag: exit 2 on fail            │   │
+│  │  preflight.sh                  │  │  │   writes results/ via mutate_write       │   │
+│  └──────────────────────────────────┘  ├──────────────────────────────────────────┤   │
+│                                         │  workspace.sh              [NEW]         │   │
+│    audit-setup.sh adds:                 │   Step 0: load manifest + init state     │   │
+│    - schema-version check               │   Step 1: preflight all repos            │   │
+│    - budget-linter section              │   Step 2: snapshot all repos             │   │
+│                                         │   Step 3: execute ops sequentially       │   │
+│    compliance/*/apply.sh adds:          │   Step 4: aggregate report               │   │
+│    - --emit-policy flag path            │   aggregate_rollback() on any failure    │   │
+│    - sandbox.json.tmpl processing       │   lib/workspace.sh sourced              │   │
+│    - managed-settings.json emit         │   lib/snapshot.sh sourced (reused)      │   │
+│    - MDM plist/registry (--mdm)         └──────────────────────────────────────────┘   │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│  SHARED LIB (sourced, not dispatched)                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ lib/mutate.sh   [existing — UNCHANGED]                                           │  │
+│  │  THE write chokepoint — ALL mutations route here — invariant preserved           │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ lib/snapshot.sh  [existing — UNCHANGED; REUSED by workspace.sh]                  │  │
+│  │  snapshot_create / snapshot_rollback / snapshot_list                            │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ lib/plugin-helpers.sh  [NEW — v0.7.0]                                            │  │
+│  │  plugin_update_marketplace / plugin_update_plugin_json                          │  │
+│  │  plugin_inject_extra_marketplace / plugin_inject_strict_marketplace             │  │
+│  │  sourced by: emit-plugin.sh + publish-plugin.sh (refactored)                    │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ lib/policy-helpers.sh  [NEW — v0.7.0]                                            │  │
+│  │  policy_emit_sandbox / policy_emit_managed_settings                             │  │
+│  │  policy_emit_plist / policy_emit_registry_hive / policy_emit_drop_in           │  │
+│  │  sourced by: all 4 compliance/*/apply.sh                                        │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ lib/workspace.sh  [NEW — v0.7.0]                                                 │  │
+│  │  workspace_load / workspace_state_init / workspace_state_update                │  │
+│  │  workspace_aggregate_rollback / workspace_report                               │  │
+│  │  sources: lib/snapshot.sh + lib/log.sh                                         │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ lib/cc-schema.json  [NEW — v0.7.0]                                               │  │
+│  │  bundled schema table: known_hook_events / known_settings_keys / version_gates  │  │
+│  │  read by: scripts/audit-setup.sh (schema-version-aware check section)           │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ lib/inventory.sh / lib/log.sh / lib/merge.sh / lib/caps.sh [existing — unchanged]│  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│  TEMPLATES + COMPLIANCE (new files)                                                     │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ templates/evals/          [NEW — v0.7.0]                                         │  │
+│  │   promptfoo/promptfooconfig.yaml + tests/                                        │  │
+│  │   hipaa/ soc2/ gdpr/ pci/ (compliance eval suites)                              │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ compliance/<overlay>/sandbox.json.tmpl     [NEW per overlay — v0.7.0]            │  │
+│  │ compliance/<overlay>/managed-settings.json.tmpl  [NEW per overlay — v0.7.0]     │  │
+│  │ compliance/<overlay>/plist.tmpl            [NEW per overlay, optional]           │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -825,104 +621,249 @@ scripts/adopt.sh --rollback
 
 | File | Type | Purpose |
 |------|------|---------|
-| `lib/snapshot.sh` | library | snapshot_create / snapshot_rollback / snapshot_list primitives |
-| `lib/inventory.sh` | library | inventory_scan / inventory_classify / inventory_emit_manifest |
-| `lib/log.sh` | library | log_init / log_step / log_fail → RESTRUCTURE-LOG.md |
-| `scripts/adopt.sh` | worker | full adopt pipeline; dispatches to new libs + existing scripts |
-| `templates/skills/restructure/SKILL.md` | skill template | restructure skill; installed by adopt.sh Step 3 |
+| `lib/plugin-helpers.sh` | library | jq transforms for plugin.json / marketplace.json; shared by emit-plugin.sh + publish-plugin.sh |
+| `lib/policy-helpers.sh` | library | emit sandbox{} block, managed-settings.json, MDM artifacts; shared by all 4 compliance overlays |
+| `lib/workspace.sh` | library | workspace load/state/rollback/report; sources snapshot.sh + log.sh |
+| `lib/cc-schema.json` | data | bundled CC schema table: hook events, settings keys, version gates |
+| `scripts/emit-plugin.sh` | worker | generates .claude-plugin/ from harness scaffold; wires extraKnownMarketplaces |
+| `scripts/eval.sh` | worker | runs promptfoo via npx; --gate exits 2 on failure; writes results/ |
+| `scripts/workspace.sh` | worker | workspace orchestration: preflight → snapshot → ops → aggregate rollback |
+| `templates/evals/` | templates | promptfoo eval suites installed by conjure init; 1 base + 4 compliance |
+| `compliance/*/sandbox.json.tmpl` | data | sandbox block template per overlay (4 files) |
+| `compliance/*/managed-settings.json.tmpl` | data | managed-settings template per overlay (4 files) |
+| `compliance/*/plist.tmpl` | data | macOS MDM plist template per overlay (4 files, optional) |
 
 ### MODIFIED FILES
 
 | File | Change | Why |
 |------|--------|-----|
-| `cli/conjure` | add `cmd_adopt` function + `adopt` dispatch entry + usage() update | new subcommand |
-| `templates/` (structure) | add `skills/restructure/` directory | new skill template |
+| `cli/conjure` | add `cmd_emit_plugin`, `cmd_eval`, `cmd_workspace` + dispatch entries + usage() | 3 new subcommands |
+| `scripts/audit-setup.sh` | add schema-version check section + budget-linter section | areas 3 + 4 |
+| `scripts/publish-plugin.sh` | refactor jq transforms into lib/plugin-helpers.sh; source that lib | deduplicate with emit-plugin.sh |
+| `compliance/hipaa/apply.sh` | add --emit-policy flag path; source lib/policy-helpers.sh | area 2 |
+| `compliance/soc2/apply.sh` | same | area 2 |
+| `compliance/gdpr/apply.sh` | same | area 2 |
+| `compliance/pci/apply.sh` | same | area 2 |
 
 ### UNCHANGED FILES (confirmed)
 
 | File | Reason |
 |------|--------|
-| `lib/mutate.sh` | `mutate_rm` already present (v0.5.0); API is complete for v0.6.0 |
-| `lib/merge.sh` | no changes needed; not involved in adopt pipeline |
-| `scripts/audit-setup.sh` | called as subprocess; existing interface sufficient |
-| `scripts/init-project.sh` | called as subprocess for scaffold; idempotent contract already correct |
-| `scripts/preflight.sh` | jq already a listed dependency; no new hard deps |
-| all other scripts | not involved in adopt flow |
+| `lib/mutate.sh` | API complete; invariant preserved by all new components |
+| `lib/snapshot.sh` | reused by workspace.sh without modification |
+| `lib/log.sh` | reused by workspace.sh without modification |
+| `lib/inventory.sh` | not involved in v0.7.0 features |
+| `lib/merge.sh` | not involved |
+| `lib/caps.sh` | not modified; budget linter in audit-setup.sh uses CLAUDE_MD_CAP directly |
+| `scripts/adopt.sh` | not modified; called by workspace.sh as a subprocess |
+| `scripts/check.sh` | not modified; available as workspace op |
+| `scripts/init-project.sh` | not modified; called by workspace.sh as subprocess |
+
+---
+
+## Data Flow: End-to-End for Each Area
+
+### Plugin Emission Flow
+
+```
+USER: conjure emit-plugin [--strict] [target]
+  │
+  ▼
+cli/conjure cmd_emit_plugin → scripts/emit-plugin.sh $target
+  │
+  ├─ read $target/.claude/skills/ → enumerate skills paths
+  ├─ read $target/.claude/agents/ → enumerate agent paths
+  ├─ read $target/.claude/hooks/  → enumerate hook files
+  ├─ read $target/.claude/settings.json → current hooks block
+  │
+  ├─ source lib/plugin-helpers.sh
+  ├─ plugin_update_plugin_json → writes $target/.claude-plugin/plugin.json
+  ├─ plugin_update_marketplace  → writes $target/.claude-plugin/marketplace.json
+  ├─ plugin_inject_extra_marketplace → writes extraKnownMarketplaces into settings.json
+  │   (all via mutate_write)
+  │
+  └─ mutate_summary; exit 0
+```
+
+### Managed-Settings / Policy Emission Flow
+
+```
+USER: conjure init --overlay=hipaa [target]  OR  conjure refresh-overlay [target]
+  │
+  ▼
+compliance/hipaa/apply.sh --emit-policy $target
+  │
+  ├─ source lib/policy-helpers.sh
+  ├─ source lib/mutate.sh
+  │
+  ├─ (existing) append CLAUDE.md.fragment → CLAUDE.md
+  ├─ (existing) copy pre-commit-phi-scan.sh → .claude/hooks/
+  ├─ (existing) copy CONTROLS.md → docs/compliance/
+  │
+  ├─ (NEW) policy_emit_sandbox $target/.claude/settings.json compliance/hipaa/sandbox.json.tmpl
+  │     jq merge sandbox{} into settings.json → mutate_write
+  │
+  ├─ (NEW --mdm) policy_emit_managed_settings $output_dir compliance/hipaa/managed-settings.json.tmpl
+  │     jq render → mutate_write managed-settings.json
+  │
+  └─ (NEW --mdm) policy_emit_plist $output_dir compliance/hipaa/plist.tmpl
+        render → mutate_write managed-settings.d/10-hipaa.json + plist artifact
+```
+
+### Workspace Orchestration Flow (the hard path)
+
+```
+USER: conjure workspace --file ./conjure-workspace.json [--dry-run]
+  │
+  ▼
+scripts/workspace.sh
+  │
+  ├─ Step 0: workspace_load → validate manifest (jq schema)
+  │    workspace_state_init → write .conjure-workspace-state.json
+  │
+  ├─ Step 1: preflight_all
+  │    for each repo:
+  │      bash $CONJURE_HOME/cli/conjure preflight $repo_path
+  │      record result → state update
+  │    any failure → exit 2 (no mutations yet)
+  │
+  ├─ Step 2: snapshot_all
+  │    for each repo:
+  │      snapshot_create $repo_path $workspace_root/.conjure-workspace-backups/$name/
+  │      workspace_state_update $name snapshot $snapshot_path
+  │    any failure → exit 2 (partial snapshots logged; warn user to check)
+  │
+  ├─ Step 3: execute_ops (sequential)
+  │    for each repo (in manifest order):
+  │      for each op in repo.conjure_ops:
+  │        DRY_RUN=$DRY_RUN bash $CONJURE_HOME/cli/conjure $op $repo_path
+  │        rc=$?
+  │        workspace_state_update $name op_applied $op
+  │        if rc == 2:
+  │          workspace_aggregate_rollback .conjure-workspace-state.json
+  │          exit 2
+  │
+  └─ Step 4: workspace_report → print table + write workspace-report.json
+       exit 0
+
+aggregate_rollback() called on Step 3 failure:
+  for each repo with status=applied in state file (newest-first for safety):
+    snapshot_rollback $recorded_snapshot_path $repo_path
+    workspace_state_update $name status rolled-back
+  print: "All applied repos rolled back."
+  exit 2
+```
+
+### Schema-Aware Audit Flow
+
+```
+USER: conjure audit [target]
+  │
+  ▼
+scripts/audit-setup.sh $target
+  │
+  ├─ (existing audit checks: size caps, frontmatter, hooks JSON, etc.)
+  │
+  └─ (NEW) schema-version-aware section:
+       CC_VERSION=$(claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+       if [ -z "$CC_VERSION" ]: warn "CC not found — schema check skipped"
+       else:
+         SCHEMA=$(jq . $CONJURE_HOME/lib/cc-schema.json)
+         known_events=$(echo $SCHEMA | jq -r '.known_hook_events[]')
+         for event in $(jq -r '.hooks | keys[]' .claude/settings.json):
+           if not in known_events: warn "Unknown hook event: $event (CC $CC_VERSION)"
+         for key in $(jq -r 'keys[]' .claude/settings.json):
+           if not in known_settings_keys: warn "Unknown settings key: $key"
+         for feature, min_ver in version_gates:
+           if feature present in settings.json AND CC_VERSION < min_ver:
+             warn "Feature $feature requires CC $min_ver (installed: $CC_VERSION)"
+         check schema freshness: if updated > 90 days ago: warn "cc-schema.json stale"
+```
 
 ---
 
 ## Dependency-Ordered Build Sequence
 
-Dependencies are explicit. Each step lists what it requires and what it unblocks.
+Dependencies between the 5 areas determine build order. The key constraint: workspace
+orchestration calls `conjure init`, `conjure adopt`, `conjure audit`, `conjure check`
+as subprocesses — so those commands must be stable before workspace.sh is written.
+Plugin helpers must be extracted before emit-plugin.sh is written.
 
-### Step 1 — `lib/log.sh`
+### Step 1 — `lib/plugin-helpers.sh` + refactor `publish-plugin.sh`
 
-**Why first:** `adopt.sh` needs logging from the start (including failure logging).
-`lib/snapshot.sh` also appends log entries on rollback. Zero external dependencies —
-only `lib/mutate.sh` (already shipped). Write the functions + RESTRUCTURE-LOG.md
-format + tests for log_init / log_step / log_fail immediately.
+**Why first:** Shared jq transforms needed by both `emit-plugin.sh` (new) and
+`publish-plugin.sh` (existing, refactored). Extracting the lib first gives a stable
+interface before emit-plugin.sh is written. This is a small, low-risk refactor.
 
 Requires: `lib/mutate.sh` (shipped)
-Unblocks: Steps 2, 3, 4
+Unblocks: Step 2 (emit-plugin.sh)
 
 ---
 
-### Step 2 — `lib/snapshot.sh`
+### Step 2 — `scripts/emit-plugin.sh` + `cmd_emit_plugin` in `cli/conjure`
 
-**Why second:** `adopt.sh` calls `snapshot_create` as the very first mutation-guarded
-action. Must exist before `adopt.sh` can be written. `log_step` is called inside
-`snapshot_create` so `lib/log.sh` must precede it.
+**Why second:** Plugin emission is the foundation for the marketplace registration that
+workspace orchestration may rely on (repos emitting their own plugins). Plugin emission
+is also the simplest new command — good to ship and stabilize early.
 
-Requires: `lib/mutate.sh` (shipped), `lib/log.sh` (Step 1)
-Unblocks: Step 4 (`adopt.sh` rollback path)
-
----
-
-### Step 3 — `lib/inventory.sh` + manifest JSON schema
-
-**Why third:** `adopt.sh` calls inventory after snapshot. Manifest schema must be
-finalized before both inventory (writer) and restructure skill (reader) are written.
-`lib/log.sh` must precede it for `inventory_emit_manifest` log entries.
-
-Requires: `lib/mutate.sh` (shipped), `lib/log.sh` (Step 1), `jq` (already preflight dep)
-Unblocks: Steps 4, 5 (skill reads manifest schema)
+Requires: Step 1 (lib/plugin-helpers.sh)
+Unblocks: Step 7 (workspace can call emit-plugin as an op)
 
 ---
 
-### Step 4 — `scripts/adopt.sh` + `cmd_adopt` in `cli/conjure`
+### Step 3 — `lib/cc-schema.json` + schema-version section in `audit-setup.sh`
 
-**Why fourth:** Depends on all three new libs. `adopt.sh` is the pipeline orchestrator
-and cannot be written until its dependencies exist. `cmd_adopt` in `cli/conjure` is a
-thin wrapper — write it in the same step. Add `--dry-run` path first, live path second
-(easier to test). Tests cover: git-clean gate, dry-run output, snapshot creation,
-inventory output, scaffold idempotency, rollback.
+**Why third:** Audit changes are targeted and isolated (additive section in
+audit-setup.sh). Schema table is a data file with no code dependencies. Building this
+before policy-helpers keeps the compliance area modular.
 
-Requires: Steps 1–3 + `scripts/init-project.sh` (shipped) + `scripts/audit-setup.sh` (shipped)
-Unblocks: Step 5 (skill needs the CLI adopt primitives to call back into)
+Requires: `scripts/audit-setup.sh` (shipped); `jq` (preflight dep)
+Unblocks: Step 5 (compliance policy may include schema-version check)
 
 ---
 
-### Step 5 — `templates/skills/restructure/SKILL.md`
+### Step 4 — `lib/policy-helpers.sh` + compliance overlay extensions
 
-**Why fifth:** The skill's `--apply-step` and `--update-manifest` callback paths in
-`conjure adopt` must exist and be tested before the skill is finalized. Writing the
-skill after the CLI ensures the callback commands documented in the skill actually work.
-Skill content is markdown/prose — fast to write once the CLI contract is locked.
+**Why fourth:** Policy helpers depend only on `lib/mutate.sh` (shipped). The 4 overlay
+`apply.sh` modifications are parallel within this step (no inter-overlay dependencies).
+Build hipaa first (most complex: PHI rules) to validate the pattern, then soc2/gdpr/pci.
 
-Requires: Step 4 (`conjure adopt --apply-step`, `--update-manifest` working)
-Unblocks: end-to-end brownfield adoption user story
+Requires: `lib/mutate.sh` (shipped), compliance templates (sandbox.json.tmpl etc.)
+Unblocks: Step 7 (workspace can call --emit-policy as a workspace op)
 
 ---
 
-### Step 6 — Integration tests for the full adopt + restructure loop
+### Step 5 — `templates/evals/` + `scripts/eval.sh` + `cmd_eval` + budget linter
 
-**Why last:** Add fixture (`tests/fixtures/brownfield-argus/`) that simulates the
-argus stress case (oversized CLAUDE.md + doc sprawl). Test: adopt --dry-run output,
-adopt live run, manifest schema validation, --rollback restores state, --apply-step
-executes and logs correctly.
+**Why fifth:** eval.sh has no dependencies on the new libs — only on `npx`. The budget
+linter in audit-setup.sh is additive. These are independent of workspace and plugin.
+Placing eval here (before workspace) allows workspace to include `eval` as a supported op.
 
-Requires: Steps 1–5 complete
-Unblocks: CI coverage of the new capability
+Requires: `scripts/audit-setup.sh` (for budget linter section); `npx` (runtime)
+Unblocks: Step 6 (workspace can run eval as an op); CI integration
+
+---
+
+### Step 6 — `lib/workspace.sh` + `scripts/workspace.sh` + `cmd_workspace` in `cli/conjure`
+
+**Why last among new features:** workspace.sh calls every other conjure command as a
+subprocess. All per-repo conjure ops must be stable before the workspace layer can be
+written. The aggregate rollback design (the hardest part) requires `lib/snapshot.sh`
+(shipped v0.6.0 — confirmed stable with 467 passing tests) and the durable state file.
+
+Requires: Steps 1–5 stable; `lib/snapshot.sh` (shipped); `lib/log.sh` (shipped)
+Unblocks: end-to-end workspace user story
+
+---
+
+### Step 7 — Integration tests for all 5 areas
+
+Per-area test fixtures added to `tests/run.sh` (graceful-red blocks before each feature).
+Workspace fixture: `tests/fixtures/_workspace-trio/` (3 small repos to orchestrate).
+Eval fixture: mock promptfoo invocation (stub npx script for CI speed).
+
+Requires: Steps 1–6
+Unblocks: CI coverage of all v0.7.0 capabilities
 
 ---
 
@@ -930,12 +871,13 @@ Unblocks: CI coverage of the new capability
 
 | Step | Work item | New / Modified files | Key dependency | Unblocks |
 |------|-----------|----------------------|----------------|----------|
-| 1 | `lib/log.sh` — append-only RESTRUCTURE-LOG.md writer | `lib/log.sh` (N) | `lib/mutate.sh` (shipped) | Steps 2, 3, 4 |
-| 2 | `lib/snapshot.sh` — snapshot/rollback primitives | `lib/snapshot.sh` (N) | Step 1 | Step 4 (rollback) |
-| 3 | `lib/inventory.sh` — inventory + classifier + manifest schema | `lib/inventory.sh` (N) | Steps 1, jq dep | Steps 4, 5 |
-| 4 | `scripts/adopt.sh` + `cmd_adopt` in `cli/conjure` | `scripts/adopt.sh` (N), `cli/conjure` (M) | Steps 1–3, init-project.sh, audit-setup.sh | Step 5 |
-| 5 | `templates/skills/restructure/SKILL.md` | `templates/skills/restructure/SKILL.md` (N) | Step 4 (CLI primitives locked) | full UX complete |
-| 6 | Integration tests (argus fixture) | `tests/fixtures/brownfield-argus/` (N), `tests/run.sh` (M) | Steps 1–5 | CI coverage |
+| 1 | lib/plugin-helpers.sh + publish-plugin.sh refactor | `lib/plugin-helpers.sh` (N), `scripts/publish-plugin.sh` (M) | lib/mutate.sh (shipped) | Step 2 |
+| 2 | emit-plugin.sh + cmd_emit_plugin | `scripts/emit-plugin.sh` (N), `cli/conjure` (M) | Step 1 | Step 6 workspace ops |
+| 3 | lib/cc-schema.json + audit schema-version section | `lib/cc-schema.json` (N), `scripts/audit-setup.sh` (M) | audit-setup.sh (shipped) | Step 5 audit budget |
+| 4 | lib/policy-helpers.sh + 4 overlay extensions + templates | `lib/policy-helpers.sh` (N), `compliance/*/apply.sh` (M×4), `compliance/*/sandbox.json.tmpl` (N×4), `compliance/*/managed-settings.json.tmpl` (N×4) | lib/mutate.sh (shipped) | Step 6 workspace ops |
+| 5 | templates/evals/ + eval.sh + cmd_eval + budget linter | `templates/evals/` (N), `scripts/eval.sh` (N), `cli/conjure` (M), `scripts/audit-setup.sh` (M) | audit-setup.sh (shipped), npx | Step 6 workspace ops |
+| 6 | lib/workspace.sh + workspace.sh + cmd_workspace | `lib/workspace.sh` (N), `scripts/workspace.sh` (N), `cli/conjure` (M) | Steps 1–5; lib/snapshot.sh (shipped) | Full workspace UX |
+| 7 | Integration tests for all areas | `tests/run.sh` (M), `tests/fixtures/_workspace-trio/` (N), eval stubs (N) | Steps 1–6 | CI coverage |
 
 N = New file, M = Modified file
 
@@ -943,256 +885,127 @@ N = New file, M = Modified file
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Restructure skill using Write/Edit tools directly
+### Anti-Pattern 1: Duplicating template content into the plugin dir
 
-**What people do:** Allow the restructure skill to call Claude Code's `Write` or
-`Edit` tools to modify `CLAUDE.md` or create skill files directly.
-**Why it's wrong:** Bypasses `lib/mutate.sh`, breaking DRY_RUN gating and the
-audit log. RESTRUCTURE-LOG.md becomes incomplete. Rollback cannot recover writes
-that were not routed through the snapshot-then-mutate path.
-**Do this instead:** The skill's `allowed-tools` is `[Read, Bash]`. All FS changes
-call `conjure adopt --apply-step` or `conjure adopt --update-manifest`. The CLI is
-the only write path.
-
----
-
-### Anti-Pattern 2: `snapshot_create` using `mutate_cp`
-
-**What people do:** Route the snapshot backup itself through `mutate_cp` to honor
-DRY_RUN.
-**Why it's wrong:** `snapshot_create` is the safety primitive that precedes all
-`mutate_*` calls. If the snapshot is suppressed by DRY_RUN, the subsequent live
-mutations have no backup. The snapshot must always execute (or the whole pipeline
-must abort in dry-run before mutations).
-**Do this instead:** `snapshot_create` uses raw `cp -R` (not `mutate_cp`) and is
-always unconditionally executed in live mode. In dry-run mode, `adopt.sh` suppresses
-all downstream `mutate_*` calls (via `DRY_RUN=1`) but still reports what the snapshot
-path would be. Specifically: in dry-run, `snapshot_create` prints the would-be path
-but does not call `cp -R`.
+**What people do:** `cp -r templates/skills/ .claude-plugin/skills/` — copies skill templates
+into the plugin directory, creating a second source of truth.
+**Why it's wrong:** When skill templates are updated in Conjure, the plugin dir copy diverges.
+The `conjure update` 3-way merge only handles the target repo's `.claude/skills/`, not
+the plugin copy. Size drift becomes unmaintainable.
+**Do this instead:** `plugin.json` references skill paths as relative paths pointing to
+the existing `.claude/skills/` in the harness. The plugin dir is a view, not a copy.
+`emit-plugin.sh` writes path references only.
 
 ---
 
-### Anti-Pattern 3: Writing the manifest via shell heredoc/printf directly
+### Anti-Pattern 2: Fetching the CC schema at runtime
 
-**What people do:** `printf '%s' "$json_content" > adopt-manifest.json` in `inventory.sh`.
-**Why it's wrong:** Bypasses `lib/mutate.sh`; DRY_RUN is not honored; `--dry-run`
-would still write the manifest.
-**Do this instead:** `inventory_emit_manifest` calls `mutate_write` for the final
-manifest write. In dry-run, it writes to a temp path (`/tmp/adopt-manifest-dryrun.json`)
-so the restructure skill can still read the dry-run inventory.
-
----
-
-### Anti-Pattern 4: Blocking adopt on a dirty git working tree without --force
-
-**What people do:** Skip the git-clean precondition to make adopt "more convenient".
-**Why it's wrong:** If adopt mutates files while the tree is dirty and then something
-fails mid-pipeline, the user's uncommitted changes are mixed with conjure's changes.
-Rollback cannot cleanly separate them.
-**Do this instead:** `adopt.sh` exits with a clear error message ("working tree is
-dirty — commit or stash changes first, or use --force") unless `--force` is passed.
-`--force` is documented as "at your own risk; rollback may not fully separate your
-changes from conjure's changes".
+**What people do:** `curl https://json.schemastore.org/claude-code-settings.json` in
+`audit-setup.sh` to get the current schema.
+**Why it's wrong:** Violates the no-egress-in-CI constraint; fails in air-gapped envs;
+introduces non-determinism (schema can change between runs); `curl | parse` is a
+foot-gun pattern.
+**Do this instead:** Bundle `lib/cc-schema.json` in the kit. Update it at Conjure release
+time when schema changes are detected. Emit a staleness warning (>90 days) to prompt
+users to run `conjure update`.
 
 ---
 
-### Anti-Pattern 5: Deleting files during restructure
+### Anti-Pattern 3: Parallel workspace execution without aggregate rollback support
 
-**What people do:** `mutate_rm` on doc files classified as `stale-candidate` to "clean up".
-**Why it's wrong:** The never-delete rule is a hard constraint. Stale-candidate
-classification is a heuristic based on git age and link analysis — it can be wrong.
-Permanent deletion without confirmation violates the project's safety contract.
-**Do this instead:** The `archive-file` operation type moves files to
-`.claude/archive/<original-path-encoded>`. The original path is preserved in the
-manifest. Archived files can be recovered manually or via `--rollback`. No `mutate_rm`
-is ever called on user-owned content files.
+**What people do:** Run workspace ops in parallel (background subshells per repo) for speed.
+**Why it's wrong:** Parallel execution means multiple repos are "in-flight" simultaneously.
+If repo 4 fails while repos 2, 3 are still running, you cannot cleanly roll back all of
+them — some may be partially applied. The aggregate rollback design (snapshot-all-then-execute)
+only works sequentially: repo N's snapshot is taken before repo N's ops begin.
+**Do this instead:** Default to `parallel: false`. Support `parallel: true` only with
+`rollback_policy: best-effort` (no rollback, just report failures). Never offer
+all-or-nothing rollback with parallel execution — the invariant cannot be maintained.
 
 ---
 
-### Anti-Pattern 6: `adopt.sh` re-implementing scaffold logic from `init-project.sh`
+### Anti-Pattern 4: Emitting managed-settings to the repo's .claude/settings.json and calling it MDM
 
-**What people do:** Duplicate the `mutate_mkdir .claude/skills` + `mutate_cp ...`
-sequence in `adopt.sh` for scaffold.
-**Why it's wrong:** Any changes to the scaffold (new skill templates, new hooks) must
-be maintained in two places. `init-project.sh` is already well-tested and idempotent.
-**Do this instead:** `adopt.sh` Step 3 calls
-`bash $CONJURE_HOME/scripts/init-project.sh existing $target` — this is already
-idempotent (all writes guarded with `[ ! -f ]` / `[ ! -d ]`). The restructure skill
-install is the only adopt-specific addition on top.
+**What people do:** Write the sandbox{} block and managed-settings.json into `.claude/settings.json`
+and tell teams "this is your MDM policy."
+**Why it's wrong:** `.claude/settings.json` is a project-level file overridable by users.
+MDM requires system-level paths (`/Library/Application Support/ClaudeCode/managed-settings.json`)
+to be enforceable. Writing to project-level only creates a false sense of enforcement.
+**Do this instead:** `--emit-policy` writes sandbox{} to `.claude/settings.json` (project
+enforcement). `--mdm` writes to a separate output dir for admin deployment. The audit warns
+when `sandbox{}` is absent from project settings even though an overlay was applied.
+
+---
+
+### Anti-Pattern 5: Workspace state file only in memory (no crash durability)
+
+**What people do:** Track per-repo snapshot paths in shell variables during workspace execution.
+**Why it's wrong:** If the process is killed mid-run (SIGKILL, OOM, network loss on remote),
+the snapshot paths are lost. On `--resume`, no rollback is possible for applied repos.
+**Do this instead:** Write `.conjure-workspace-state.json` before each repo operation and
+update it after. Every snapshot path is persisted to disk. `--rollback` reads this file
+and can restore any repo that has a recorded snapshot path, even after a crash.
 
 ---
 
 ## Integration Points
 
-### lib/mutate.sh chokepoint (unchanged invariant)
+### lib/snapshot.sh → workspace.sh (direct reuse, zero modification)
 
-All v0.6.0 file-writing paths route through `lib/mutate.sh`:
-- `adopt.sh` sources `lib/mutate.sh` and uses `mutate_mkdir`, `mutate_cp`,
-  `mutate_write` throughout
-- `lib/log.sh` uses `mutate_write --append` for all log entries
-- `lib/inventory.sh` uses `mutate_write` for manifest output
-- `lib/snapshot.sh` uses `mutate_write` only for the log entry on rollback;
-  the snapshot `cp -R` is intentionally not routed through `mutate_cp`
-  (see Anti-Pattern 2)
-- The restructure skill never calls `mutate_*` directly; it calls the CLI
-  which internally sources `lib/mutate.sh`
+`workspace.sh` sources `lib/snapshot.sh` and calls `snapshot_create` / `snapshot_rollback`
+with workspace-scoped backup root. The snapshot functions are parameterized (backup_root
+is a caller argument), so they work identically for workspace backups as for adopt backups.
+No changes to `lib/snapshot.sh` required.
 
-### adopt.sh → audit-setup.sh (Step 4 reuse)
+### scripts/publish-plugin.sh → lib/plugin-helpers.sh (refactor, not replacement)
 
-`scripts/audit-setup.sh` is called as a subprocess with the target as argument.
-Exit codes: 0 = all pass, 1 = warnings, 2 = errors (hard violations). `adopt.sh`
-captures the exit code and logs it; it does not abort on audit failure because the
-purpose of adopt is to surface and remediate violations, not to gate on them.
+`publish-plugin.sh` is refactored to source `lib/plugin-helpers.sh` for the jq transforms.
+All existing behavior is preserved; the refactor only extracts 2-3 jq expressions into
+named functions. This is a mechanical refactor with no behavior change, testable by
+running the existing `publish-plugin.sh` tests before and after.
 
-### adopt.sh → init-project.sh (Step 3 reuse)
+### compliance/apply.sh → lib/policy-helpers.sh (additive sourcing)
 
-`scripts/init-project.sh` called in `existing` mode as a subprocess. Already
-idempotent — every file write is guarded. Adopt passes the same `$target` and
-`CONJURE_HOME` / `DRY_RUN` env vars. The restructure skill install (`mutate_cp
-templates/skills/restructure/ $target/.claude/skills/restructure/`) is done
-directly in `adopt.sh` after init-project.sh returns.
+Each overlay's `apply.sh` gains `source "$CONJURE_HOME/lib/policy-helpers.sh"` and a
+`--emit-policy` code path. The existing code path (without `--emit-policy`) runs exactly
+as before. No behavior change for existing users.
 
-### Restructure skill → conjure adopt --apply-step (callback contract)
+### workspace.sh → cli/conjure (subprocess call-back)
 
-The restructure skill's callback path is:
-
+`workspace.sh` calls other conjure subcommands as subprocesses:
+```bash
+bash "$CONJURE_HOME/cli/conjure" $op [flags] "$repo_path"
 ```
-1. Skill computes step definition in-session (pure computation, no FS)
-2. Skill calls: Bash → conjure adopt --update-manifest --step-json '<json>' $target
-      adopt.sh: jq read manifest → append step → mutate_write manifest
-      log_step UPDATE-MANIFEST "step=<id> registered"
-      returns 0 on success
-3. Skill calls: Bash → conjure adopt --apply-step <step-id> $target
-      adopt.sh: jq read manifest → find step by id
-      validate: step.status must be "approved"
-      execute: mutate_write / mutate_cp / mutate_mkdir / mutate_rm per op type
-      jq update manifest: step.status = "applied"
-      mutate_write manifest (updated)
-      log_step APPLY "step=<id> status=applied"
-      returns 0 on success, 1 on validation failure
-4. Skill calls: Read → RESTRUCTURE-LOG.md (last N lines to confirm)
-```
+This is the same pattern as `adopt.sh` calling `audit-setup.sh`. The CLI is the
+stable interface; workspace never sources scripts directly (to avoid environment
+variable leakage between repos).
 
-**Why the skill sets `approved` status:** The skill writes the step with
-`status: "approved"` in the JSON it passes to `--update-manifest`. The CLI only
-executes steps with `status: "approved"`. This means a step that is registered but
-not approved (e.g., the user said "skip") will never execute if `--apply-step` is
-called on it — the CLI rejects it. This is an additional safety gate beyond the
-human approval in the skill session.
+### eval.sh → npx promptfoo (runtime, no install dep)
 
-### Version stamp chain (unchanged, not extended for v0.6.0)
-
-`adopt.sh` reads `.claude/.conjure-version` for informational purposes (to include
-in the manifest) but does not modify it. Version stamping remains the domain of
-`cmd_init` and `cmd_update --apply`.
-
----
-
-## Architecture Diagram (v0.6.0 additions highlighted)
-
-```
-┌────────────────────────────────────────────────────────────────────────────────────┐
-│  ENTRYPOINTS                                                                        │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
-│  │  cli/conjure  (bash dispatcher)                         [existing + MODIFIED]│   │
-│  │   init / migrate / audit / update / check / resolve                        │   │
-│  │   refresh-graph / refresh-overlay / install-mcp                            │   │
-│  │   preflight / publish / publish-skill                                      │   │
-│  │   adopt [--dry-run|--force|--rollback|--inventory|                         │   │
-│  │          --apply-step|--update-manifest|--status]    [NEW — v0.6.0]       │   │
-│  └─────────────────────────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
-│  │  cli/conjure.ps1  (PowerShell shim)                   [existing — unchanged]│   │
-│  └─────────────────────────────────────────────────────────────────────────────┘   │
-├────────────────────────────────────────────────────────────────────────────────────┤
-│  WORKER SCRIPTS                                                                     │
-│  ┌───────────────────────────┐   ┌─────────────────────────────────────────────┐  │
-│  │ v0.5.0 workers (unchanged)│   │ adopt.sh                          [NEW]      │  │
-│  │  init-project.sh ──┐      │   │  Step 0: git-clean precondition             │  │
-│  │  audit-setup.sh ───┼──────┼───┤  Step 1: snapshot_create                    │  │
-│  │  check.sh          │      │   │  Step 2: inventory_scan + emit_manifest     │  │
-│  │  resolve.sh        │      │   │  Step 3: init-project.sh (subprocess) +    │  │
-│  │  update-pr.sh      │      │   │          install restructure skill          │  │
-│  │  publish-*.sh      │      │   │  Step 4: audit-setup.sh (subprocess)       │  │
-│  └───────────────────────────┘   │  Step 5: summary + next-steps msg          │  │
-│                                   │  Flags:  --rollback → snapshot_rollback    │  │
-│                                   │          --inventory → re-scan only        │  │
-│                                   │          --apply-step → execute one step   │  │
-│                                   │          --update-manifest → write step def│  │
-│                                   └─────────────────────────────────────────────┘  │
-├────────────────────────────────────────────────────────────────────────────────────┤
-│  SHARED LIB (sourced, not dispatched)                                              │
-│  ┌──────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/mutate.sh   [existing — UNCHANGED]                                       │  │
-│  │  mutate_mkdir / mutate_cp / mutate_write / mutate_rm / mutate_summary        │  │
-│  │  THE write chokepoint — ALL mutations route here                            │  │
-│  └──────────────────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/snapshot.sh  [NEW — v0.6.0]                                              │  │
-│  │  snapshot_create (cp -R before any mutate_*) / snapshot_rollback /           │  │
-│  │  snapshot_list                                                               │  │
-│  └──────────────────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/inventory.sh [NEW — v0.6.0]                                              │  │
-│  │  inventory_scan / inventory_classify / inventory_emit_manifest              │  │
-│  │  → writes adopt-manifest.json via mutate_write                              │  │
-│  └──────────────────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/log.sh       [NEW — v0.6.0]                                              │  │
-│  │  log_init / log_step / log_fail                                              │  │
-│  │  → writes RESTRUCTURE-LOG.md via mutate_write --append                      │  │
-│  └──────────────────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/merge.sh / lib/cost.sh / lib/exact-count.mjs [existing — unchanged]    │  │
-│  └──────────────────────────────────────────────────────────────────────────────┘  │
-├────────────────────────────────────────────────────────────────────────────────────┤
-│  IN-SESSION SKILL (Claude Code, human-gated, read+bash only)                      │
-│  ┌──────────────────────────────────────────────────────────────────────────────┐  │
-│  │ .claude/skills/restructure/SKILL.md    (installed by adopt.sh Step 3)       │  │
-│  │ template: templates/skills/restructure/SKILL.md  [NEW — v0.6.0]             │  │
-│  │  allowed-tools: [Read, Bash]   ← no Write or Edit                           │  │
-│  │  reads:  adopt-manifest.json, RESTRUCTURE-LOG.md, source docs               │  │
-│  │  writes: via conjure adopt --update-manifest (step def) +                   │  │
-│  │               conjure adopt --apply-step (execution)                        │  │
-│  │  human-gated: approve/skip/edit per step — NEVER batch-approves             │  │
-│  └──────────────────────────────────────────────────────────────────────────────┘  │
-├────────────────────────────────────────────────────────────────────────────────────┤
-│  PER-REPO ARTIFACTS (written into target, not kit source)                         │
-│  adopt-manifest.json         — inventory output; restructure_steps[] state         │
-│  RESTRUCTURE-LOG.md          — append-only step audit trail (per session)          │
-│  .conjure-adopt-backups/     — snapshot dirs (gitignored by adopt.sh)              │
-│  .claude/skills/restructure/ — installed restructure skill                         │
-└────────────────────────────────────────────────────────────────────────────────────┘
-
-Adopt pipeline data flow (critical path):
-  git-clean gate
-    → snapshot_create → RESTRUCTURE-LOG.md header
-      → inventory_scan → adopt-manifest.json
-        → init-project.sh (idempotent scaffold)
-          → audit-setup.sh (size-cap check; subprocess)
-            → summary + next steps message
-
-Skill callback data flow:
-  skill (Read adopt-manifest.json)
-    → human approves step
-      → conjure adopt --update-manifest --step-json (write step def to manifest)
-        → conjure adopt --apply-step <id> (execute via mutate_*)
-          → Read RESTRUCTURE-LOG.md tail (confirm)
-```
+`eval.sh` uses `npx --yes promptfoo@latest eval`. The `--yes` flag installs promptfoo
+on first use (npx cache), requiring no pre-install step. This is consistent with the
+existing `npx --yes ctx7@latest` pattern in the development tooling.
 
 ---
 
 ## Sources
 
-- `cli/conjure` (full content read this session — lines 1-477) — HIGH confidence
+- `cli/conjure` (full content read this session) — HIGH confidence
 - `lib/mutate.sh` (full content read this session) — HIGH confidence
-- `lib/merge.sh` (full content read this session) — HIGH confidence
-- `scripts/init-project.sh` (full content read this session) — HIGH confidence
-- `scripts/audit-setup.sh` (lines 1-80 read this session) — HIGH confidence
-- `.planning/PROJECT.md` v0.6.0 requirements (read this session) — HIGH confidence
-- `.planning/research/ARCHITECTURE.md` v0.5.0 (read this session; carried forward) — HIGH confidence
-- `templates/skills/_anatomy/SKILL.md` (frontmatter schema confirmed this session) — HIGH confidence
+- `lib/snapshot.sh` (full content read this session) — HIGH confidence
+- `lib/caps.sh` (full content read this session) — HIGH confidence
+- `scripts/audit-setup.sh` (full content read this session) — HIGH confidence
+- `scripts/publish-plugin.sh` (full content read this session) — HIGH confidence
+- `compliance/hipaa/apply.sh` (read this session) — HIGH confidence
+- `.claude-plugin/marketplace.json` + `plugin.json` (read this session) — HIGH confidence
+- `.planning/PROJECT.md` v0.7.0 milestone context (read this session) — HIGH confidence
+- `.planning/research/ARCHITECTURE.md` v0.6.0 (read this session; carried forward) — HIGH confidence
+- Official CC docs: settings (sandbox, managed-settings, hook events, schema keys) — HIGH confidence ([source](https://code.claude.com/docs/en/settings))
+- Official CC docs: plugin marketplaces (marketplace.json schema, extraKnownMarketplaces, strictKnownMarketplaces) — HIGH confidence ([source](https://code.claude.com/docs/en/plugin-marketplaces))
+- Official CC docs: hooks guide (hook events list including ConfigChange, Notification) — HIGH confidence ([source](https://code.claude.com/docs/en/hooks-guide))
+- promptfoo CI/CD integration docs (npx eval, GitHub Action, YAML spec format) — MEDIUM confidence ([source](https://www.promptfoo.dev/docs/integrations/ci-cd/))
+- CC settings gist (April 2026, v2.1.104 reference) — MEDIUM confidence ([source](https://gist.github.com/mculp/c082bd1e5a439410158974de90c89db7))
 
 ---
-*Architecture research for: Conjure v0.6.0 Safe Brownfield Adoption integration*
-*Researched: 2026-05-28*
+*Architecture research for: Conjure v0.7.0 Plugin-native + Policy-grade integration*
+*Researched: 2026-06-03*

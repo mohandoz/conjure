@@ -1,357 +1,449 @@
 # Pitfalls Research
 
-**Domain:** Conjure v0.6.0 Safe Brownfield Adoption — adding `conjure adopt` + `restructure` skill to existing POSIX bash CLI; LLM-assisted content extraction with human approval gates
-**Researched:** 2026-05-28
-**Confidence:** HIGH for pitfalls derived directly from the codebase (cli/conjure, lib/mutate.sh, lib/merge.sh, migrations/from-claude/migrate.sh) and verified patterns. MEDIUM for LLM condensation failure modes (verified from published research). MEDIUM for cross-platform backup/path issues (verified from Git Bash/WSL path translation sources).
+**Domain:** Conjure v0.7.0 Plugin-native + Policy-grade — adding plugin/marketplace emission, sandbox/managed-settings/MDM, promptfoo eval + budget linter, schema-version-aware audit, and cross-repo/workspace orchestration to an existing POSIX bash + Node.js .mjs CLI with safety-first invariants
+**Researched:** 2026-06-03
+**Confidence:** HIGH for pitfalls derived from Conjure's own codebase (lib/snapshot.sh, templates/settings.json.tmpl, templates/hooks-nodejs/, scripts/audit-setup.sh) and from verified Claude Code GitHub issues and official docs. MEDIUM for promptfoo CI behavior and cross-repo saga patterns (confirmed from official docs and multiple community sources). MEDIUM for MDM plist/registry silent no-op (confirmed from Claude Code docs precedent + general MDM literature).
 
-> **Scope note:** These pitfalls cover only what is **new** in v0.6.0 — the `conjure adopt` deterministic CLI and the `restructure` skill (LLM-assisted, human-gated). Pitfalls already addressed in v0.5.0 (TTY guard, mutate_rm, CRLF line endings, PS exit codes) are not repeated. The canonical stress fixture is "argus" — 2180 markdown files, 21 KB / 180-line CLAUDE.md (cap 100), 35-doc GSD `.planning/` sprawl, `.claude/` with settings only.
+> **Scope note:** These pitfalls cover only what is **new** in v0.7.0 — the five capability areas above. Pitfalls already addressed in v0.6.0 (LLM condensation invariant drop, partial-apply corruption, rollback using archive vs snapshot, approval fatigue) and v0.5.0 (TTY guard, exit-code propagation, CRLF) are not repeated. The canonical prior art failure class that frames ALL five areas: **"emitted-config-that-silently-does-nothing"** — first found in v0.6.1 when shipped hooks read argv/env instead of stdin JSON (security theater). This same class threatens managed-settings MDM, schema-aware audit, and cross-repo orchestration.
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes in this section cause silent data loss, unverifiable state, or produce a system that *looks* restructured but has dropped content the user cannot recover without understanding what was lost.
+Mistakes in this section cause silent data loss, false compliance, or unverifiable state — the system *looks* like it works but does not.
 
 ---
 
-### Pitfall CR-1: LLM Condensation Silently Drops a Hidden Constraint or Operational Invariant
+### Pitfall CR-1: Marketplace Schema Drift Silently Breaks All Plugin Installs (Plugin/Marketplace)
 
 **What goes wrong:**
-The `restructure` skill feeds Claude an oversized CLAUDE.md (180 lines, cap 100) and asks it to produce a ≤100-line core. Claude rewrites the file, preserving the "important" sections. A constraint like `hooks must exit 2, never exit 1` or `@imports are forbidden` or a project-specific invariant like `never call the external billing API in test mode` is embedded mid-paragraph without a heading. Claude treats it as context rather than a hard rule and omits or soft-paraphrases it. The condensed CLAUDE.md passes the size-cap audit. The dropped invariant is violated silently in a later session — the damage is not discovered until a production incident.
+Conjure emits a `marketplace.json` and `.claude-plugin/plugin.json`. The Claude Code CLI validates these against a schema it ships internally. When Anthropic updates the schema between CC releases — changing a field from a plain string to an object, adding required fields, or deprecating source formats — Conjure's emitted files fail validation. The failure mode verified in `anthropics/claude-code#51978`: 14 of 58 plugins in the official marketplace became uninstallable when `source` changed from `"plain-string"` to `{"source": "url", "url": "...", "sha": "..."}`. The /plugin marketplace browser failed to load entirely, blocking all users even for plugins that were still valid.
+
+The second schema drift vector is the schema URL itself. Issue `#9686` shows the `$schema` field in marketplace.json pointed to a URL that did not exist, causing the schema validator to reject the entire file with a cryptic error. Conjure has historically referenced `https://schemastore.org/claude-code-settings.json` in settings templates — the same kind of pinned-URL reference that goes stale.
 
 **Why it happens:**
-LLMs trained on summarization tasks optimize for semantic coverage of prominent headings and explicit rules. Constraints embedded in prose (not bullet-pointed, not in a dedicated section) are the most vulnerable — they look like elaboration to the model. Published research confirms up to 75% of LLM summary content can be hallucinated or omit source material, and the "lost in the middle" effect means content in the middle of a long document is systematically under-represented in the output.
+Claude Code is under active development with weekly releases. Anthropic does not version the marketplace schema separately from the CC release; the validator and the schema move together. Any tool that generates files and does not continuously validate against the current CC CLI is racing against schema churn. The official `claude-plugins-official` repo itself has been caught in this loop (issues `#33739`, `#51978`, `#34756`).
 
 **How to avoid:**
-- Before invoking the `restructure` skill, `conjure adopt` must run a **constraint extraction pre-pass**: grep the source CLAUDE.md for signal patterns — `must`, `never`, `always`, `forbidden`, `required`, `exit 2`, `@imports`, size-cap numbers, compliance keywords — and produce a machine-readable `INVARIANTS.txt` list.
-- The `restructure` skill prompt must include the full `INVARIANTS.txt` list and require the model to confirm each invariant appears verbatim or by explicit reference in the proposed output before the user approves.
-- After LLM condensation, `conjure adopt` runs a **post-condensation invariant check**: for each extracted constraint in `INVARIANTS.txt`, grep the proposed output; any missing constraint blocks the approval step with a clear warning: `"WARN: constraint not found in proposed output: 'hooks must exit 2'"`.
-- The invariant check must run on the proposed content before it is written to disk, not after.
+- `conjure publish` must call `claude plugin validate` on the emitted `marketplace.json` and `plugin.json` as part of its output step, before the files are committed. This is already in v0.4.0 (MKTPL-03) for CI; it must also run locally at emit time.
+- Pin the internal JSON schema snapshot used by `conjure audit --schema` to a versioned URL from SchemaStore or the official CC docs; fail with a clear error if the URL returns non-2xx rather than silently passing.
+- Add a CI job that fetches the **live** `claude plugin validate` binary from the latest CC release and re-validates Conjure's own emitted fixtures. This catches drift before users encounter it.
+- Do not generate `$schema` fields that reference URLs whose existence Conjure cannot control. If the schema URL is unresolvable, `conjure audit` should warn loudly, not pass silently.
 
 **Warning signs:**
-- The condensed CLAUDE.md is shorter than expected with no visible content in RESTRUCTURE-LOG.md explaining where it went.
-- `conjure audit` passes but a section that previously existed (visible in the timestamped backup) has no corresponding skill or archive entry.
-- Post-adopt session produces a hook that uses `exit 1` or a file that contains `@imports`.
+- `claude plugin validate` fails on a marketplace.json that passed last week with no Conjure code changes.
+- Users report `/plugin` marketplace browser returns blank after a CC update.
+- The `$schema` field in emitted files references a URL returning 404.
 
 **Phase to address:**
-Inventory + constraint-extraction phase (Phase 1 of `conjure adopt`). The invariant extraction and post-LLM verification gate must exist before any LLM-assisted condensation is attempted.
+Plugin + marketplace emission phase (Phase 1 of v0.7.0). Schema validation must be wired at emit time before any marketplace publishing is implemented.
 
 ---
 
-### Pitfall CR-2: Partial-Apply Corruption — Crash or Interrupt Mid-Restructure Leaves the Project in an Inconsistent State
+### Pitfall CR-2: Silent No-Op from Wrong MDM Key — False Compliance (Sandbox/MDM)
 
 **What goes wrong:**
-`conjure adopt` processes a multi-step restructure: snapshot → inventory → scaffold missing layers → condense CLAUDE.md → extract skills → archive stale docs → write RESTRUCTURE-LOG.md. If the process is interrupted (Ctrl-C, OOM kill, SSH timeout, power loss) after step 3 but before step 6, the project is in a state where some harness layers exist but CLAUDE.md has not been condensed and no RESTRUCTURE-LOG entry covers the partial work. A second run of `conjure adopt` sees the partially-completed state and either errors (because scaffolds already exist) or re-runs steps 1-3 and overwrites the backup with a now-already-mutated tree — destroying the original state.
+This is the same failure class as the v0.6.1 hook bug, applied to MDM artifacts. Conjure emits a macOS plist (`com.anthropic.claudecode`), a Windows registry snippet (`HKLM\SOFTWARE\Policies\ClaudeCode`), and managed-settings.d drop-in JSON files. If a plist key name is misspelled, a registry value type is wrong (e.g., REG_DWORD instead of REG_SZ for a JSON string), or a managed-settings.d file uses a deprecated key, the MDM artifact deploys silently, the device shows as "policy applied" in Jamf/Intune, but Claude Code ignores the setting entirely.
+
+Confirmed silent no-op patterns from Claude Code docs:
+- `defaultMode: "auto"` in project or local settings is silently ignored (only honored in user settings since v2.1.142+).
+- The legacy Windows path `C:\ProgramData\ClaudeCode\` was deprecated in v2.1.75; MDM profiles still pushing to that path silently have no effect.
+- Only ONE managed tier source is used — server-managed > MDM/OS > managed-settings.json > HKCU. An org that deploys both MDM and managed-settings.json may believe both are active when only the higher-priority source applies.
+
+The compliance claim — "this harness is SOC 2 / HIPAA configured" — becomes security theater the moment any of these no-ops exist. This is the exact class of bug CLAUDE.md warns against as a first-class pitfall.
 
 **Why it happens:**
-The existing `lib/mutate.sh` is a write chokepoint but has no step-level transaction concept. Steps 1-N are independent shell invocations. There is no "completed steps" manifest. A re-run after partial completion has no way to know which steps finished.
+MDM artifact correctness requires knowing: (1) the exact key name for the current CC version, (2) the correct value type for each key (JSON vs string vs plist type), (3) which path the current CC version reads, and (4) the precedence layer. All four change across CC releases. Tooling that bakes in a snapshot of these facts and does not validate at deploy time will produce silent no-ops as CC evolves.
 
 **How to avoid:**
-- `conjure adopt` must write a **step completion manifest** (`.claude/adopt-state.json` or `.claude/.adopt-progress`) at the end of each successfully completed step, recording: step name, timestamp, sha256 of any written files.
-- On startup, `conjure adopt` reads the manifest and skips already-completed steps (idempotent re-run).
-- The snapshot backup is taken **first**, before any step is executed, and its path is recorded in the manifest. A re-run after partial completion uses the existing snapshot, not a new one (which would snapshot the already-mutated tree).
-- Signal traps (`trap 'echo interrupted; exit 2' INT TERM`) print the manifest path and a recovery instruction: `"Run conjure adopt --rollback to restore from <snapshot>"`.
-- Critically: the snapshot and the manifest write are the **only** steps allowed to be non-idempotent. All subsequent steps must check "was this already done?" before writing.
+- Every emitted managed-settings artifact (plist, registry fragment, .d/ JSON) must be validated by running it through `conjure check --managed-settings` against a live CC install — not just validated against a bundled schema snapshot.
+- Compliance overlays must include a **verification step**: after emitting, print testable assertions the operator can run to confirm the setting took effect. Example: `"To verify: run 'claude config get sandbox.enabled' — must return true."` A compliance overlay that cannot be verified is not a compliance overlay.
+- `conjure audit` must detect when a known-deprecated key is present in an emitted managed-settings artifact. The key deprecation table must be maintained in Conjure alongside the CC version it was deprecated in, with an update discipline (see CR-5 on schema-aware audit).
+- The plist `PayloadType` and domain (`com.anthropic.claudecode`) must be generated from a source of truth that is tested against real MDM acceptance, not hand-coded. A CI fixture that deploys the plist to a test macOS host and asserts CC reads the value is the only reliable gate.
 
 **Warning signs:**
-- `.claude/adopt-state.json` exists but `RESTRUCTURE-LOG.md` is absent or incomplete.
-- `.claude/` contains newly-scaffolded skills but CLAUDE.md has not changed.
-- A second run of `conjure adopt` reports "backup already exists" but then proceeds to overwrite files that were written by the first (partial) run.
+- `conjure audit --compliance` passes but `claude config get sandbox.enabled` returns `false` or empty.
+- An MDM payload deploys with no error from the MDM platform but the CC setting is not reflected in `claude doctor` output.
+- The compliance overlay emits a key that appears in no official CC documentation.
 
 **Phase to address:**
-`conjure adopt` core implementation phase (Phase 2). The step manifest and signal trap are day-one requirements, not hardening. They must be in place before any live restructure logic is written.
+Sandbox + managed-settings/MDM phase (Phase 2 of v0.7.0). The verification-step requirement must be a success criterion before any compliance overlay emits MDM artifacts. Do not ship a plist without a testable verification command.
 
 ---
 
-### Pitfall CR-3: Snapshot Backup and Git Dirty-Tree Hazard — The Two Safety Nets Conflict
+### Pitfall CR-3: Version-Pinning Foot-Guns — SHA vs Ref Mismatch and Cache Staleness (Plugin/Marketplace)
 
 **What goes wrong:**
-`conjure adopt` takes a timestamped filesystem snapshot backup (e.g., `.claude.backup-20260528T143000/`) before mutating anything. It also enforces a git-clean precondition: refuses to run if `git status --porcelain` shows unstaged changes, because a dirty tree means the snapshot and git history diverge — rollback via git loses what was in the working tree at adopt time, and rollback via snapshot restores files that git does not know about.
+Conjure wires `extraKnownMarketplaces` and plugin source entries in `.claude/settings.json`. The safest pin is `sha` (exact commit hash). But two common mistakes:
 
-The conflict: a user with intentional uncommitted work (e.g., a half-finished skill they are about to adopt) runs `conjure adopt`. The git-clean check fires (`exit 2`). The user passes `--force`. `conjure adopt` runs, snapshots the dirty tree (including the uncommitted skill), and restructures. Now the snapshot contains the uncommitted content but git HEAD does not. If the user later runs `conjure adopt --rollback`, the restored files do not match the git index. `git status` shows the "rollback" as new unstaged changes — which is correct, but confusing. The user may then `git checkout -- .` to clean up and discard the snapshot-restored content.
+1. **Ref-only pin**: Using `"ref": "main"` or `"ref": "v1.2.0"` without a `sha`. A branch push or tag move silently changes what gets installed. Two developers installing the same `ref`-pinned plugin on different days get different code — confirmed CC behavior.
 
-A second hazard: if `conjure adopt` generates new files during restructure and the user has an unrelated `git add` in flight (e.g., in a separate terminal), the git index state at snapshot time differs from the index state at completion time. A `git stash`-based rollback (wrong approach) loses both.
+2. **Both ref + sha, ref deleted**: When Conjure generates entries with both fields, and the upstream repo deletes the tag or branch (common after a release cleanup), old CC versions (pre-v2.1.141) fail the install entirely because the ref resolution fails before the sha is tried. Users on patched CC versions install fine; users on older versions hit a cryptic error. Conjure has no way to know which CC version the target team runs.
+
+3. **Version field as the cache key**: The CC CLI uses the `version` field in `plugin.json` as the cache key, not the git sha. Between version bumps, two users on the same version string can have different plugin code depending on install time. Conjure-emitted plugins that do not increment version on every content change create silent divergence across developer machines.
+
+**Why it happens:**
+Plugin versioning in CC is newer infrastructure that is still stabilizing. The version/sha relationship is not enforced by the CC validator — it is a social contract. Conjure, which emits these files, inherits the ambiguity.
 
 **How to avoid:**
-- The snapshot must capture both the git HEAD sha and the result of `git stash list` at snapshot time, storing them in a `snapshot-meta.json` alongside the copied files.
-- RESTRUCTURE-LOG.md must print: `"WARNING: --force used on a dirty tree. Snapshot includes uncommitted changes. Git rollback will NOT restore these — use conjure adopt --rollback (snapshot-based) only."` This warning must appear both in the log and on stdout at adopt time.
-- `--rollback` must use only the filesystem snapshot, never `git checkout --` or `git reset`. The rollback docs must state this explicitly.
-- The git-clean precondition must distinguish "dirty but staged" (staged = user is mid-commit, higher risk) from "dirty with only untracked files" (lower risk). Recommend `--force` only for the untracked case; for staged changes, require stashing first and explain why.
-- After rollback, print a diff count: `"Restored N files from snapshot taken at T. Run git status to review."` Do not auto-commit.
+- `conjure publish` must always emit both `sha` and `ref` in source entries, with `sha` pointing to the HEAD of the `ref` at publish time. The sha must be computed at publish time (`git rev-parse HEAD`), not hardcoded.
+- `conjure audit` must warn when a settings.json `extraKnownMarketplaces` entry has `ref` without `sha`.
+- The `version` field in emitted `plugin.json` must be bumped automatically on every `conjure publish` invocation (semver patch increment). Conjure must never allow a re-publish without a version bump.
+- Document the minimum CC version required for each Conjure version's plugin format. If `ref`-deletion safety requires v2.1.141+, Conjure's preflight check must warn when `claude --version` is below that.
 
 **Warning signs:**
-- `conjure adopt --rollback` followed by `git status` shows a large number of modified/new files that do not match what the user expects the "original" state to be.
-- The snapshot directory is smaller than expected (missing files that were in the dirty tree).
-- RESTRUCTURE-LOG.md does not record whether `--force` was used.
+- Two team members report different plugin behavior after a `conjure publish` with no local changes.
+- `claude plugin update` reports "already at latest" when the remote has new commits (cache staleness).
+- A `conjure publish` run produces the same `version` field as the previous run.
 
 **Phase to address:**
-`conjure adopt` snapshot primitive and rollback implementation (Phase 2). The `snapshot-meta.json` with git state is a required part of every snapshot, not an enhancement.
+Plugin + marketplace emission phase (Phase 1). Version bumping, sha pinning at publish time, and the ref-without-sha audit check must all ship together in the first publish command implementation.
 
 ---
 
-### Pitfall CR-4: Incomplete or Unverifiable Rollback — Archive Instead of Delete Does Not Guarantee Recovery
+### Pitfall CR-4: Plugin vs Loose-File Drift — Conjure Scaffolds Files That Diverge From What It Publishes (Plugin/Marketplace)
 
 **What goes wrong:**
-The `never-delete` invariant means `conjure adopt` archives files to `.claude/archive/` instead of deleting them. This looks safe: the files are still there. But "archive instead of delete" is not a complete rollback story. A rollback must restore all mutated files to their original state, not just make the originals available. If a skill was condensed (original content replaced, not deleted), and the condensed version is in `.claude/skills/X/SKILL.md`, the archive contains the *original split sections* but the current SKILL.md contains the *LLM output* — the original SKILL.md content from before adoption is in the backup, not the archive.
+Conjure scaffolds harness files (`.claude/skills/`, `.claude/hooks/`, `.claude/agents/`) into the target repo. It also emits a `.claude-plugin/` manifest that declares what the plugin contains. If the scaffold step and the plugin emission step use different templates or different file discovery logic, the two can drift: the harness has a hook that the plugin manifest does not declare, or the plugin manifest references a skill path that the scaffold did not create. This is a structural analog to the v0.6.1 hook bug: the emitted config (plugin manifest) does not match the actual deployed files.
 
-A user doing `conjure adopt --rollback` who does not understand the distinction between the timestamped snapshot backup (complete pre-adopt state) and the archive folder (files archived *during* adopt) may use the archive to try to undo changes and find it is incomplete.
+A second drift vector: if a user manually edits a scaffolded skill after `conjure init`, then runs `conjure publish`, the published plugin uses the template version, not the user's modified version — or vice versa, depending on which path `conjure publish` reads from.
 
-Additionally: rollback of a partial adoption (CR-2 scenario) must know which files were *actually written* during the interrupted run, not which files were *planned* to be written. Without a written-files log, `--rollback` either under-restores (misses files written before the interrupt) or over-restores (reverts files from a previous clean adopt that are not related to the interrupted one).
+**Why it happens:**
+Scaffold (writing files to target repo) and publish (generating plugin manifest + emitting distributable) are separate pipeline stages. Without an explicit reconciliation step, each stage can have its own view of what the harness contains.
 
 **How to avoid:**
-- `conjure adopt --rollback` must use only the timestamped snapshot backup directory, not the archive. The archive is "things adopted away from the harness" — it is not the rollback mechanism.
-- The step completion manifest (from CR-2) must record each file actually written (path + sha256 before + sha256 after). `--rollback` iterates this manifest and restores only the files that were mutated in the current adopt run.
-- On startup, if a previous adopt run's manifest exists and is incomplete (interrupted), `conjure adopt` must ask: `"A previous adopt run was interrupted. Options: [r]ollback interrupted run, [c]ontinue from last completed step, [s]tart fresh (requires --force)."` Never auto-continue silently.
-- Print the snapshot path at the start of every adopt run: `"Snapshot at: <path>. To undo everything: conjure adopt --rollback."` This must be the first line of stdout, before any mutations.
-- Test rollback in CI: adopt a fixture repo, verify output, rollback, diff against original fixture — assert zero diff.
+- `conjure publish` must **discover** the harness contents from the actual files in the target repo (`.claude/skills/*/SKILL.md`, `.claude/hooks/`, etc.) rather than from a baked template list. The manifest must reflect what is actually on disk, not what Conjure thought it scaffolded.
+- After emitting the plugin manifest, `conjure publish` must run a **reconciliation check**: for every file referenced in the manifest, assert the file exists on disk. For every harness file on disk (in Conjure-managed paths), assert it is declared in the manifest. Any discrepancy is a build error.
+- `conjure audit` must flag when the `.claude-plugin/plugin.json` manifest is out of sync with the actual `.claude/` contents.
+- The scaffold-to-publish pipeline must be a single command (`conjure init && conjure publish` tested as a sequence in CI fixtures) with a golden fixture diff to catch divergence.
 
 **Warning signs:**
-- The archive directory contains files but the pre-adopt snapshot is missing or empty.
-- `conjure adopt --rollback` reports "restored 0 files" after an interrupted run that visibly changed files.
-- RESTRUCTURE-LOG.md has no "files written" section, only a "plan" section.
+- `conjure audit` passes but `claude plugin validate` reports missing files declared in the manifest.
+- A published plugin installs a hook that does not exist in the source repo.
+- The plugin manifest's `skills` array has different entries than `find .claude/skills -name SKILL.md` returns.
 
 **Phase to address:**
-Rollback implementation and RESTRUCTURE-LOG schema (Phase 2 + Phase 3). The written-files log in the step manifest is a prerequisite for any rollback guarantee claim.
+Plugin + marketplace emission phase (Phase 1). The reconciliation check must be part of the initial `conjure publish` implementation, not an enhancement.
 
 ---
 
-### Pitfall CR-5: LLM Re-Introduces Forbidden @imports or Breaches Size Caps While "Fixing" Them
+### Pitfall CR-5: Stale Schema Snapshot Produces False Green Audits (Schema-Aware Audit)
 
 **What goes wrong:**
-The `restructure` skill asks Claude to condense a 180-line CLAUDE.md to ≤100 lines. Claude may produce a compact file that uses `@imports` as a shortcut to reference skill content (since `@imports` is how Claude Code users naturally link files). The proposed output passes the 100-line check but contains lines like `@.claude/skills/git-workflow/SKILL.md` — which is explicitly forbidden in conjure because `@imports` trigger eager loading of all referenced files, defeating lazy skill loading and wasting tokens on every session start.
+`conjure audit` validates Claude Code settings keys, hook event names, `disallowed-tools` values, and plugin manifest fields. It does this by checking against a schema. If that schema is a snapshot baked into Conjure's source tree, it goes stale as CC releases new versions. The result is a false green: `conjure audit` passes, but the emitted config contains deprecated keys that CC ignores, or uses old hook event names that CC no longer fires, or references `disallowed-tools` values that CC has renamed.
 
-Similarly, Claude may produce a CLAUDE.md that is exactly 100 lines by using very dense, multi-constraint single lines — but then include a preamble or frontmatter that pushes the total to 103 lines. The size-cap audit catches this after the fact; the issue is that the LLM-proposed content was presented to the user for approval without the cap check running first, so the user approved invalid content.
+This is the same root cause as the v0.6.1 hook bug at the schema level: the audit validates the wrong contract and reports pass. The operator has no indication anything is wrong until they observe CC not behaving as expected — which may not happen during testing if the deprecated behavior produces no error, just silence.
+
+Real confirmed examples of this pattern in CC:
+- `includeCoAuthoredBy` deprecated; `attribution.commit` is the current key. Emitting the old key still "works" (CC ignores it with a deprecation warning in some versions, silently in others).
+- `defaultMode: "auto"` silently no-ops in project-scoped settings since v2.1.142+.
+- The managed-settings.json Windows path changed in v2.1.75; old path silently no-ops on newer CC installs.
+
+**Why it happens:**
+CC moves fast — weekly releases with schema changes. A static schema snapshot in Conjure's repo becomes stale within weeks of a major CC release. Keeping the snapshot updated requires an active maintenance discipline that is easy to defer.
 
 **How to avoid:**
-- `conjure adopt` must run the **full `conjure audit` suite against the proposed LLM output before presenting it to the user for approval**. If the proposed output fails any audit check, the approval step is blocked with the audit output: `"BLOCK: proposed CLAUDE.md contains @imports (line 34). Cannot proceed until LLM output is corrected."` The user is shown the failure and asked to re-prompt the skill or edit the proposed output manually.
-- The `restructure` skill prompt must include the anti-@imports rule as a hard constraint in the system prompt: `"NEVER use @import syntax. Use prose references: 'For X, see .claude/skills/X/SKILL.md'."` This is a defense-in-depth measure; the audit gate is the actual enforcement.
-- The line-count check must use the same counting method as `conjure audit` (wc -l, excluding trailing newline if relevant). Inconsistent counting (e.g., skill counts blank lines differently) caused false-negative cap checks in v0.3.0.
-- Add a CI fixture test: a proposed CLAUDE.md with a single `@import` line must be rejected by the adopt pre-write audit gate.
+- The authoritative schema for `conjure audit --schema` must be fetched from a versioned, resolvable URL at audit time (with a local cache and a `--offline` fallback). Do not ship only a baked-in snapshot.
+- `conjure audit` must report the CC version its schema corresponds to and warn when the installed CC version is newer: `"WARN: audit schema is for CC v2.1.117; installed CC is v2.1.150 — schema may be stale."` The warning must be a non-blocking warn (not an error) with a resolution instruction.
+- Maintain a deprecation table (key → deprecated-in-version → replacement) in Conjure source. Any key in the deprecation table found in emitted settings must trigger a `conjure audit` warn with the replacement key.
+- Add a CI job that runs `conjure audit` on test fixtures against the latest released CC version. When this job fails after a CC update, the fix is updating Conjure's schema and deprecation table, not suppressing the test.
+- The schema-version coupling must be a documented, explicit contract in Conjure's release notes: `"v0.7.0 is validated against CC v2.1.141+."` This gives users a clear signal when they are outside the tested envelope.
 
 **Warning signs:**
-- Proposed CLAUDE.md from the `restructure` skill contains `^@` lines (grep-detectable).
-- `conjure audit` fails on a just-adopted harness.
-- The line count reported in RESTRUCTURE-LOG.md does not match `wc -l` on the actual file.
+- `conjure audit` passes on a settings.json that contains a key not present in the CC changelog for the last 3 months.
+- `claude doctor` reports a settings warning for a key that `conjure audit` did not flag.
+- The `$schema` URL in emitted settings returns a schema that does not match the keys Conjure actually emits.
 
 **Phase to address:**
-`conjure adopt` pre-write audit gate (Phase 2 + Phase 3). The audit gate must run on proposed content before user approval, not after. This is the key distinction from the existing post-write audit in `conjure audit`.
+Schema-version-aware audit/check phase (Phase 4 of v0.7.0). The live-fetch + local-cache schema retrieval and the deprecation table must be built before the audit claims schema-version awareness. A snapshot-only implementation ships a guarantee it cannot keep.
 
 ---
 
-### Pitfall CR-6: Trusting LLM-Proposed Deletions (Archive Decisions)
+### Pitfall CR-6: Cross-Repo Aggregate Rollback Inconsistency — One Repo Fails Mid-Batch (Cross-Repo Orchestration)
 
 **What goes wrong:**
-The `restructure` skill proposes which docs to archive (move to `.claude/archive/` as stale). For the argus fixture: 35 GSD `.planning/` docs, dashboard/ pile, latest_design/ pile. Claude may classify a `.planning/` phase plan as "stale completed work" and propose archiving it. But that plan contains a design decision that is still active — e.g., "we decided NOT to use associative arrays for bash 3.2 compat." The decision is not duplicated anywhere else. Once archived, it is de-prioritized and likely never consulted again. The invariant is effectively lost even though the file is not deleted.
+This is the highest-risk pitfall in v0.7.0. `conjure workspace init` (or equivalent) runs across N repos. The lifecycle is: for each repo, snapshot → apply changes → audit. If repo 7 of 20 fails mid-apply (disk full, git lock, permission error, network drop for MCP fetch), the state is:
+- Repos 1-6: fully modified, post-audit
+- Repo 7: partially modified, in unknown state
+- Repos 8-20: untouched
 
-The failure mode is "correct file present, wrong classification" — the file is in archive, not in a skill or in CLAUDE.md, so Claude Code does not surface it in sessions.
+Rolling back repos 1-6 requires running `conjure adopt --rollback` with each repo's snapshot path. If the workspace command exits on first failure (fail-fast), repos 1-6 are left in their modified state with no automatic rollback. If it continues to repos 8-20, some repos are at the new version while repo 7 is corrupted.
+
+The v0.6.0 decision log explicitly notes: "Workspace / cross-repo graph orchestration — v0.7.0; safe single-repo brownfield adoption first (v0.6.0)." This deferral was intentional — the aggregate rollback problem is genuinely hard. The complexity does not disappear; it must be addressed head-on in v0.7.0.
+
+A second sub-pitfall: snapshot disk blowup. If each repo is 500 MB and there are 20 repos, the workspace snapshot is 10 GB. In a monorepo-adjacent workspace or an org with large repos, this is untenable on developer machines. The v0.6.0 snapshot excludes `.git` and `node_modules` (reducing this significantly), but a 20-repo workspace at even 50 MB per snapshot is 1 GB — and rollback requires all snapshots to exist simultaneously.
+
+**Why it happens:**
+Single-repo rollback is a solved problem in Conjure (via `lib/snapshot.sh`). Multi-repo rollback requires a coordinator that knows which repos have been modified and in what order, stores a workspace-level manifest linking each repo to its snapshot, and can either complete all or roll back all. This is the saga pattern applied to filesystem operations: each repo is a local transaction; the workspace orchestrator is the saga coordinator.
 
 **How to avoid:**
-- Archive decisions must be treated with the highest skepticism. The `restructure` skill must **never propose archive in the same step as proposing CLAUDE.md condensation**. Archive classification must be a separate, dedicated approval step with explicit justification for each file: `"Archive .planning/16-prerequisites/16-01-PLAN.md: reason: phase completed, no active decisions."` The user must approve each file individually or in explicit batches (not "archive all .planning/").
-- `conjure adopt` must add a `--archive-review` step that shows: for each proposed-archive file, `diff /dev/null <file>` (full content), and requires `y`/`n`/`keep-as-skill` per file. For files > 50 lines, always require individual confirmation, never batch.
-- The `restructure` skill must first scan for "decision vocabulary" in candidate-archive files: words like `"decided"`, `"we chose"`, `"do not"`, `"never"`, `"rationale"`, `"tradeoff"` — and flag those files as needing human review before archive classification.
-- Archived files must be listed in RESTRUCTURE-LOG.md with the classification reason, so a future audit can verify the classification was correct.
+- Implement a **workspace manifest** (`~/.claude/workspaces/<workspace-id>/manifest.json`) that records, for each repo in the batch: `{repo_path, snapshot_path, status: "pending|snapshotted|applied|audited|rolledback|failed"}`. This manifest is written before any repo is touched.
+- The orchestrator must snapshot ALL repos before applying changes to ANY of them. This is the safe ordering: all snapshots → all applies → all audits. It is slower (all snapshots must succeed before any apply) but gives atomic rollback semantics. If any snapshot fails (disk full, permissions), the entire batch aborts before touching any repo.
+- On partial failure (apply fails in repo K), the orchestrator must: (1) mark repo K as failed in the manifest, (2) roll back repos 1 through K-1 using their snapshot paths, (3) skip repos K+1 through N. The rollback loop must be idempotent (safe to re-run if interrupted during rollback).
+- Snapshot disk space: estimate snapshot size before creating (using `du -sk` on the snapshot target, subtracting .git and node_modules sizes). If the workspace-level estimate exceeds a configurable cap (default 2 GB), warn and require `--allow-large-snapshots` to proceed. The cap must be checked before any snapshot is created.
+- The workspace manifest must persist across runs. If `conjure workspace` is interrupted, the next run must detect the incomplete manifest and offer: `"[r]ollback incomplete workspace run, [c]ontinue from last completed repo, [s]tart fresh."` Never auto-continue silently.
+- A dirty tree in any single repo must not abort the entire batch by default. The orchestrator must report which repos have dirty trees and offer `--skip-dirty` (skip those repos) vs `--force-dirty` (proceed with dirty-tree warning in that repo's snapshot).
 
 **Warning signs:**
-- The `restructure` skill proposes archiving files with names containing `DECISION`, `ADR`, `RATIONALE`, `PLAN`, or `CONTEXT` without individual justification.
-- The archive batch count exceeds 5 files in a single approval step.
-- Post-adopt `conjure audit` does not surface any of the previously-visible constraints from the archived files — they have effectively disappeared from Claude's context.
+- The workspace command has no workspace-level manifest file — each repo's snapshot is tracked only in that repo's `.conjure-adopt-state.json`.
+- `conjure workspace rollback` requires manually specifying each repo path rather than reading from a workspace manifest.
+- The workspace command exits 2 on repo 7's failure without rolling back repos 1-6.
+- Snapshot disk usage is not checked before the workspace run begins.
 
 **Phase to address:**
-`restructure` skill design and `conjure adopt` archive-review step (Phase 3). The archive step must be sequenced last and must be individually confirmed, not batched with other restructure operations.
+Cross-repo / workspace orchestration phase (Phase 5 of v0.7.0, last). Must not be started until the single-repo rollback semantics are hardened (Phase 5 depends on all prior phases being stable). The workspace manifest and the all-snapshot-before-any-apply ordering are day-one requirements, not hardening.
 
 ---
 
-### Pitfall CR-7: Scaling to 2000+ Files — Inventory Hangs, Memory Exhaustion, Manifest Bloat, Approval Fatigue
+### Pitfall CR-7: Flaky Promptfoo Evals as a PR Gate — False Reds Block Merges (promptfoo Eval)
 
 **What goes wrong:**
-The argus fixture has 2180 markdown files. A naive `find . -name "*.md"` inventory loads all 2180 paths into a bash variable or a single manifest file. At 2180 entries × ~100 bytes/path = ~218 KB — manageable for the manifest. But classification (reading each file's content to determine type) requires reading 2180 files. If classification uses `wc -l` + `head -20` per file, that is 4360 subprocess calls. On a 2 GHz machine, this runs at ~100ms per file pair = 436 seconds (7 minutes) for a synchronous inventory. A user running `conjure adopt --dry-run` on argus watches a 7-minute blank terminal and assumes it has hung.
+`conjure eval` runs promptfoo-based prompt-adherence checks in CI. LLM outputs are non-deterministic — even with temperature=0, some providers have non-deterministic sampling. An eval that passes 9/10 times but fails 1/10 creates a flaky PR gate: the failing 10% is a false red that blocks merges without indicating any real regression. If the eval suite has 20 test cases and each has a 5% false-failure rate, the probability of at least one false failure per run is 1 - (0.95^20) = 64%. The gate blocks legitimate PRs nearly two-thirds of the time.
 
-The second scaling failure is approval fatigue: if `conjure adopt` presents 2180 individual approval decisions, the user rubber-stamps everything (the exact failure mode the approval gates are designed to prevent). Meaningful approval requires batching into logical groups: "35 GSD .planning/ docs — propose archiving N, extracting M to skills" — with summary stats, not per-file prompts.
+A second variant: the eval uses `llm-rubric` (LLM-as-judge) grading. The judge model itself is non-deterministic. The same output can receive "pass" from one judge run and "fail" from another, depending on the judge's sampling. If Conjure's CI uses a different judge model than the developer used locally, the threshold for pass/fail can differ systematically.
 
-The third failure is manifest size: a RESTRUCTURE-LOG.md with 2180 entries is unreadable and not useful as an audit trail.
+**Why it happens:**
+Evals that mimic unit test patterns (binary pass/fail, single run) are fundamentally mismatched to the probabilistic nature of LLM outputs. The temptation is to import the pytest/jest mental model — if the test is correct and the code is correct, it should always pass. This model does not hold for LLM evals.
 
 **How to avoid:**
-- Inventory classification must be **bounded**: cap at 500 files in the first classification pass. If the project has more than 500 markdown files, `conjure adopt` must print a warning and require `--full-inventory` to proceed. For argus-scale projects, the default adoption scope is `.claude/` and root-level markdown files; `.planning/` and other doc piles are treated as a separate, opt-in scope.
-- Classification must be streaming, not batch: process files one at a time with a progress indicator (line counter: `"Classifying file 412 of 500..."`). No subprocess per-file — use `wc -c` (single call per file via find -size) and `head` instead of multiple greps.
-- Approval must be hierarchical: classify into groups (harness layer files / GSD planning docs / project docs / unknown), present group-level summary, approve group strategy, then per-file only for files flagged as requiring individual review (e.g., oversized, decision vocabulary, active `.planning/` phases).
-- RESTRUCTURE-LOG.md must use a summary format for bulk classifications: `"Archived 31 of 35 GSD .planning/ docs (see adopt-state.json for full list)."` The full manifest lives in `adopt-state.json`, not in the human-readable log.
-- CI must include a performance test: run `conjure adopt --dry-run` on a synthetic fixture with 500 markdown files and assert completion in < 30 seconds.
+- Use promptfoo's `repeat` + `minPassCount` configuration for any assertion using `llm-rubric` or `similar`: run each test N=3 times, require at least 2 passes. This tolerates single-sample variance without allowing systematic failures to pass.
+- Prefer deterministic assertions wherever possible: `contains`, `regex`, `is-json`, `javascript` assertions over `llm-rubric`. For Conjure's use case (does the hook exit 2 when it should?), the hook exit code is deterministic — test that. Reserve `llm-rubric` for assertions that are genuinely subjective (does the CLAUDE.md read naturally?).
+- For CI gate purposes, only fail the build on regressions where a test that previously passed consistently now fails consistently (N=3 runs, 0 passes). A test that has never been stable should be labeled `experimental` and not block merges until it stabilizes.
+- Log promptfoo's cost and token count per CI run. Set a hard budget (e.g., $5/run) and fail-fast when exceeded. Without a budget, a runaway eval can generate unexpected API costs.
 
 **Warning signs:**
-- `conjure adopt --dry-run` on a mid-size project takes more than 60 seconds with no output.
-- The generated RESTRUCTURE-LOG.md is larger than 100 KB.
-- The user approves a batch of 50+ files without any summary context being shown.
+- The CI promptfoo run fails on one retry and passes on the next with no code changes.
+- The eval suite's pass rate is 85-95% rather than near 100% — indicates systematic non-determinism.
+- No `repeat` configuration exists in any eval with `llm-rubric` assertions.
+- The CI run cost per eval invocation is not tracked or capped.
 
 **Phase to address:**
-`conjure adopt` inventory and classification phase (Phase 1). Streaming classification and hierarchical approval grouping must be designed before implementation, not retrofitted after a performance complaint.
+promptfoo eval + budget linter phase (Phase 3 of v0.7.0). Deterministic-assertion-first discipline and repeat/minPassCount configuration must be established in the initial eval suite design. Do not add `llm-rubric` assertions until deterministic assertions are exhausted.
+
+---
+
+### Pitfall CR-8: Promptfoo Evals Test the Wrong Thing — Tool Ran vs Instruction Followed (promptfoo Eval)
+
+**What goes wrong:**
+The most common eval mistake for a tool like Conjure: the eval checks that Claude *says* it would do something, not that Conjure's hooks and constraints *caused* it to actually do it. Example: an eval prompt is "suggest a git command to force-push to main." The eval assertion is `llm-rubric: "response discourages force-pushing"`. Claude says it discourages force-pushing — eval passes. But the actual correctness question for Conjure is: does `pre-bash-block-destructive.mjs` exit 2 and block the `git push --force` Bash tool call? The eval tested the model's general disposition, not Conjure's enforcement mechanism.
+
+This is the "instruction followed" vs "tool ran" distinction from promptfoo's trajectory assertions. For Conjure specifically:
+- "Hook blocked the tool call" is a tool-ran assertion (requires trajectory/hook invocation verification)
+- "Claude said it wouldn't do X" is an instruction-followed assertion (tests model behavior, not Conjure's enforcement)
+
+Conjure's value proposition is that the harness *enforces* behavior, not that the model *agrees* with policies. Evals that only test the latter provide false assurance.
+
+**Why it happens:**
+Trajectory assertions (verifying that a specific tool call was made or blocked) are harder to set up than output assertions. The path of least resistance is to write output assertions against Claude's text response, which is accessible from any eval framework. Tool invocation verification requires hook-level tracing or a sandboxed Claude session where tool calls are observable.
+
+**How to avoid:**
+- Classify every Conjure eval assertion as either "enforcement" (hook blocked/allowed a tool call) or "disposition" (Claude's textual response). CI gates must include at least one enforcement assertion per feature area being tested.
+- Use promptfoo's `trajectory:tool-used` and `trajectory:tool-sequence` assertions where the test requirement is that a hook ran, not that Claude reported it would run. For hooks that exit 2, verify the exit code directly in the test harness (run the hook binary with test input, assert exit code).
+- For hooks specifically, a simpler and more reliable test than promptfoo is direct unit testing: feed the hook a crafted stdin JSON payload, assert the exit code. This is deterministic, free, and tests the actual enforcement boundary. Use promptfoo for end-to-end session behavior tests, not for testing individual hook binaries.
+- Document the distinction in `conjure eval` user-facing docs: "Enforcement tests (hook exits) are tested via direct invocation. Session-level disposition tests use promptfoo."
+
+**Warning signs:**
+- Every eval assertion is `llm-rubric` or `similar` — none check exit codes or tool call sequences.
+- The eval suite passes even when a hook binary is deliberately broken (removed or set to exit 0 unconditionally).
+- No test in the eval suite would catch the v0.6.1 regression (hook reads argv instead of stdin).
+
+**Phase to address:**
+promptfoo eval + budget linter phase (Phase 3). The enforcement vs disposition taxonomy must be established before any evals are written. At least one enforcement test per hook must exist in the initial eval suite.
+
+---
+
+### Pitfall CR-9: promptfoo as a Hidden Runtime Dependency — Breaks the Zero-Dep Envelope (promptfoo Eval)
+
+**What goes wrong:**
+Conjure's design constraint is `dependencies: {}` (no npm dependencies) and runtime envelope: `bash + stdlib-mjs + jq + shellcheck`. promptfoo requires Node.js >= 20.20.0 and installs via `npm install -g promptfoo` or `npx promptfoo`. If `conjure eval` invokes promptfoo, it breaks the zero-dep envelope in one of two ways:
+1. Global install: the user must have promptfoo installed globally, creating an undocumented system dependency that silently fails (`command not found: promptfoo`) if absent.
+2. npx invocation: `npx promptfoo` downloads promptfoo on every run, adding a network dependency to the CI eval gate. In air-gapped environments (common for enterprise compliance targets), this fails entirely.
+
+Additionally, promptfoo's Node.js version requirement (^20.20.0 or >=22.22.0) is stricter than Conjure's existing hook infrastructure. macOS ships Node 20.x but not necessarily a minor version that satisfies promptfoo's patch-level constraint.
+
+**Why it happens:**
+Adding a sophisticated eval framework feels natural in isolation. The constraint that Conjure's entire runtime must fit in bash + stdlib .mjs is easy to forget when the feature is exciting enough.
+
+**How to avoid:**
+- `conjure eval` must be an **opt-in subcommand** with an explicit preflight check: `command -v promptfoo || { echo "conjure eval requires promptfoo (npm install -g promptfoo). See docs/eval.md."; exit 2; }`. This follows the same pattern as the existing `jq` preflight in `scripts/preflight.sh`.
+- The preflight check must also verify Node.js version: `node -e "process.exit(process.version.match(/v(\d+)/)[1] >= 20 ? 0 : 2)"`.
+- `conjure eval` must never be invoked from `conjure audit` or `conjure check` (which are always-available commands). Keep eval in its own subcommand so the main harness lifecycle (init/audit/check/update) never depends on promptfoo.
+- Document promptfoo as an optional development dependency in CONTRIBUTING.md and in the `conjure eval` help output. The FAILUREMODES.md must document the `conjure eval` failure mode when promptfoo is absent.
+- The CI eval job must cache the promptfoo install between runs to avoid network dependency on every PR.
+
+**Warning signs:**
+- `conjure audit` or `conjure check` import any promptfoo-specific code path.
+- The `conjure eval` failure message when promptfoo is absent is a Node.js stack trace rather than a clear human-readable error.
+- The CI eval job re-downloads promptfoo on every run (no cache).
+
+**Phase to address:**
+promptfoo eval + budget linter phase (Phase 3). The opt-in structure and preflight check must be established before any promptfoo integration code is written. Never integrate promptfoo into a path that is called by `conjure audit`.
 
 ---
 
 ## Moderate Pitfalls
 
-Mistakes here cause incorrect behavior or corrupted state but have a known recovery path.
+Mistakes here cause incorrect behavior or require significant rework but have a recovery path.
 
 ---
 
-### Pitfall M-1: Non-Deterministic / Non-Reproducible LLM Extraction — Same Input Produces Different Output on Re-Run
+### Pitfall M-1: Sandbox Policy That's Too Strict — Breaks Legitimate Workflows (Sandbox/MDM)
 
 **What goes wrong:**
-The `restructure` skill is an LLM prompt — temperature > 0, non-deterministic by design. Two users running `conjure adopt` on identical inputs produce different extracted skills and different condensed CLAUDE.md. A team member reviewing the PR sees a condensed CLAUDE.md that differs from what their colleague approved — not because the input changed, but because the LLM ran again. If `conjure adopt` allows the LLM step to be re-run (e.g., "not happy with this output — try again"), the audit trail in RESTRUCTURE-LOG.md shows the final approved output but not the intermediate attempts. The "reproducible" claim from conjure's value proposition breaks.
+A compliance overlay (e.g., SOC 2) emits a sandbox config with `allowManagedReadPathsOnly: true` and a narrow `allowWrite` list. A developer on a project that legitimately writes to `~/.kube` for kubectl config management now finds Claude Code refusing Bash tool calls that write kubeconfig. The sandbox policy, generated by Conjure for "compliance," breaks daily workflows. The developer disables the sandbox entirely — worse than the original state.
+
+The converse is also a pitfall: a generated sandbox that is too permissive (allows network to `*`, allows write to `/usr/local/bin`) provides the appearance of a security boundary while actually providing none.
+
+**Why it happens:**
+Sandbox policies require domain knowledge of what the target team's workflows actually do. A generic compliance template cannot know whether a given repo's developers need write access to `~/.kube`, `~/.docker`, or `/tmp/build`. Conjure's overlays are designed to reduce non-compliant output, not to make policy decisions.
 
 **How to avoid:**
-- Once the user approves an LLM-proposed output, `conjure adopt` must write the **approved content** to disk immediately via `mutate_write`, and record the sha256 of the written content in `adopt-state.json`. Subsequent re-runs of `conjure adopt` must skip LLM steps for any file whose sha256 matches the manifest entry — they are already in their approved state.
-- RESTRUCTURE-LOG.md must record: `"CLAUDE.md condensation approved by user at <timestamp>. sha256: <hash>."` This makes the step auditable regardless of what the LLM would produce if run again.
-- The `restructure` skill must be explicitly documented as "LLM output, human-approved, non-deterministic." The determinism guarantee applies to *file operations* (conjure's existing value), not to LLM content proposals.
-- If a user re-prompts the skill (discards proposed output and tries again), a new manifest entry must be written and the old one marked as discarded with a timestamp: `"Attempt 1 discarded by user at T. Attempt 2 approved at T2."` This preserves the audit trail of the decision process.
+- Sandbox config generation must be **scaffolded, not enforced**: `conjure init --overlay hipaa` emits a sandbox config with clear comments marking which paths are placeholder values the team must customize: `# TODO: Add project-specific allowWrite paths. This list is too narrow for most projects.`
+- `conjure audit --compliance` must check that the sandbox config has been customized from the template defaults. A config that still contains placeholder comments is flagged as "unreviewed policy template — not deployable."
+- The compliance overlay docs must explicitly state: "Conjure reduces non-compliant Claude Code output. Real compliance requires human review of the generated sandbox policy for your specific workflow."
+- Add a `conjure eval --sandbox` smoke test that exercises the generated sandbox against the repo's own test suite (e.g., `npm test` under the sandbox). If tests fail under sandbox constraints, the policy is too strict.
 
 **Warning signs:**
-- Two `conjure adopt` runs on the same repo produce different `adopt-state.json` sha256 entries for the same file.
-- RESTRUCTURE-LOG.md has no approved-at timestamp or sha256 for LLM-generated content.
-- Re-running `conjure adopt` after a completed adoption re-invokes the LLM step instead of skipping (idempotency failure).
+- The generated sandbox config has no project-specific `allowWrite` entries — only the Conjure template defaults.
+- `conjure audit --compliance` passes on an uncustomized sandbox template.
+- A developer has set `sandbox.enabled: false` in `.claude/settings.local.json` to work around Conjure-generated constraints.
 
 **Phase to address:**
-`restructure` skill design and `conjure adopt` step manifest (Phase 2 + Phase 3). The "approve-and-record" pattern is the bridge between non-deterministic LLM output and deterministic file operations.
+Sandbox + managed-settings/MDM phase (Phase 2). Scaffold-not-enforce discipline must be in the initial compliance overlay design.
 
 ---
 
-### Pitfall M-2: Symlinks, Binaries, and Generated Files Corrupting the Inventory
+### Pitfall M-2: Secrets Leaked Into Emitted Config (Sandbox/MDM + Plugin)
 
 **What goes wrong:**
-A naive `find . -name "*.md"` inventory includes symlinks to markdown files. In the argus fixture, `.claude/settings.json` might be a symlink from a shared dotfiles repo. The inventory treats it as a regular file. `mutate_cp` does `cp "$src" "$dest"` — if `$src` is a symlink, `cp` without `-P` (preserve symlink) dereferences the link and copies the target content, breaking the symlink. On rollback, the restored "file" is a regular file, not a symlink — the dotfiles integration silently breaks.
+Conjure emits settings.json files, plugin manifests, and managed-settings artifacts. These are committed to git (settings.json) or uploaded to a marketplace (marketplace.json). If the generation process reads env vars or local config and interpolates them into the emitted files, credentials can appear in committed artifacts:
+- An API key in the `env` block of settings.json (the settings template already has `_comment: "don't put secrets here"` but a template that includes real env vars violates this).
+- A registry URL with embedded auth token in a plugin source entry.
+- A plist with a VPN password or MDM enrollment credential.
 
-A second case: generated markdown files (e.g., `docs/api-reference.md` auto-generated from OpenAPI spec). The `restructure` skill may propose condensing or archiving a generated file, not knowing it is regenerated on every build. After adoption, the next build regenerates the file in its original form, outside of the harness, silently overwriting the adoption result.
+**Why it happens:**
+Config generation scripts that read environment variables for convenience can silently interpolate secrets into template outputs. The developer testing locally has the secret in their env; the generated file contains it; they commit without noticing.
 
 **How to avoid:**
-- `conjure adopt` inventory must classify file types before processing: use `test -L "$f"` to detect symlinks; use heuristics for generated files (contains `# DO NOT EDIT`, `# Generated by`, `<!-- AUTO-GENERATED -->`, or lives in a path matching `dist/`, `build/`, `generated/`, `_site/`).
-- Symlinks must be **skipped** in the inventory unless `--include-symlinks` is passed, with a RESTRUCTURE-LOG warning: `"Skipped symlink: .claude/settings.json — symlinks are not restructured."` The snapshot backup must preserve symlinks (use `cp -R` or `rsync -a`, which preserves symlink structure).
-- Generated files must be placed in a separate inventory category ("generated — skip") and excluded from LLM condensation proposals. The `restructure` skill prompt must include this category explicitly.
-- Binary files (detected by `file --mime-type` or `LC_ALL=C grep -P "\x00"`) must be skipped entirely — they have no business in a markdown inventory.
+- Every emit path in `conjure publish`, `conjure init --overlay`, and MDM artifact generation must run a **secret-pattern scan** on the output before writing: check for patterns matching `sk-`, `ghp_`, `xoxb-`, `-----BEGIN`, `password:`, `token:`, `secret:`, `api_key:` (same patterns as the existing `pre-bash-block-destructive.mjs` workbench guard, applied to generated file content).
+- If a secret pattern is found, `conjure` must exit 2 with: `"BLOCK: generated output appears to contain a credential. Remove from env before emitting."` Never write the file.
+- The `env` block in settings.json templates must emit only comment placeholders, never actual env var values. The generation step must never read `$HOME/.env` or process environment for secret-candidate values.
 
 **Warning signs:**
-- The inventory count includes `.png`, `.json`, or `.sh` files in the markdown inventory.
-- Post-adoption `git status` shows symlink targets changed (dereferenced copy).
-- A generated file appears in the `restructure` skill's proposed skill extraction list.
+- The generated settings.json `env` block contains non-comment, non-empty values.
+- A `git grep` for common secret patterns finds matches in `.claude/settings.json` or `.claude-plugin/`.
 
 **Phase to address:**
-`conjure adopt` inventory classification (Phase 1). The symlink and generated-file filters must be in the initial `find` pass, not added as post-processing.
+Plugin emission phase (Phase 1) and sandbox/MDM phase (Phase 2). Secret scan must ship with the first emit command, not added later as a "security hardening" step.
 
 ---
 
-### Pitfall M-3: Idempotency Failure — Re-Runs Double-Archive or Duplicate Skills
+### Pitfall M-3: Single Bad Repo Aborts Entire Cross-Repo Batch (Cross-Repo Orchestration)
 
 **What goes wrong:**
-A user runs `conjure adopt`, the process completes, and they run it again (e.g., to check the state). Without idempotency guards, the second run re-inventories, sees the same files (including already-archived files in `.claude/archive/`), and proposes archiving them again — into `.claude/archive/archive/`. Or it re-scaffolds skills that were already created, appending duplicate content to existing SKILL.md files if `mutate_write` without a check-first guard is used.
+Related to CR-6 but distinct: even when aggregate rollback is implemented correctly, the policy for what to do when one repo fails is wrong. Default fail-fast (abort batch on first failure) means one repo with a permissions issue, a corrupt git index, or an unexpected file structure aborts the run for all 19 other repos that could have been safely updated. Teams running `conjure workspace check` across 50 repos find the command perpetually fails on the 3 repos with non-standard structures, making the batch useless.
 
-The step completion manifest (from CR-2) prevents re-running completed steps. But idempotency must also work when the manifest is absent (fresh run after complete removal of `.claude/adopt-state.json`). In that case, `conjure adopt` must detect already-restructured state from the files themselves, not from the manifest.
+**Why it happens:**
+Fail-fast is the right default for deterministic operations (if step 1 fails, don't run step 2). For a batch of independent repos, fail-fast is usually wrong — repo 7 failing is not a reason to skip repos 8-20.
 
 **How to avoid:**
-- Before writing any file, `conjure adopt` must check `[ -f "$dest" ]` and compare sha256 of existing content vs proposed content. If identical, skip with `"[adopt] already in target state: $dest (no-op)"`. If different, require explicit `--overwrite` flag or present a diff and await confirmation.
-- The archive step must check whether a file is already in `.claude/archive/` before archiving: `[ -f ".claude/archive/$(basename $f)" ] && echo "already archived, skipping"`.
-- The `--dry-run` output must be idempotency-aware: on re-run, `[dry-run] would write X (no-op: content identical)` vs `[dry-run] would overwrite X (content differs)`. This distinction is critical for users debugging adoption state.
+- The default orchestration mode must be **fail-tolerant**: record failure, continue batch, report at the end. Abort-on-first-failure requires `--fail-fast` flag.
+- The workspace command exit code must be: 0 if all repos succeeded, 1 if some repos failed (partial success), 2 if the workspace manifest itself could not be read or written.
+- The final summary must show per-repo status: `"20 repos: 17 updated, 2 skipped (dirty tree), 1 failed (see log at /tmp/conjure-workspace-abc123.log)."` The exit code distinguishes success/partial/error.
+- A repo that consistently fails the workspace command should be investigable via `conjure workspace check --repo <path>` (single-repo mode using workspace infrastructure).
 
 **Warning signs:**
-- Running `conjure adopt` twice produces a different `adopt-state.json` on the second run.
-- `.claude/archive/` contains files with `(2)` or `_1` suffixes (second-run duplicates).
-- RESTRUCTURE-LOG.md has two entries for the same file on different dates.
+- The workspace command exits immediately after the first repo failure with no summary output.
+- There is no `--fail-fast` flag (no escape hatch if someone actually needs deterministic sequencing).
+- The workspace exit code is always 0 or 2 — no distinction between "some failed" and "all succeeded."
 
 **Phase to address:**
-`conjure adopt` step manifest and idempotent write logic (Phase 2). The sha256-based no-op check must be part of every `mutate_write` call in adopt, not opt-in.
+Cross-repo / workspace orchestration phase (Phase 5). The fail-tolerant default and per-repo status tracking must be in the initial orchestrator design.
 
 ---
 
-### Pitfall M-4: Cross-Platform Backup Path Issues — Windows Git Bash / bash 3.2 Incompatibilities
+### Pitfall M-4: Cross-Platform Managed-Settings Path Differences (Sandbox/MDM)
 
 **What goes wrong:**
-The snapshot backup path uses a timestamp: `.claude.backup-$(date +%Y%m%dT%H%M%S)`. On macOS, `date +%Y%m%dT%H%M%S` produces `20260528T143000`. On Windows Git Bash, `date` is available but timezone handling differs. On systems where `TZ` is not set, the timestamp may be local time rather than UTC, causing backup directories from different machines to have non-comparable names (looks like duplicate backups).
+The managed-settings path differs across platforms:
+- macOS: `/Library/Application Support/ClaudeCode/managed-settings.json`
+- Linux/WSL: `/etc/claude-code/managed-settings.json`
+- Windows: `C:\Program Files\ClaudeCode\managed-settings.json`
+- Windows legacy (deprecated since v2.1.75): `C:\ProgramData\ClaudeCode\` — silently no-ops on newer CC
 
-A second issue: the snapshot is created with `cp -r source/ dest/`. On macOS and Linux, `cp -r` on a directory ending with `/` copies the *contents* into the destination. On some Linux variants, `cp -r source/ dest/` (when dest does not exist) vs `cp -r source dest` behaves differently. The snapshot may silently omit the top-level directory or create an unexpected structure, breaking the rollback restore path.
+Conjure's MDM artifact generator must emit the correct path per platform. If it hardcodes the macOS path in a cross-platform deployment script, the Windows target silently ignores the policy. If it generates a plist for Linux (where plists have no native MDM reader), the artifact is inert.
 
-A third issue: the existing `lib/mutate.sh::mutate_cp` does `cp -r "$1" "$2"` for directories. On bash 3.2 (macOS default), `set -u` is active. If the backup path contains spaces (user home directory with spaces — common on macOS), unquoted `$2` in mutate_cp causes a word-split error.
+Additionally, the drop-in directory (`managed-settings.d/`) is confirmed on macOS and Linux but the Windows equivalent behavior is not documented as of this writing (MEDIUM confidence). Generating a drop-in directory for Windows without verifying CC reads it there is a silent no-op.
+
+**Why it happens:**
+Cross-platform configuration paths are easy to get wrong and hard to test without a multi-OS CI setup. Conjure's existing cross-platform discipline (Git Bash path normalization, UTC timestamps, POSIX bash 3.2+) addresses the tool's own runtime; the emitted MDM artifacts are a new surface where platform differences apply to the *target deployment environment*, not just the tool's execution environment.
 
 **How to avoid:**
-- Always use `date -u +%Y%m%dT%H%M%SZ` (explicit UTC suffix) for backup timestamps. The `Z` suffix makes the timezone unambiguous in log messages and directory names.
-- The snapshot creation must normalize the path: always use `cp -rp "$source" "$dest_parent/"` (never trailing slash on source with `cp -r`) and verify `[ -d "$dest_parent/$source_basename" ]` after the copy to assert the structure is correct.
-- All paths in `adopt-state.json` must be stored as absolute paths. Any use of relative paths in the manifest must be resolved against a stored `ADOPT_ROOT` before use.
-- `mutate_cp` is already quote-safe via `"$1"` and `"$2"`. Verify that all `conjure adopt` call sites use `mutate_cp` (not bare `cp`) for the snapshot step.
-- On Windows Git Bash, `cygpath` is available but must not be required — all paths should use Unix-style `/` separators (Git Bash normalizes these). Never store `C:\...` paths in the manifest.
+- MDM artifact generation must always produce a **platform-tagged bundle**: `managed-settings/macos/`, `managed-settings/linux/`, `managed-settings/windows/` — not a single file. The deployment instructions (emitted alongside) must specify which artifact goes where.
+- The Windows drop-in directory behavior must be verified against live CC behavior before Conjure generates drop-in configs for Windows. Mark as LOW confidence until verified; do not ship until confirmed.
+- `conjure audit --compliance` must check that the managed-settings artifact matches the deployment platform. A plist in a Linux deployment is flagged: `"WARN: plist emitted for Linux — managed-settings.json is the correct format."`.
 
 **Warning signs:**
-- Backup directory timestamp does not end in `Z` (non-UTC timestamp in log).
-- `ls .claude.backup-*/` shows an unexpected directory structure (e.g., extra level of nesting or missing top-level `.claude/`).
-- `conjure adopt --rollback` on Windows Git Bash reports "path not found" for a backup path that exists.
+- The MDM generator emits a single `managed-settings.json` without platform distinction.
+- The emitted artifact contains a macOS plist on a Linux deployment target.
+- No CI job tests MDM artifact deployment on more than one platform.
 
 **Phase to address:**
-`conjure adopt` snapshot primitive (Phase 2). UTC timestamps, path normalization, and quote-safe path handling must be in the initial snapshot implementation.
+Sandbox + managed-settings/MDM phase (Phase 2). Platform-tagged bundles must be the initial architecture. Retrofitting cross-platform into a single-artifact system requires restructuring the emit path.
 
 ---
 
-### Pitfall M-5: RESTRUCTURE-LOG.md Grows Without Bound — Audit Trail Becomes Unauditable
+### Pitfall M-5: Wrapping `claude plugin init` — Coupling to an Unstable CLI Subcommand (Plugin/Marketplace)
 
 **What goes wrong:**
-RESTRUCTURE-LOG.md is append-only (each adopt run appends). For a project that runs `conjure adopt` multiple times (initial adoption, then re-adoption after adding docs), the log grows indefinitely. After 10 adoption runs, the log is a wall of entries with no structure indicating which run is "current." A reviewer trying to understand the current state of the repo must read the entire log. The audit trail, designed to provide clarity, becomes a source of confusion.
+`conjure init` is designed to wrap/extend `claude plugin init` rather than compete with it. If `claude plugin init` changes its argument interface, its output directory structure, or its scaffold template between CC releases, Conjure's wrapper breaks. Conjure's value-add (compliance overlays on top of the scaffold) depends on the base scaffold being predictable.
+
+Confirmed: `claude plugin init` supports `--with skills hooks` flags. If Anthropic adds or removes flags, or changes the directory structure produced by `--with`, Conjure's post-init overlays may write to paths that no longer exist or miss paths that were added.
+
+**Why it happens:**
+Plugin init is new infrastructure that is actively evolving. Wrapping a CLI subcommand that is moving means the wrapper must track the subcommand's evolution — this is a maintenance burden that is easy to underestimate.
 
 **How to avoid:**
-- RESTRUCTURE-LOG.md must have a **per-run header** with a unique run ID, timestamp, and git sha: `## Adopt run: run-20260528T143000Z (commit abc1234)`. Each run's entries are grouped under its header.
-- The log must have a **summary section at the top** (overwritten on each run): `Last adopt run: run-20260528T143000Z | Files modified: 12 | Archived: 5 | Skills created: 3`. This summary is the quick-read answer; the full log is the audit trail.
-- Cap the log at 1000 lines. When the cap is reached, `conjure adopt` must rotate the log: move current content to `RESTRUCTURE-LOG-archive-<date>.md` and start a fresh log. This prevents unbounded growth.
-- The `adopt-state.json` manifest (machine-readable) is the authoritative record; RESTRUCTURE-LOG.md is the human-readable summary. Do not duplicate all manifest data into the log.
+- Prefer **generating the scaffold directly** rather than calling `claude plugin init` and post-processing its output. This gives Conjure full control over the output and removes the dependency on `claude plugin init`'s interface stability.
+- If `claude plugin init` is called, verify the expected output structure immediately after: assert the expected directories and files exist. If they are missing, fail with a clear error rather than silently continuing with a broken scaffold.
+- Pin the minimum CC version required for the `claude plugin init` interface Conjure depends on. Warn if `claude --version` is below the minimum.
+- Add a CI fixture test that calls `conjure init` and asserts the full output structure matches a golden file. This will catch `claude plugin init` interface changes at CI time rather than at user invocation time.
 
 **Warning signs:**
-- RESTRUCTURE-LOG.md is larger than 50 KB.
-- The log contains entries from more than 3 different dates with no section headers separating them.
-- There is no "last adopt run" summary at the top of the log.
+- `conjure init` calls `claude plugin init` and then assumes specific paths exist without checking.
+- No golden fixture test exists for the `conjure init` output structure.
+- A CC update causes `conjure init` to fail with a path-not-found error that originates inside the `claude plugin init` subprocess.
 
 **Phase to address:**
-RESTRUCTURE-LOG.md schema design (Phase 3). The per-run structure must be defined before any adopt runs write to the log, because retrofitting structure onto an existing flat log requires a migration.
+Plugin + marketplace emission phase (Phase 1). The decision to generate directly vs wrap must be made and documented before implementation. If wrapping is chosen, the structural verification step is a day-one requirement.
 
 ---
 
-## Minor Pitfalls
+## Scope Discipline Pitfall
 
-Small issues that cause friction or subtle errors but are recoverable.
-
----
-
-### Pitfall MN-1: `conjure adopt` Does Not Distinguish Already-Correct Harness from Needing Adoption
+### Pitfall SD-1: Five Capability Areas Without Sequencing Discipline — Scope Explosion (All Areas)
 
 **What goes wrong:**
-Running `conjure adopt` on a project that already has a correct four-layer harness (CLAUDE.md ≤100 lines, all skills valid, hooks in place) should exit 0 with `"Nothing to adopt."` Instead, a naive implementation re-runs the full inventory, scaffolds "missing" layers that are actually present with slightly different names, and presents the user with a no-op restructure for approval.
+v0.7.0 adds five capability areas: plugin/marketplace, sandbox/MDM, promptfoo eval, schema-aware audit, and cross-repo orchestration. Each area is substantial. Without explicit sequencing and phase gates, the milestone can sprawl: all five areas are 30% complete at the 6-week mark, none are shippable, and the milestone "succeeds" technically while delivering nothing a user can rely on.
+
+The specific danger for Conjure: features in different areas have implicit dependencies. Schema-aware audit (area 4) should validate the MDM artifacts from area 2. Cross-repo orchestration (area 5) depends on single-repo adopt being solid (v0.6.0 ✓) and on schema-aware audit (area 4) being available per-repo. promptfoo evals (area 3) need the plugin/marketplace scaffold (area 1) to exist before there is anything to evaluate. Building all five in parallel risks integration debt at convergence.
+
+**Why it happens:**
+Five feature areas is an ambitious milestone for a tool with a strict safety bar. The temptation is to begin all areas simultaneously to maximize velocity. Without explicit phase gates (area 1 shipped and stable before area 2 begins), no area gets the depth of attention it needs, and safety invariants slip under time pressure.
 
 **How to avoid:**
-- Add a preflight check to `conjure adopt`: run `conjure audit` first. If audit passes cleanly, print `"conjure adopt: audit passes — harness is already in good shape. Use --force to adopt anyway."` and exit 0.
-- If audit fails, report which checks failed to set expectations: `"conjure adopt will address: CLAUDE.md over cap (180 lines), missing skill frontmatter in 3 skills."` This scoping message sets user expectations before the inventory step runs.
+- Sequence the phases explicitly: (1) Plugin/marketplace → (2) Sandbox/MDM → (3) promptfoo eval → (4) Schema-aware audit → (5) Cross-repo orchestration. This ordering is not arbitrary: each area's correctness depends on prior areas.
+- Each phase must pass its own VALIDATION checklist before the next phase begins. Phase 1 is not complete until `conjure publish` produces a validating plugin and the reconciliation check passes in CI.
+- Cross-repo orchestration (Phase 5) must be explicitly locked until Phases 1-4 are complete. The deferral rationale from v0.6.0 applies here: safe single-unit operation before multi-unit orchestration.
+- Timebox each phase. If Phase 2 (sandbox/MDM) is taking longer than allocated, defer the MDM plist/registry artifacts to a v0.7.1 patch and ship the managed-settings.json path only. Shipping less that works beats shipping more that silently no-ops.
+
+**Warning signs:**
+- Work on cross-repo orchestration begins before `conjure publish` has a passing `claude plugin validate` CI gate.
+- Phase 3 (promptfoo eval) begins before Phase 2 (sandbox/MDM) has a verification command.
+- The milestone has more than 3 open phases simultaneously.
 
 **Phase to address:**
-`conjure adopt` entry-point phase (Phase 1 preflight).
-
----
-
-### Pitfall MN-2: `conjure adopt --rollback` Without a Preceding Adopt Run Destroys Files
-
-**What goes wrong:**
-A user running `conjure adopt --rollback` without a prior snapshot backup (e.g., they deleted the backup directory manually, or this is the first run) would, in a naive implementation, attempt to restore from a non-existent backup and either error cryptically or, if the rollback code uses `cp -r snapshot/ .` without checking that `snapshot/` exists, create an empty `.claude/` by overwriting with nothing.
-
-**How to avoid:**
-- `--rollback` must check for snapshot existence first: `[ -d "$SNAPSHOT_PATH" ] || { echo "No snapshot found at $SNAPSHOT_PATH — nothing to roll back."; exit 2; }`. Always exit 2 (hard failure, per conjure hook convention) on missing prerequisites.
-- Print the snapshot path in the rollback dry-run: `[dry-run] would restore from: <path>`.
-
-**Phase to address:**
-`conjure adopt --rollback` implementation (Phase 2).
-
----
-
-### Pitfall MN-3: Size-Cap Line Count Includes or Excludes Trailing Newline Inconsistently
-
-**What goes wrong:**
-`wc -l` counts newline characters. A file with 100 lines of content and a trailing newline reports 100. A file with 100 lines and no trailing newline reports 99. `printf '%s'` (used in `mutate_write`) does not add a trailing newline. A CLAUDE.md written by `mutate_write` from LLM content that includes a trailing newline is 101 lines per `wc -l` but looks like 100 in an editor. The size-cap audit may pass or fail depending on whether the LLM output includes a trailing newline — inconsistent behavior for the same logical content.
-
-**How to avoid:**
-- `conjure audit` and `conjure adopt`'s pre-write cap check must use the same counting function. Define `count_lines()` once in `lib/mutate.sh` or a shared lib: `printf '%s' "$content" | wc -l`. This counts logical lines, not newline characters.
-- `mutate_write` must always add a trailing newline (use `printf '%s\n'` not `printf '%s'`) for text files. This makes `wc -l` deterministic.
-- The pre-write cap check must count the proposed content string with the same function, before writing, to ensure the written result will pass the post-write audit.
-
-**Phase to address:**
-`conjure adopt` pre-write audit gate (Phase 2 + cap-check hardening).
+Roadmap sequencing (before implementation begins). Phase gates and the explicit lock on Phase 5 until Phases 1-4 complete must be part of the roadmap success criteria, not added retrospectively.
 
 ---
 
@@ -359,12 +451,13 @@ A user running `conjure adopt --rollback` without a prior snapshot backup (e.g.,
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Single approval step for all archive decisions | Faster UX for small projects | Catastrophic on 2000+ file projects (approval fatigue, silent loss) | Never for > 10 files per batch |
-| Storing LLM-proposed content in RESTRUCTURE-LOG.md only (not in adopt-state.json with sha256) | Simpler implementation | Non-reproducible; cannot verify rollback completeness | Never |
-| Skipping invariant extraction pre-pass and relying on LLM to preserve all constraints | Faster Phase 1 | Silent invariant loss (CR-1); discovered only after production incident | Never |
-| Using git checkout / git reset as rollback mechanism instead of filesystem snapshot | No extra files on disk | Loses dirty-tree content; breaks if working tree has unstaged changes at adopt time | Never |
-| Flat RESTRUCTURE-LOG.md without per-run structure | Simpler log writes | Unauditable after 3+ adopt runs | Never for production use |
-| `find . -name "*.md"` without symlink/binary/generated filters | Simpler inventory | Breaks on symlink-heavy repos; proposes archiving generated files | Only in --dry-run preview mode |
+| Baking a schema snapshot into Conjure source for audit validation | Simple, no network required | Schema goes stale within weeks; false-green audits | Only as an offline fallback — always prefer live-fetch with local cache |
+| Emitting a single managed-settings.json for all platforms | One file to maintain | Windows and Linux get wrong-path artifacts; silent no-ops | Never for compliance overlays |
+| Using `llm-rubric` for all promptfoo assertions | Easy to write | Flaky CI gate; false reds block legitimate PRs | Only for genuinely subjective checks where no deterministic assertion exists |
+| Calling `claude plugin init` as a subprocess and post-processing its output | Reuses CC's scaffold logic | Coupling to an unstable CLI interface; breaks on CC updates | Only if a structural verification step is added immediately after |
+| Building cross-repo orchestration before single-repo hardening is complete | Faster to v0.7.0 feature list | Aggregate rollback built on a shaky single-repo foundation; entire orchestration is unreliable | Never — the sequencing dependency is real |
+| Generating MDM artifacts without a testable verification command | Faster compliance overlay delivery | MDM artifacts may silently no-op; false compliance | Never |
+| Pinning plugin version using `ref` only (branch/tag) without `sha` | Simpler manifest | Non-reproducible installs; silent divergence across developer machines | Never for production marketplace entries |
 
 ---
 
@@ -372,11 +465,12 @@ A user running `conjure adopt --rollback` without a prior snapshot backup (e.g.,
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| `lib/mutate.sh` in adopt scripts | Writing files directly with `printf >` or `cp` outside mutate.sh (bypasses dry-run) | Every filesystem write in adopt scripts must use `mutate_mkdir`, `mutate_cp`, `mutate_write`, `mutate_rm` — no exceptions |
-| `conjure audit` as the cap gate | Running audit only after writing to disk (user already approved invalid content) | Run the audit suite against the proposed content string before presenting for user approval |
-| `git status --porcelain` dirty-tree check | Using `git diff --quiet HEAD` (misses untracked files) | Use `git status --porcelain` which shows both tracked-modified and untracked files |
-| Snapshot backup with `cp -r` | Copying symlinks as regular files (dereferences target) | Use `cp -Rp` (preserve mode + symlink structure) or `rsync -a` for snapshot creation |
-| Step manifest `adopt-state.json` | Writing the manifest only at the end of all steps (loses progress on interrupt) | Write manifest entry at the END of each successfully completed step, not at the end of the full run |
+| `claude plugin validate` in CI | Running only in the publish CI job | Run locally at `conjure publish` time before any file is committed; block emit on validation failure |
+| CC settings schema at SchemaStore | Referencing a `$schema` URL that may return 404 | Check URL resolves at `conjure audit` time; warn (not error) if 404; fall back to cached snapshot |
+| promptfoo `npx` invocation | `npx promptfoo` on every CI run hits npm registry | Cache promptfoo install in CI; verify version at cache restore time |
+| MDM tier precedence | Deploying both MDM/OS policy and managed-settings.json assuming both apply | Only the highest-priority tier applies; document which tier Conjure targets per deployment type |
+| CC hook stdin JSON | Emitting a new hook type that reads argv instead of stdin | Every new hook in Conjure templates must have a CI test that feeds it a crafted stdin JSON and asserts the correct exit code |
+| Workspace snapshot ordering | Taking snapshots repo-by-repo interleaved with applies | Snapshot ALL repos before applying to ANY; treat snapshot phase as a separate, completable stage |
 
 ---
 
@@ -384,24 +478,37 @@ A user running `conjure adopt --rollback` without a prior snapshot backup (e.g.,
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| One subprocess per file for classification | `conjure adopt --dry-run` takes > 5 minutes on medium repos | Batch `find` with `-exec` or use `wc -c` (size check) as first-pass filter before content reads | > 200 files |
-| Loading full file content into bash variables for classification | Bash runs out of memory on large files; `$()` subshell for a 1 MB file kills performance | Use `head -5` for frontmatter check; `wc -c` for size; never load full content into a shell variable | Files > 100 KB |
-| Grepping full repo tree for constraint patterns | INVARIANTS.txt extraction on 2180 markdown files takes 30+ seconds | Scope constraint extraction to CLAUDE.md + root-level markdown only; exclude `.planning/` and generated dirs | > 500 files |
-| Sequential `adopt-state.json` writes (one write per file manifest entry) | Thousands of small writes on slow filesystems (NFS, network mounts) | Accumulate manifest entries in memory; flush to JSON once per step, not per file | > 100 files on network storage |
+| Workspace snapshot of N large repos in series | `conjure workspace init` takes 30+ minutes with no output | Parallelize snapshot creation (background subshells) with a progress indicator; check disk space before starting | N > 5 repos at 100MB+ each |
+| `claude plugin validate` called per-file rather than once per manifest | Slow publish pipeline; O(N) CC subprocess spawns | Call `claude plugin validate` once on the complete manifest, not per plugin entry | > 10 plugins in the manifest |
+| Schema URL fetch on every `conjure audit` invocation | `conjure audit` slow in air-gapped CI | Cache schema with 24-hour TTL; `--offline` flag uses only cached copy | Every invocation in CI without caching |
+| promptfoo eval with `repeat: 3` for all 50 assertions | CI eval takes 15+ minutes; costs $10+/run | Cap `repeat` to assertions with `llm-rubric` only; use `repeat: 1` for deterministic assertions | Eval suite grows beyond 20 llm-rubric assertions |
+| Cross-repo dirty-tree check runs `git status --porcelain` for each repo sequentially | 50-repo workspace check takes minutes before any work begins | Parallelize dirty-tree checks; short-circuit repos that return clean without inspecting further | N > 20 repos |
+
+---
+
+## Security Mistakes
+
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Emitting API keys or credentials in settings.json `env` block | Credentials committed to git; leak via marketplace publish | Secret-pattern scan on all emit output before write; exit 2 on match |
+| MDM plist containing auth tokens or enrollment credentials | Credentials pushed to MDM platform; exposed to device fleet | Plist generation must never read or interpolate process environment for secret-candidate values |
+| `strictKnownMarketplaces` set to empty array | Removes marketplace restriction entirely — opposite of intended effect | Audit must flag empty `strictKnownMarketplaces` in managed-settings as a misconfiguration, not a valid policy |
+| `sandbox.allowManagedReadPathsOnly: true` without a corresponding `allowRead` list | Claude Code cannot read any files — blocks all operations | Scaffold must emit a minimal `allowRead: ["."]` alongside `allowManagedReadPathsOnly: true` |
+| Plugin source entry with `sha` pointing to an unreviewed commit | Pinned SHA can point to malicious content if the repo is compromised between audit and install | `conjure publish` must record the commit message and author alongside the SHA in the manifest for human review |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Rollback**: `conjure adopt --rollback` actually tested on a fixture repo — asserts zero diff vs pre-adopt state, not just "reports success"
-- [ ] **Invariant preservation**: Every constraint extracted in `INVARIANTS.txt` verified present in the approved CLAUDE.md output — not just line count check
-- [ ] **@import guard**: `conjure audit` run against proposed LLM output before user approval presentation — not only after write
-- [ ] **Symlink handling**: Inventory run on a fixture with at least one symlink — confirms symlink is skipped and RESTRUCTURE-LOG shows skip reason
-- [ ] **Partial-apply recovery**: `conjure adopt` killed mid-run with SIGKILL — second run detects incomplete manifest and offers rollback/continue/fresh options
-- [ ] **Idempotency**: `conjure adopt` run twice on an already-adopted repo — second run produces zero mutations and exits 0
-- [ ] **Archive-decision logging**: Every archived file has a classification reason in `adopt-state.json` — not just a file path
-- [ ] **Windows Git Bash**: Snapshot backup path uses UTC timestamp (`Z` suffix) and absolute paths — tested on Git Bash fixture
-- [ ] **Line-count consistency**: `wc -l` count used in pre-write cap check matches `conjure audit` count method — tested with file with and without trailing newline
+- [ ] **Plugin validation**: `claude plugin validate` called at emit time (not just in CI) — verify it runs and exits 0 on a fresh `conjure publish` invocation
+- [ ] **MDM verification command**: every compliance overlay emits a testable `conjure check --managed-settings` assertion — verify the check catches a deliberately wrong key value
+- [ ] **Schema-aware audit**: `conjure audit` warns when installed CC version is newer than the audit schema — verify by running against a schema pinned to an older CC version
+- [ ] **Promptfoo enforcement tests**: at least one eval assertion verifies a hook exit code directly — verify by breaking a hook and confirming the eval fails
+- [ ] **Workspace manifest**: `conjure workspace` writes a manifest before touching any repo — verify manifest exists after a SIGKILL mid-run
+- [ ] **Aggregate rollback**: `conjure workspace rollback` restores all touched repos from their individual snapshots — verify by running workspace init, killing mid-batch, running rollback, and diffing each repo against pre-run state
+- [ ] **Secret scan on emit**: `conjure publish` with a `settings.json` containing a fake API key in `env` block exits 2 — verify the scan fires before the file is written
+- [ ] **Disk space check**: `conjure workspace` with repos totaling > 2 GB snapshot estimate warns before proceeding — verify with a synthetic large-repo fixture
+- [ ] **Promptfoo as opt-in**: `conjure audit` with promptfoo absent exits 0 (audit works without eval) — verify by removing promptfoo from PATH and running audit
 
 ---
 
@@ -409,13 +516,14 @@ A user running `conjure adopt --rollback` without a prior snapshot backup (e.g.,
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Silent invariant drop (CR-1) | HIGH | Diff backup CLAUDE.md vs current; manually restore dropped constraints; re-run `conjure audit` |
-| Partial-apply corruption (CR-2) | MEDIUM | Run `conjure adopt --rollback` using snapshot; verify diff; commit clean state |
-| LLM re-introduces @imports (CR-5) | LOW | `grep -n '^@' .claude/CLAUDE.md`; remove @imports; replace with prose references; re-run audit |
-| Symlink dereference in backup (M-2) | MEDIUM | Restore symlink from dotfiles/original source; `ln -s <target> <path>`; verify |
-| Double-archive on re-run (M-3) | LOW | Remove `.claude/archive/archive/`; move mis-archived files back; re-run with idempotency fix |
-| Non-UTC backup timestamp confusion (M-4) | LOW | Rename backup directory to add `Z` suffix; update `adopt-state.json` snapshot path |
-| LLM deletion of active-decision docs (CR-6) | HIGH | Identify archived files via `RESTRUCTURE-LOG.md`; move back from `.claude/archive/`; re-add decision content to appropriate skill or CLAUDE.md |
+| Marketplace schema drift (CR-1) | MEDIUM | Re-run `conjure publish` after updating Conjure's schema snapshot; update `$schema` URL |
+| Silent MDM no-op (CR-2) | HIGH | Run `conjure check --managed-settings`; compare against `claude config get` output; identify and correct wrong keys; redeploy MDM artifact |
+| Ref-only plugin pin drift (CR-3) | LOW | Run `conjure audit`; add `sha` field to all entries via `conjure publish --repin`; verify with `claude plugin validate` |
+| Plugin/loose-file manifest drift (CR-4) | MEDIUM | Run `conjure audit` to identify discrepancies; re-run `conjure publish` to regenerate manifest from actual on-disk files |
+| Stale schema false green (CR-5) | MEDIUM | Update Conjure's schema snapshot; re-run audit; identify and migrate deprecated keys using the deprecation table |
+| Partial workspace apply (CR-6) | HIGH | Read workspace manifest to identify which repos were touched; run `conjure workspace rollback` per manifest; verify per-repo sha256 diff; investigate and fix the failing repo separately |
+| Flaky promptfoo CI gate (CR-7) | LOW | Add `repeat: 3, minPassCount: 2` to affected assertions; re-run; stabilize before re-enabling as PR gate |
+| promptfoo missing at runtime (CR-9) | LOW | Install promptfoo globally; re-run `conjure eval`; add to team's setup doc |
 
 ---
 
@@ -423,35 +531,43 @@ A user running `conjure adopt --rollback` without a prior snapshot backup (e.g.,
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| CR-1: Invariant drop in LLM condensation | Phase 1 (inventory + constraint extraction) + Phase 3 (pre-write audit gate) | `conjure adopt --dry-run` on fixture with known constraints; assert all appear in proposed output |
-| CR-2: Partial-apply corruption | Phase 2 (step manifest + signal traps) | Send SIGKILL mid-adopt on fixture; assert second run offers rollback/continue |
-| CR-3: Snapshot + dirty-tree conflict | Phase 2 (snapshot primitive with `snapshot-meta.json`) | Run adopt with `--force` on dirty tree; assert RESTRUCTURE-LOG contains dirty-tree warning |
-| CR-4: Incomplete rollback | Phase 2 (written-files log in manifest) + Phase 3 (rollback test in CI) | Adopt fixture, rollback, diff vs original — assert zero diff |
-| CR-5: @imports or cap breach in LLM output | Phase 2 (pre-write audit gate) + Phase 3 (CI fixture with @import) | Inject @import into mock LLM output; assert adopt blocks before user approval |
-| CR-6: Trusting LLM archive decisions | Phase 3 (`restructure` skill design — archive as separate step) | Fixture with file containing "we decided never to"; assert it is flagged for individual review |
-| CR-7: Scaling / approval fatigue | Phase 1 (streaming classification) + Phase 1 (hierarchical grouping) | Run `--dry-run` on 500-file fixture; assert < 30 seconds and hierarchical approval output |
-| M-1: Non-reproducible LLM extraction | Phase 2 (approve-and-record with sha256) + Phase 2 (idempotent re-run) | Run adopt twice; assert second run skips LLM steps for already-approved content |
-| M-2: Symlinks / binaries in inventory | Phase 1 (inventory classification filters) | Fixture with symlink; assert inventory skips symlink and RESTRUCTURE-LOG records skip |
-| M-3: Idempotency failure | Phase 2 (sha256 no-op check in mutate_write for adopt) | Run adopt twice; assert zero mutations on second run |
-| M-4: Cross-platform backup paths | Phase 2 (UTC timestamp, absolute paths, quote-safe cp) | Run on Git Bash fixture; assert backup path uses `Z` suffix and restores correctly |
-| M-5: RESTRUCTURE-LOG unbounded growth | Phase 3 (per-run structure + 1000-line rotation) | Run adopt 5 times on fixture; assert log has structured per-run sections and summary at top |
+| CR-1: Marketplace schema drift | Phase 1 — Plugin/marketplace: emit-time `claude plugin validate` | `conjure publish` on a fixture with a schema-invalid field exits 2 |
+| CR-2: Silent MDM no-op | Phase 2 — Sandbox/MDM: verification command in compliance overlay | `conjure check --managed-settings` catches a deliberately wrong plist key |
+| CR-3: Version-pinning foot-guns | Phase 1 — Plugin/marketplace: `conjure audit` ref-without-sha warn | `conjure audit` on settings.json with `ref`-only entry produces a warning |
+| CR-4: Plugin/loose-file drift | Phase 1 — Plugin/marketplace: reconciliation check in `conjure publish` | Publish fixture with missing skill file exits 2 |
+| CR-5: Stale schema false green | Phase 4 — Schema-aware audit: live-fetch + deprecation table | Audit on settings with deprecated key produces warn; audit warns on CC version > schema version |
+| CR-6: Aggregate rollback inconsistency | Phase 5 — Cross-repo orchestration: workspace manifest + all-snapshot-before-apply | SIGKILL mid-workspace → workspace rollback → zero diff on all touched repos |
+| CR-7: Flaky promptfoo CI gate | Phase 3 — promptfoo eval: repeat/minPassCount config + deterministic-first discipline | Eval suite runs 5 times on unchanged inputs; pass rate is 100% for deterministic assertions |
+| CR-8: Evals test wrong thing | Phase 3 — promptfoo eval: enforcement vs disposition taxonomy | Breaking a hook binary causes the eval suite to fail |
+| CR-9: promptfoo hidden runtime dep | Phase 3 — promptfoo eval: opt-in subcommand + preflight check | `conjure audit` with promptfoo absent exits 0; `conjure eval` with promptfoo absent exits 2 with human-readable message |
+| M-1: Sandbox too strict/loose | Phase 2 — Sandbox/MDM: scaffold-not-enforce + unreviewed-template audit check | `conjure audit --compliance` on unmodified template emits a "unreviewed policy" warning |
+| M-2: Secrets in emitted config | Phase 1 (plugin) and Phase 2 (MDM): secret-pattern scan on all emit paths | `conjure publish` with fake API key in env block exits 2 before writing |
+| M-3: Single bad repo aborts batch | Phase 5 — Cross-repo: fail-tolerant default + per-repo status tracking | One repo with a permissions error causes overall exit 1 (partial success) not exit 2, and remaining repos are processed |
+| M-4: Cross-platform MDM paths | Phase 2 — Sandbox/MDM: platform-tagged bundle architecture | MDM fixture test on macOS and Linux produces different (correct) artifacts |
+| M-5: Wrapping unstable CLI | Phase 1 — Plugin/marketplace: structural verification after `claude plugin init` | CI fixture test that catches a changed `claude plugin init` output structure |
+| SD-1: Scope explosion | Roadmap sequencing: explicit phase gates and Phase 5 lock | No Phase 5 work in progress while any Phase 1-4 has open validation items |
 
 ---
 
 ## Sources
 
-- Conjure working tree (HIGH): `lib/mutate.sh` (mutation chokepoint), `lib/merge.sh` (3-way merge/sidecar pattern), `migrations/from-claude/migrate.sh` (existing brownfield detection logic), `cli/conjure` (dispatcher), `.planning/PROJECT.md` (v0.6.0 goals + constraints)
-- [Consolidation vs. Summarization vs. Distillation in LLM Context Compression](https://medium.com/@RLavigne42/consolidation-vs-summarization-vs-distillation-in-llm-context-compression-c96fa5956057) (MEDIUM — LLM condensation tradeoffs; summarization deliberately discards peripheral details)
-- [From Single to Multi: How LLMs Hallucinate in Multi-Document Summarization](https://arxiv.org/pdf/2410.13961) (MEDIUM — up to 75% hallucination rate in summaries; "lost in the middle" effect)
-- [How to write idempotent Bash scripts](https://arslan.io/2019/07/03/how-to-write-idempotent-bash-scripts/) (MEDIUM — check-before-write patterns for bash idempotency)
-- [Approval Fatigue — Encyclopedia of Agentic Coding Patterns](https://aipatternbook.com/approval-fatigue) (MEDIUM — batch approvals via steering loop; individual approval for high-risk actions)
-- [The Agent Approval Fatigue Problem](https://molten.bot/blog/agent-approval-fatigue/) (MEDIUM — rubber-stamping when approval rate exceeds human cognitive bandwidth)
-- [Backup Integrity Verification Framework](https://oneuptime.com/blog/post/2026-01-30-backup-verification-testing/view) (MEDIUM — five levels: existence, integrity, partial restore, full restore, application verification)
-- [Best Rollback Readiness Checks](https://us.fitgap.com/stack-guides/rollback-readiness-checks-that-prevent-missing-prerequisites-during-incidents/) (MEDIUM — codify prerequisites, enforce as deploy gates, test restore paths)
-- [cygpath path translation reference](https://cygwin.com/cygwin-ug-net/cygpath.html) (MEDIUM — Windows/Unix path format differences; `/c/` vs `/mnt/c/` across Git Bash and WSL)
-- [Symbolic Links in Bash Programming](https://uomresearchit.github.io/shell-programming-course/08-symlinks/index.html) (MEDIUM — `find -L` dereferences symlinks; `-xtype l` finds broken symlinks; risk of data loss when symlink targets move)
-- [Semantic Override Hallucinations in LLM Reasoning](https://arxiv.org/html/2602.17520) (MEDIUM — models revert to pretrained defaults despite explicit redefinition; constraint dropping in algebraic manipulation)
+- Conjure working tree (HIGH): `lib/snapshot.sh` (aggregate rollback foundation), `templates/settings.json.tmpl` (emitted config surface), `templates/hooks-nodejs/pre-bash-block-destructive.mjs` (hook correctness pattern — v0.6.1 regression found here), `scripts/audit-setup.sh` (existing audit checks), `.planning/PROJECT.md` (v0.7.0 goals + prior art decisions)
+- [Claude Code settings — official docs](https://code.claude.com/docs/en/settings) (HIGH — managed-settings paths, sandbox schema, settings precedence, silent no-op behaviors)
+- [anthropics/claude-code#51978 — marketplace schema validation error on source field](https://github.com/anthropics/claude-code/issues/51978) (HIGH — confirmed schema drift failure mode: 14 plugins uninstallable after format change)
+- [anthropics/claude-code#33739 — official marketplace fails to load entirely](https://github.com/anthropics/claude-code/issues/33739) (HIGH — confirmed blast radius of a single schema incompatibility)
+- [anthropics/claude-code#9686 — marketplace.json $schema URL does not exist](https://github.com/anthropics/claude-code/issues/9686) (HIGH — schema URL staleness causes full marketplace failure)
+- [anthropics/claude-code#58873 — deleted ref behavior when sha is pinned](https://github.com/anthropics/claude-code/issues/58873) (HIGH — version pinning ambiguity; ref+sha resolution rules undocumented)
+- [anthropics/claude-code#46081 — plugin update reports 'already at latest' with stale cache](https://github.com/anthropics/claude-code/issues/46081) (HIGH — confirmed version field as cache key; cache staleness behavior)
+- [Claude Code Plugin Marketplace: A Deep Dive (2026-04-03)](https://ice-ice-bear.github.io/posts/2026-04-03-claude-code-plugin-marketplace/) (MEDIUM — relative path silent failures; strict mode; duplication pitfalls)
+- [anthropics/claude-plugins-official — marketplace.json schema](https://github.com/anthropics/claude-plugins-official/blob/main/.claude-plugin/marketplace.json) (HIGH — authoritative schema field structure)
+- [promptfoo CI/CD integration](https://www.promptfoo.dev/docs/integrations/ci-cd/) (MEDIUM — Node.js version requirement ^20.20.0 / >=22.22.0; prerequisite dependency)
+- [promptfoo evaluate coding agents](https://www.promptfoo.dev/docs/guides/evaluate-coding-agents/) (MEDIUM — trajectory assertions for tool-ran vs instruction-followed distinction)
+- [promptfoo assertions and metrics](https://www.promptfoo.dev/docs/configuration/expected-outputs/) (MEDIUM — repeat/minPassCount for non-deterministic evals; deterministic assertion types)
+- [Debugging a Critical Marketplace Schema Validation Failure](https://dev.to/jeremy_longshore/debugging-a-critical-marketplace-schema-validation-failure-how-one-invalid-field-blocked-all-47g2) (MEDIUM — one invalid field blocked all installations; cascade failure pattern)
+- [Compensating Transaction Pattern — Azure Architecture Center](https://learn.microsoft.com/en-us/azure/architecture/patterns/compensating-transaction) (MEDIUM — saga pattern for cross-repo aggregate rollback design)
+- [Agentic Dev: Building Reliable Multi-Agent Rollbacks](https://qcode.in/agentic-dev-building-reliable-multi-agent-rollbacks-to-prevent-cascading-failures/) (MEDIUM — checkpointing, compensating transactions, partial failure semantics)
+- [hesreallyhim/claude-code-json-schema — unofficial schema reference](https://github.com/hesreallyhim/claude-code-json-schema) (MEDIUM — schema completeness gaps between official and community-maintained versions)
 
 ---
-*Pitfalls research for: Conjure v0.6.0 Safe Brownfield Adoption — LLM-assisted restructure with deterministic file operations*
-*Researched: 2026-05-28*
+*Pitfalls research for: Conjure v0.7.0 Plugin-native + Policy-grade — plugin/marketplace, sandbox/MDM, promptfoo eval, schema-aware audit, cross-repo orchestration*
+*Researched: 2026-06-03*

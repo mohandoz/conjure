@@ -1277,3 +1277,752 @@ each apply:
 ---
 *Stack research for: Conjure v0.3.0 Testing + telemetry tooling*
 *Updated: 2026-05-28 — v0.6.0 Safe Brownfield Adoption additions appended*
+
+---
+
+## Stack Additions for v0.7.0: Plugin-native + Policy-grade
+
+**Domain:** v0.7.0 "Plugin-native + Policy-grade" — five capability areas: plugin/marketplace emission, sandbox + managed-settings/MDM, promptfoo eval + context-budget linter, schema-version-aware audit, cross-repo orchestration.
+**Researched:** 2026-06-03
+**Confidence:** HIGH for plugin schema, managed-settings schema, MDM paths, hook events, frontmatter keys (all verified against official code.claude.com docs, May–June 2026). HIGH for promptfoo npx pattern (official docs + npm). MEDIUM for schema-version-aware audit (schema drift detection approach is design, not external standard).
+
+---
+
+### TL;DR Picks (v0.7.0)
+
+| Feature | Pick | Confidence |
+|---------|------|------------|
+| Plugin/marketplace emission | Emit `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` via existing `lib/mutate.sh`; wire `extraKnownMarketplaces` into `.claude/settings.json`; validate with `claude plugin validate .` (built-in, zero dep) | HIGH |
+| Sandbox + managed-settings | Emit `sandbox{}` block into `.claude/settings.json`; emit `managed-settings.json` + macOS plist + Windows registry fragment + Linux drop-in via bash + `jq` | HIGH |
+| MDM delivery paths | macOS: `/Library/Application Support/ClaudeCode/managed-settings.json` + drop-in dir; Windows: `HKLM\SOFTWARE\Policies\ClaudeCode` (`Settings` REG_SZ) + `C:\Program Files\ClaudeCode\managed-settings.json`; Linux/WSL: `/etc/claude-code/managed-settings.json` + drop-in dir | HIGH |
+| promptfoo eval gate | `npx promptfoo@0.121.14 eval -c conjure-eval/promptfooconfig.yaml --no-cache --no-share` — invoked via `conjure eval` without adding a bundled dep; Node.js ≥20.20.0 already in the envelope | HIGH |
+| Context-budget linter | Extend existing chars/4 heuristic in `conjure audit --budget` — no new dep | HIGH |
+| Schema-version-aware audit | Map CC version → known-good key set in a `lib/cc-schema.json` baked into kit; `jq` diff against actual settings; flag drift | MEDIUM |
+| Cross-repo orchestration | Pure bash `while read -r` loop over a repo-list file; each iteration shells out to `conjure <subcommand>` with `--target`; cross-repo rollback via per-repo `.conjure-adopt-state` | HIGH |
+
+---
+
+### (a) Plugin / Marketplace Emission
+
+#### What Conjure must emit
+
+Every `conjure init` target becomes a plugin. The emitted files are:
+
+**`.claude-plugin/plugin.json`** — plugin manifest (already partially exists from v0.4.0; needs schema alignment with current CC):
+
+```json
+{
+  "name": "<repo-slug>",
+  "description": "<from manifest or CLAUDE.md first line>",
+  "version": "<conjure version>",
+  "author": { "name": "<git user.name>" },
+  "homepage": "<git remote url>",
+  "repository": "<git remote url>",
+  "license": "MIT"
+}
+```
+
+Required fields: `name` (kebab-case), `description`. Optional but important: `version`, `author`, `homepage`, `repository`, `license`. The manifest does NOT declare components (skills, agents, hooks) by name unless strict mode is off — standard is to let CC discover them from the directory layout. Keep `strict` default (true) so `plugin.json` is the authority.
+
+New in v2.1.154: `defaultEnabled` boolean on plugin entries (marketplace `plugins[]` or `plugin.json`) — set in marketplace entry for controlled rollout.
+
+**`.claude-plugin/marketplace.json`** — marketplace catalog:
+
+```json
+{
+  "name": "<marketplace-slug>",
+  "owner": { "name": "<git user.name>", "email": "<git user.email>" },
+  "description": "Conjure harness for <repo-slug>",
+  "plugins": [
+    {
+      "name": "<repo-slug>",
+      "source": { "source": "github", "repo": "<owner>/<repo>" },
+      "description": "...",
+      "version": "<conjure version>",
+      "category": "developer-tools"
+    }
+  ]
+}
+```
+
+Required top-level: `name` (kebab-case; not a reserved name), `owner.name`, `plugins[]`. Required per-plugin: `name`, `source`. Plugin `source` is an object for remote repos (`{"source":"github","repo":"owner/repo"}`) or a relative path string (`"./plugins/my-plugin"`) for mono-repo layouts.
+
+**Reserved marketplace names** (must not emit): `claude-code-marketplace`, `claude-code-plugins`, `claude-plugins-official`, `anthropic-marketplace`, `anthropic-plugins`, `agent-skills`, `anthropic-agent-skills`, `knowledge-work-plugins`, `life-sciences`, `claude-for-legal`, `claude-for-financial-services`, `financial-services-plugins`.
+
+**`extraKnownMarketplaces`** in `.claude/settings.json` — wired by `conjure init` so team members see the marketplace on trust:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "<marketplace-slug>": {
+      "source": {
+        "source": "github",
+        "repo": "<owner>/<repo>"
+      }
+    }
+  }
+}
+```
+
+Note: `extraKnownMarketplaces` is an **object** (keys = marketplace names), not an array. This is the project-scope setting; users are prompted to install on trust. Pair with `enabledPlugins` for auto-enable.
+
+**`strictKnownMarketplaces`** — goes in **managed-settings.json** only (managed scope, not project settings). Controls which marketplace sources the org allows. Value: array of source objects `[{"source":"github","repo":"owner/repo"}]` or `[]` (lockdown). Also supports `{"source":"hostPattern","hostPattern":"^github\\.example\\.com$"}` for enterprise git hosts. When undefined: no restrictions.
+
+**`strictPluginOnlyCustomization`** — managed scope. Boolean `true` blocks all four surfaces (skills, agents, hooks, MCP) from non-plugin sources. Or a string array `["skills","hooks"]` for partial lockdown. Conjure's compliance overlays should emit this into managed-settings.json when maximum enforcement is required (e.g., PCI, HIPAA).
+
+#### CLI surface: `claude plugin` commands
+
+These are **built-in Claude Code CLI commands** — zero dependency for Conjure to invoke:
+
+```bash
+# Validate marketplace and plugin manifests (run in CI, no external tool):
+claude plugin validate .
+
+# Scaffold a plugin in ~/.claude/skills/<name>/ (used internally, not by conjure):
+claude plugin init <name>
+
+# Non-interactive marketplace operations (for scripting):
+claude plugin marketplace add <source> [--scope project|user|local]
+claude plugin marketplace list [--json]
+claude plugin marketplace update [<name>]
+claude plugin marketplace remove <name>
+```
+
+`claude plugin validate .` checks: JSON schema, duplicate plugin names, `..` path traversal in sources, version mismatches between marketplace entry and `plugin.json`. Use in Conjure's CI gate alongside `conjure audit`. Exits non-zero on validation failure.
+
+**`conjure publish` wraps** `claude plugin validate .` already (v0.4.0). v0.7.0 extends it to also validate the `marketplace.json` schema additions (reserved names, source types, `strictPluginOnlyCustomization` if present).
+
+#### Plugin directory layout (authoritative, verified)
+
+```
+<repo>/
+├── .claude-plugin/
+│   ├── plugin.json          # plugin manifest
+│   └── marketplace.json     # marketplace catalog
+├── skills/<name>/SKILL.md   # skills at plugin root
+├── agents/*.md              # agents at plugin root
+├── hooks/hooks.json         # hooks at plugin root (not inside .claude-plugin/)
+├── .mcp.json                # MCP config at plugin root
+└── settings.json            # plugin-level default settings (only `agent` + `subagentStatusLine` keys honored)
+```
+
+**CRITICAL:** `skills/`, `agents/`, `hooks/`, `.mcp.json` go at the **plugin root**, NOT inside `.claude-plugin/`. Only `plugin.json` (and `marketplace.json` for marketplace repos) goes inside `.claude-plugin/`. This is a common mistake that causes silent load failures.
+
+For Conjure's own repo layout: skills live in `.claude/skills/` (standalone, not plugin layout). When Conjure emits a target-repo as a plugin, the target's `.claude/skills/` maps to the plugin's `skills/` via the manifest's `skills` path field.
+
+#### Plugin source types (for marketplace.json `source` field)
+
+| Source type | When to use | Schema |
+|-------------|-------------|--------|
+| Relative path (`"./path"`) | Plugins in same repo as marketplace | String, must start with `./` |
+| `github` | Public/private GitHub repos | `{"source":"github","repo":"owner/repo","ref":"v1.0","sha":"<40-char>"}` |
+| `url` | GitLab, Bitbucket, self-hosted git | `{"source":"url","url":"https://...","ref":"...","sha":"..."}` |
+| `git-subdir` | Plugin in a monorepo subdirectory | `{"source":"git-subdir","url":"...","path":"tools/plugin","ref":"..."}` |
+| `npm` | npm-distributed plugins | `{"source":"npm","package":"@org/plugin","version":"2.1.0","registry":"..."}` |
+
+Conjure should default to `github` for new repos, `git-subdir` for monorepos, and relative path for local-only testing.
+
+---
+
+### (b) Sandbox + Managed-Settings / MDM
+
+#### Sandbox schema (`.claude/settings.json` `sandbox` block)
+
+Verified exact schema (Claude Code docs, June 2026):
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": false,
+    "autoAllowBashIfSandboxed": false,
+    "excludedCommands": ["git", "npm"],
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "allowWrite": ["~/code", "/tmp"],
+      "denyWrite": ["/etc", "/usr"],
+      "denyRead": ["~/.ssh", "~/.aws"],
+      "allowRead": ["/opt/data"],
+      "allowManagedReadPathsOnly": false
+    },
+    "network": {
+      "allowedDomains": ["api.github.com", "registry.npmjs.org"],
+      "deniedDomains": ["malicious.example.com"],
+      "allowAllDomains": false,
+      "allowUnixSockets": ["/var/run/docker.sock"],
+      "allowAllUnixSockets": false,
+      "allowLocalBinding": true,
+      "allowMachLookup": ["com.apple.system"]
+    }
+  }
+}
+```
+
+Conjure compliance overlays should emit a pre-filled sandbox block per compliance tier:
+- **HIPAA/PCI**: strict — `enabled:true`, `failIfUnavailable:true`, minimal `allowWrite`, `denyRead:["~/.ssh","~/.aws","~/.gnupg"]`, `allowedDomains` list of approved endpoints.
+- **SOC2/GDPR**: moderate — `enabled:true`, `failIfUnavailable:false`, standard write/read permissions.
+- **Base**: `enabled:false` (opt-in; document how to enable).
+
+When `sandbox.filesystem.allowWrite` or similar keys appear in **multiple settings scopes**, Claude Code **concatenates and deduplicates** the arrays (not overrides). Lower-priority scopes extend without wiping higher-priority entries.
+
+#### Managed-settings schema (managed-only keys)
+
+These keys are **only valid in `managed-settings.json`**, not in `.claude/settings.json`:
+
+| Key | Type | Purpose for Conjure |
+|-----|------|---------------------|
+| `allowManagedHooksOnly` | boolean | Lock hooks to managed/plugin sources only; blocks user/project hooks |
+| `allowManagedPermissionRulesOnly` | boolean | Block user/project `allow`/`ask`/`deny` rules; only managed rules apply |
+| `allowManagedMcpServersOnly` | boolean | Lock MCP to managed allowlist only |
+| `allowedMcpServers` | `Array<{serverName: string}>` | Allowlist of MCP servers |
+| `deniedMcpServers` | `Array<{serverName: string}>` | Denylist of MCP servers |
+| `forceLoginMethod` | `"claudeai" \| "console"` | Restrict login method |
+| `forceLoginOrgUUID` | `string \| string[]` | Restrict to specific org UUID(s); empty array blocks all login |
+| `forceRemoteSettingsRefresh` | boolean | Block startup until remote settings fetched |
+| `minimumVersion` | string | Floor version (semver string); prevents downgrade via auto-updates |
+| `strictKnownMarketplaces` | `Array<{source, repo?, ref?, hostPattern?, pathPattern?}>` | Allowlist of allowed marketplace sources; `[]` = lockdown |
+| `blockedMarketplaces` | same as above | Denylist (takes precedence over allowlist) |
+| `strictPluginOnlyCustomization` | `boolean \| string[]` | Block non-plugin skills/agents/hooks/MCP |
+| `allowAllClaudeAiMcps` | boolean | Allow claude.ai connectors |
+| `claudeMd` | string | Org-wide CLAUDE.md text injected at managed scope |
+| `pluginTrustMessage` | string | Custom text appended to plugin trust warning |
+| `disableRemoteControl` | boolean | Disable Remote Control feature (v2.1.128+) |
+| `wslInheritsWindowsSettings` | boolean | WSL reads Windows policy chain too (Windows-only) |
+| `parentSettingsBehavior` | `"first-wins" \| "merge"` | Multi-tier managed settings merge behavior (v2.1.133+) |
+| `policyHelper` | `{path: string}` | Path to executable for dynamic policy computation (v2.1.136+) |
+
+**For Conjure's compliance overlays**, the relevant keys to emit are:
+- `allowManagedHooksOnly`, `allowManagedPermissionRulesOnly` (HIPAA/PCI overlays)
+- `minimumVersion` (all compliance tiers — pin to tested version)
+- `forceLoginOrgUUID` (enterprise overlays — org binding)
+- `strictKnownMarketplaces` (all compliance tiers — restrict marketplace sources)
+- `strictPluginOnlyCustomization: true` (PCI/HIPAA — lockdown)
+
+#### MDM delivery paths
+
+Verified exact paths (Claude Code settings docs, June 2026):
+
+| Platform | File path | Drop-in directory | Registry / plist |
+|----------|-----------|-------------------|------------------|
+| macOS | `/Library/Application Support/ClaudeCode/managed-settings.json` | `/Library/Application Support/ClaudeCode/managed-settings.d/` | Plist domain: `com.anthropic.claudecode` (MDM push via Jamf/Kandji) |
+| Windows (admin) | `C:\Program Files\ClaudeCode\managed-settings.json` | `C:\Program Files\ClaudeCode\managed-settings.d\` | `HKLM\SOFTWARE\Policies\ClaudeCode`, value `Settings` (REG_SZ containing JSON) |
+| Windows (user) | `%USERPROFILE%\.claude\managed-settings.json` | — | `HKCU\SOFTWARE\Policies\ClaudeCode`, value `Settings` |
+| Linux / WSL | `/etc/claude-code/managed-settings.json` | `/etc/claude-code/managed-settings.d/` | — |
+| Windows (deprecated) | `C:\ProgramData\ClaudeCode\managed-settings.json` | — | Dropped in v2.1.75, do NOT emit |
+
+Drop-in directories (`managed-settings.d/`) let organizations layer partial policy files. Claude Code merges all `.json` files in the directory; later files win on key conflicts (same as object merge).
+
+**Conjure emission strategy for MDM artifacts:**
+
+```bash
+# conjure init --overlay compliance/hipaa --emit-mdm
+# Emits:
+#   managed-settings.json          (the canonical file)
+#   mdm/macos-hipaa.mobileconfig   (macOS configuration profile for Jamf/Kandji)
+#   mdm/windows-hipaa.reg          (Windows registry fragment for Group Policy/Intune)
+#   mdm/linux-hipaa.d/             (drop-in snippet for /etc/claude-code/managed-settings.d/)
+```
+
+**macOS plist generation (bash + Python plutil, zero dep):**
+
+```bash
+# Convert managed-settings.json to macOS plist using only system tools:
+python3 -c "
+import json, plistlib, sys
+data = json.load(open('managed-settings.json'))
+plistlib.dump(data, open('mdm/macos.plist','wb'), fmt=plistlib.FMT_XML)
+"
+# Or use plutil (macOS system tool, no external dep):
+plutil -convert xml1 managed-settings.json -o mdm/macos.plist
+```
+
+**Windows registry fragment (.reg file, pure bash string emit):**
+
+```bash
+# Emit a .reg file that loads the managed-settings JSON into the registry:
+settings_json=$(jq -c . managed-settings.json)
+cat > mdm/windows.reg << REG_EOF
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\ClaudeCode]
+"Settings"="${settings_json//\"/\\\"}"
+REG_EOF
+```
+
+Note: JSON embedded in REG_SZ must escape double quotes as `\"`. Use `jq -c .` to compact the JSON first. The resulting `.reg` file is human-reviewable and deployable via `reg import` or Intune policy.
+
+**Linux drop-in snippet (pure bash copy):**
+
+```bash
+# Emit a partial policy file suitable for /etc/claude-code/managed-settings.d/:
+# conjure only emits the CC-relevant keys; system admins copy to the target path.
+cp managed-settings.json mdm/linux.d/00-conjure-policy.json
+```
+
+**No new runtime deps for MDM emission.** All generation uses `jq` (already a hard dep), `python3` (advisory, macOS has it in system; `plutil` is the no-python fallback on macOS), and bash string operations. `plutil` is macOS system — no install required. On Linux, the JSON is served as-is (no plist conversion needed).
+
+---
+
+### (c) promptfoo Eval + Context-Budget Linter
+
+#### promptfoo: invocation without adding a bundled dep
+
+**Pick: `npx promptfoo@0.121.14 eval ...` — pinned version, invoked at runtime via npx, never bundled.**
+
+Promptfoo is the de-facto standard for Claude Code skill/prompt eval (used by Anthropic internally, ships its own `promptfoo-evals` skill, active community). Current stable version: **0.121.14** (released 2026-06-02).
+
+Node.js requirement: `^20.20.0 || >=22.22.0`. The Conjure runtime already requires Node ≥18 LTS (v0.3.0 decision); for `conjure eval` to work, users need Node 20.20.0+. Add this to the preflight check for `conjure eval` specifically, not globally.
+
+**Invocation pattern for `conjure eval`:**
+
+```bash
+# conjure eval: runs promptfoo with a pinned version, no global install:
+PROMPTFOO_VERSION="${CONJURE_PROMPTFOO_VERSION:-0.121.14}"
+npx --yes "promptfoo@${PROMPTFOO_VERSION}" eval \
+  -c "${CONJURE_HOME}/eval/promptfooconfig.yaml" \
+  --no-cache \
+  --no-share \
+  --output "$target/.conjure-eval-results.json"
+```
+
+- `--yes` suppresses the npx install confirmation prompt (CI-safe).
+- `--no-cache` ensures a clean eval on each run (required for PR gates).
+- `--no-share` prevents result upload to promptfoo.dev dashboard (PII/privacy compliance).
+- Exit code 0 = all assertions passed; non-zero = failures. Use this as the PR gate signal.
+- Pin via env var `CONJURE_PROMPTFOO_VERSION` so teams can override without a code change.
+- `npx` downloads on first use, caches in the npx cache. Not bundled in Conjure itself — `dependencies: {}` stays empty.
+
+**`conjure eval` script pattern:**
+
+```bash
+cmd_eval() {
+  # Preflight: Node ≥20.20 required for promptfoo
+  local node_major
+  node_major=$(node -e 'process.stdout.write(process.versions.node.split(".")[0])' 2>/dev/null)
+  if [ "${node_major:-0}" -lt 20 ]; then
+    echo "conjure eval requires Node.js >=20.20.0. Installed: ${node_major:-none}" >&2
+    exit 2
+  fi
+
+  local config="${CONJURE_EVAL_CONFIG:-$CONJURE_HOME/eval/promptfooconfig.yaml}"
+  [ -f "$config" ] || { echo "No eval config at $config. Run: conjure eval --init" >&2; exit 2; }
+
+  local version="${CONJURE_PROMPTFOO_VERSION:-0.121.14}"
+  npx --yes "promptfoo@${version}" eval \
+    -c "$config" \
+    --no-cache \
+    --no-share \
+    "$@"
+}
+```
+
+The `"$@"` passthrough lets callers add `--output file.json` or `--verbose` without code changes.
+
+#### promptfooconfig.yaml schema for prompt-adherence / instruction-following
+
+Minimal working config for Conjure's eval suite:
+
+```yaml
+# conjure/eval/promptfooconfig.yaml
+description: "Conjure harness eval: prompt adherence + instruction following"
+
+providers:
+  - id: claude-code-agent   # or: anthropic:claude-sonnet-4-6
+    config:
+      model: claude-sonnet-4-6
+
+prompts:
+  - file://prompts/harness-check.txt   # path to skill/CLAUDE.md prompt under test
+
+tests:
+  - description: "CLAUDE.md size cap respected"
+    vars:
+      input: "Summarize the project constraints"
+    assert:
+      - type: javascript       # deterministic first
+        value: "output.length < 10000"
+      - type: contains
+        value: "constraints"
+      - type: llm-rubric       # semantic last
+        value: "Does not mention @import or eager-load patterns"
+        threshold: 0.8
+
+  - description: "Exit code convention followed"
+    vars:
+      input: "What exit code should hooks use on error?"
+    assert:
+      - type: contains
+        value: "exit 2"
+      - type: not-contains
+        value: "exit 1"
+
+  - description: "Skill size cap"
+    vars:
+      input: "Show me a SKILL.md template"
+    assert:
+      - type: javascript
+        value: "!output.includes('@import')"
+      - type: llm-rubric
+        value: "Skill is at most 200 lines"
+        threshold: 0.9
+```
+
+**Assert type priority** (use in this order for reliability): `contains` / `not-contains` / `is-json` / `javascript` before `llm-rubric`. `llm-rubric` is the escape hatch for semantic checks — it incurs an API call and can be flaky at low threshold.
+
+**PR gate pattern (GitHub Actions step):**
+
+```yaml
+- name: Conjure eval gate
+  run: |
+    conjure eval --output eval-results.json
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    CONJURE_PROMPTFOO_VERSION: "0.121.14"
+```
+
+Add `continue-on-error: false` (the default) so a non-zero promptfoo exit fails the CI job.
+
+**`conjure eval --init`** scaffolds a starter `promptfooconfig.yaml` in `.conjure/eval/` inside the target repo — same pattern as `conjure init` for harness files. The scaffold uses the target repo's CLAUDE.md and skills as the prompts under test.
+
+#### Context-budget linter (`conjure audit --budget`)
+
+The existing chars/4 heuristic in `conjure audit --cost` (v0.3.0) is extended to a per-turn budget linter for v0.7.0:
+
+```bash
+# Per-turn budget check: compute tokens/turn from eager-load surface
+tokens_per_turn() {
+  local eager_chars=0
+  # CLAUDE.md eager load (always loaded)
+  eager_chars=$((eager_chars + $(wc -c < "$target/CLAUDE.md" 2>/dev/null || echo 0)))
+  # Skill listings (name + description from frontmatter; body is lazy)
+  for skill_md in "$target/.claude/skills/"*/SKILL.md; do
+    local desc_chars
+    desc_chars=$(awk '/^---/{f=!f;next} f && /^(description|name):/{print}' "$skill_md" | wc -c)
+    eager_chars=$((eager_chars + desc_chars))
+  done
+  # settings.json (always loaded)
+  eager_chars=$((eager_chars + $(wc -c < "$target/.claude/settings.json" 2>/dev/null || echo 0)))
+  echo $((eager_chars / 4))
+}
+```
+
+The linter warns when tokens/turn exceed the `skillListingBudgetFraction` × model-context-window threshold. Since `skillListingBudgetFraction` defaults to 0.01 (1% of context window) and Claude 4 models have ~200k token contexts, the budget is ~2000 tokens for skill listings alone. Flag harnesses that exceed this threshold with a `WARN: skill listing budget exceeded (N tokens, budget M)` message.
+
+**No new dep.** The linter reuses `wc -c`, `awk`, and arithmetic that is already in the existing audit script. It reads `skillListingBudgetFraction` and `maxSkillDescriptionChars` from `.claude/settings.json` via `jq` if present; falls back to defaults (0.01 and 1536) if absent.
+
+---
+
+### (d) Schema-Version-Aware Audit / Check
+
+**No new external dep.** The schema is baked into the kit as `lib/cc-schema.json` — a mapping of `minVersion → {validKeys[], validHookEvents[], validFrontmatterKeys[]}`. Updated each time Conjure bumps its `minimumVersion`.
+
+#### New settings keys since v2.1.117 (audit must know)
+
+Verified from official Claude Code docs and changelogs (May–June 2026):
+
+| Key | Min CC version | Scope | Audit action |
+|-----|---------------|-------|-------------|
+| `disableRemoteControl` | 2.1.128 | managed | Warn if used on older CC (< 2.1.128) |
+| `skillOverrides` | 2.1.129 | user/project | Validate values: `on \| name-only \| user-invocable-only \| off` |
+| `parentSettingsBehavior` | 2.1.133 | managed | Validate values: `first-wins \| merge` |
+| `policyHelper` | 2.1.136 | managed | Validate `{path: string}` shape |
+| `worktree.bgIsolation` | 2.1.143 | user/project | Validate values: `worktree \| none` |
+| `displayName` | 2.1.143 | plugin marketplace entry | Plugin audit only |
+| `defaultEnabled` | 2.1.154 | plugin.json / marketplace entry | Plugin audit |
+| `workflowKeywordTriggerEnabled` | 2.1.157 | user/project | Warn if used on older CC |
+
+#### New hook events since v2.1.117 (audit hook-event names)
+
+Verified full event list from official hooks docs (June 2026). Events added after v2.1.117 that audit must validate (not flag as unknown):
+
+| Event | Status | Notes |
+|-------|--------|-------|
+| `MessageDisplay` | New (v2.1.152) | Cannot block (`exit 2` has no effect); timeout lowered to 10s; `displayContent` in hookSpecificOutput replaces on-screen text |
+| `ConfigChange` | New post-v2.1.117 | Can block except `policy_settings`; matcher: `user_settings \| project_settings \| local_settings \| policy_settings \| skills` |
+| `CommitCreate` | Verified present | Can block (exit 2 blocks the commit) |
+| `GitPush` | Verified present | Can block |
+| `PullRequest` | Verified present | Can block |
+| `PostToolBatch` | Verified present | Can block agentic loop |
+| `PreCompact` / `PostCompact` | Verified present | `PreCompact` can block |
+| `WorktreeCreate` / `WorktreeRemove` | Verified present | `WorktreeCreate`: any non-zero fails creation |
+| `Elicitation` / `ElicitationResult` | Verified present | MCP-related |
+| `SubagentStart` / `SubagentStop` | Verified present | Cannot block |
+| `TaskCreated` / `TaskCompleted` | Verified present | Can block |
+| `TeammateIdle` | Verified present | Can block |
+| `SessionStop` / `SessionEnd` | Note: official name is `SessionEnd` | `SessionStop` is NOT a valid event name |
+
+**Audit action**: when `conjure audit` finds a `hooks` entry with an unrecognized event name, emit `ERROR: unknown hook event "<name>" (valid: SessionStart, SessionEnd, UserPromptSubmit, ...)`. When it finds a recognized-but-version-restricted event, emit `WARN: hook event "<name>" requires Claude Code >= X.Y.Z; your .conjure-version pins >= 2.1.117`.
+
+#### New skill frontmatter keys since v2.1.117
+
+| Key | Min CC version | Semantics |
+|-----|---------------|-----------|
+| `disallowed-tools` | 2.1.152 | Space-separated list of tools to remove while skill is active; complements `allowed-tools`; audit must not flag as unknown |
+| `disable-model-invocation` | pre-existing | Existing — do not flag |
+| `allowed-tools` | pre-existing | Existing — validate values are known tool names |
+
+**Bug note:** as of June 2026 there are open issues (#18837, #37683) reporting that `allowed-tools` in skill frontmatter is not fully enforced by Claude Code. Conjure audit should document this limitation in the warning message rather than treating it as a config error.
+
+#### `lib/cc-schema.json` format
+
+```json
+{
+  "schema_version": "1",
+  "generated_against_cc": "2.1.157",
+  "valid_settings_keys": [
+    "permissions", "hooks", "model", "outputStyle", "env",
+    "apiKeyHelper", "cleanupPeriodDays", "includeCoAuthoredBy",
+    "enableAllProjectMcpServers", "extraKnownMarketplaces", "enabledPlugins",
+    "skillListingBudgetFraction", "maxSkillDescriptionChars", "skillOverrides",
+    "sandbox", "disableRemoteControl", "worktree", "workflowKeywordTriggerEnabled",
+    "parentSettingsBehavior", "statusLine", "fileSuggestion", "claudeMdExcludes"
+  ],
+  "managed_only_keys": [
+    "allowManagedHooksOnly", "allowManagedPermissionRulesOnly",
+    "allowManagedMcpServersOnly", "allowedMcpServers", "deniedMcpServers",
+    "forceLoginMethod", "forceLoginOrgUUID", "forceRemoteSettingsRefresh",
+    "minimumVersion", "strictKnownMarketplaces", "blockedMarketplaces",
+    "strictPluginOnlyCustomization", "allowAllClaudeAiMcps", "channelsEnabled",
+    "claudeMd", "pluginTrustMessage", "pluginSuggestionMarketplaces",
+    "allowedChannelPlugins", "allowedHttpHookUrls", "httpHookAllowedEnvVars",
+    "disableRemoteControl", "wslInheritsWindowsSettings",
+    "parentSettingsBehavior", "policyHelper"
+  ],
+  "valid_hook_events": [
+    "SessionStart", "SessionEnd", "Setup",
+    "UserPromptSubmit", "UserPromptExpansion", "Stop", "StopFailure",
+    "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch",
+    "PermissionRequest", "PermissionDenied",
+    "SubagentStart", "SubagentStop", "TeammateIdle",
+    "TaskCreated", "TaskCompleted",
+    "FileChanged", "ConfigChange", "InstructionsLoaded", "CwdChanged",
+    "MessageDisplay", "Notification",
+    "PreCompact", "PostCompact",
+    "WorktreeCreate", "WorktreeRemove",
+    "Elicitation", "ElicitationResult",
+    "CommitCreate", "GitPush", "PullRequest"
+  ],
+  "valid_frontmatter_keys": [
+    "name", "description", "disable-model-invocation",
+    "allowed-tools", "disallowed-tools",
+    "when-to-use", "disallow-model-invocation"
+  ]
+}
+```
+
+The schema is a static JSON file updated as part of the release process. `conjure audit` reads it via `jq` and diffs against the installed settings. No network call; no external schema registry dep.
+
+---
+
+### (e) New Settings/Keys/Events Since v2.1.117 — Consolidated Reference
+
+Consolidated table for audit/check validation (verified, June 2026):
+
+**Settings keys new since v2.1.117:**
+- `skillOverrides` (v2.1.129), `disableRemoteControl` (v2.1.128), `parentSettingsBehavior` (v2.1.133), `policyHelper` (v2.1.136), `worktree.bgIsolation` (v2.1.143), `workflowKeywordTriggerEnabled` (v2.1.157)
+
+**Hook events new/confirmed since v2.1.117:**
+- `MessageDisplay` (v2.1.152), `ConfigChange`, `CommitCreate`, `GitPush`, `PullRequest`, `PostToolBatch`, `PreCompact`, `PostCompact`, `WorktreeCreate`, `WorktreeRemove`, `Elicitation`, `ElicitationResult`, `SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`, `TeammateIdle`
+
+**Frontmatter keys new since v2.1.117:**
+- `disallowed-tools` (v2.1.152, space-separated tool list)
+
+**Plugin/marketplace fields new since v2.1.117:**
+- `displayName` (v2.1.143), `defaultEnabled` (v2.1.154), `strict` field on marketplace plugin entries (pre-existing but now documented), `allowCrossMarketplaceDependenciesOn` (marketplace level)
+
+**Skill visibility settings (existing but now audit-relevant):**
+- `skillListingBudgetFraction` (default 0.01), `maxSkillDescriptionChars` (default 1536, v2.1.105+), `skillOverrides` (v2.1.129)
+
+**Important name correction:**
+- `SessionStop` is NOT a valid hook event. The correct name is `SessionEnd`. Any existing hooks config using `SessionStop` will silently fail. Conjure audit should detect and flag this.
+
+---
+
+### (f) Cross-Repo / Workspace Orchestration
+
+**Pick: pure bash `while read -r` loop over a repo-list file; conjure subcommands invoked with `--target <path>`; per-repo state isolation; cross-repo rollback via per-repo `.conjure-adopt-state`.**
+
+No new deps. This is a composition pattern, not a new tool.
+
+#### Repo-list file format
+
+```
+# .conjure-workspace (one repo per line, comments allowed)
+/absolute/path/to/repo-a
+/absolute/path/to/repo-b
+~/dev/repo-c          # relative to HOME ok with expand
+git@github.com:org/repo-d  # git URL: conjure clones to temp dir
+```
+
+Parsing with POSIX bash:
+
+```bash
+# workspace_iter: iterate repos from workspace file, call handler for each
+workspace_iter() {
+  local workspace_file="$1"
+  local handler="$2"   # function name to call per repo
+  shift 2
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Strip comments and leading/trailing whitespace
+    line="${line%%#*}"
+    line="${line#"${line%%[! ]*}"}"
+    line="${line%"${line##*[! ]}"}"
+    [ -z "$line" ] && continue
+    # Expand ~ to $HOME
+    line="${line/#\~/$HOME}"
+    "$handler" "$line" "$@"
+  done < "$workspace_file"
+}
+```
+
+This is POSIX bash 3.2+ — no `mapfile`, no associative arrays.
+
+#### Cross-repo invocation pattern
+
+```bash
+cmd_workspace() {
+  local subcommand="$1"   # init | adopt | check | update | audit
+  local workspace_file="${2:-.conjure-workspace}"
+  [ -f "$workspace_file" ] || { echo "No .conjure-workspace found." >&2; exit 2; }
+
+  local pass=0 fail=0 skip=0
+  _run_for_repo() {
+    local repo="$1"
+    local subcmd="$2"
+    if [ ! -d "$repo" ]; then
+      echo "SKIP $repo (not a directory)"
+      skip=$((skip + 1))
+      return
+    fi
+    echo "==> conjure $subcmd --target $repo"
+    if conjure "$subcmd" --target "$repo"; then
+      pass=$((pass + 1))
+    else
+      echo "FAIL $repo"
+      fail=$((fail + 1))
+      # Cross-repo: continue on failure (collect all failures, report at end)
+    fi
+  }
+  workspace_iter "$workspace_file" _run_for_repo "$subcommand"
+  echo "Done: $pass ok, $fail failed, $skip skipped"
+  [ "$fail" -gt 0 ] && exit 2
+  return 0
+}
+```
+
+**Continue-on-failure is the default** for workspace runs. Unlike single-repo `conjure adopt` (which aborts on error to protect the snapshot), workspace orchestration must collect all failures and report them. Each repo's snapshot protects it independently.
+
+#### Cross-repo rollback semantics
+
+Each repo maintains its own `.conjure-adopt-state` and snapshot. Workspace rollback invokes `conjure adopt --rollback` per repo:
+
+```bash
+cmd_workspace_rollback() {
+  local workspace_file="${1:-.conjure-workspace}"
+  _rollback_repo() {
+    local repo="$1"
+    [ -d "$repo" ] || return
+    echo "==> conjure adopt --rollback --target $repo"
+    conjure adopt --rollback --target "$repo" || true  # best-effort per repo
+  }
+  workspace_iter "$workspace_file" _rollback_repo
+}
+```
+
+`|| true` ensures a failed rollback on one repo does not block rollbacks on subsequent repos. Log each success/failure. This matches the "backup-before-mutate, rollback independently" safety contract.
+
+#### Workspace-level dry-run
+
+```bash
+conjure workspace init --dry-run .conjure-workspace
+```
+
+Passes `--dry-run` through to each repo invocation. Uses the existing `DRY_RUN` gate in `lib/mutate.sh` — no new code needed at the repo level.
+
+#### What NOT to do (cross-repo)
+
+Do NOT use `git submodule foreach` — this requires the workspace to be a git repo with submodules, which is not the case for arbitrary multi-repo workspaces. The file-based `workspace_iter` is more general and does not impose a git structure on the workspace itself.
+
+Do NOT use GNU `parallel` or `xargs -P` for parallelism — concurrent `conjure adopt` runs on different repos would all log to the same terminal and the output would be unreadable. Sequential is correct here. Parallelism can be a future opt-in (`--parallel N`) if needed.
+
+Do NOT attempt a global snapshot of all repos — the per-repo snapshot contract is the safety boundary. A global snapshot would require tar-ing potentially gigabytes across repos.
+
+---
+
+### v0.7.0 Stack Summary Table
+
+| Tool / Pattern | Version / Source | Feature | New to stack? |
+|----------------|-----------------|---------|---------------|
+| `.claude-plugin/plugin.json` schema (updated) | CC docs, June 2026 | Plugin emission | Schema update to existing file; no new tool |
+| `.claude-plugin/marketplace.json` schema (updated) | CC docs, June 2026 | Marketplace emission | Schema update; no new tool |
+| `claude plugin validate .` | Claude Code ≥2.1.117 (built-in CLI) | Plugin/marketplace CI validation | No new dep — already invoked in v0.4.0 |
+| `claude plugin marketplace add --scope project` | Claude Code ≥2.1.117 (built-in CLI) | Wire `extraKnownMarketplaces` | No new dep |
+| `sandbox{}` block in settings.json | CC schema, June 2026 | Sandbox policy emission | New JSON schema shape; no new tool |
+| `managed-settings.json` generation | bash + jq | MDM policy emission | New script; existing tools |
+| `python3 -c "import plistlib..."` OR `plutil` | macOS system tool (no install) | macOS plist generation | Advisory — `plutil` is macOS system; `python3` already advisory dep |
+| Windows `.reg` fragment generation | bash string ops | Windows registry MDM artifact | No new dep; pure bash |
+| `npx --yes promptfoo@0.121.14 eval ...` | promptfoo 0.121.14 (2026-06-02), Node ≥20.20.0 | `conjure eval` PR gate | New invocation; NOT bundled; `dependencies:{}` stays empty |
+| `promptfooconfig.yaml` | promptfoo config format | Eval suite config | New config file template |
+| `lib/cc-schema.json` | Baked-in JSON file | Schema-version-aware audit | New file; no new tool |
+| `while read -r` workspace iteration | POSIX bash 3.2+ | Cross-repo orchestration | No new dep; new pattern |
+| `.conjure-workspace` file format | Convention (new) | Cross-repo workspace definition | New file format; no new tool |
+| Per-turn token budget check | `wc -c` + arithmetic (POSIX) | Context-budget linter in audit | Pattern extension; no new tool |
+
+**Net new runtime dependencies: zero.** `dependencies: {}` stays empty. `npx promptfoo@<pinned>` is invoked at eval time only — not bundled. `plutil`/`python3` for plist generation are macOS system tools (advisory, with bash string fallback).
+
+---
+
+### What NOT to Add (v0.7.0)
+
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| **`npm install promptfoo`** in kit dependencies | Violates zero-dep constraint; forces install step on all users even those not using eval | `npx --yes promptfoo@<pinned>` at eval time; not bundled |
+| **`promptfoo@latest`** without pin | Breaking changes in promptfoo are frequent (0.x semver); unpinned `@latest` will break CI silently | Pin to `0.121.14` in `CONJURE_PROMPTFOO_VERSION`; update deliberately |
+| **`@anthropic-ai/tokenizer`** for budget linter | Officially inaccurate for Claude 3+ (existing finding); no accurate offline Claude 4 tokenizer | chars/4 heuristic (existing) + `skillListingBudgetFraction` from settings |
+| **Separate schema registry / API call** for CC schema validation | Network dep; versioning complexity; schema changes slowly | `lib/cc-schema.json` baked into kit; updated at release time |
+| **`GNU parallel` for workspace orchestration** | Not POSIX, not in preflight; sequential is correct for audit/adopt workloads | `while read -r` loop; parallel opt-in deferred |
+| **Global workspace snapshot** (tar all repos) | Impractical for large workspaces; per-repo snapshot is the safety boundary | Per-repo `conjure adopt --rollback` per existing snapshot contract |
+| **`C:\ProgramData\ClaudeCode\managed-settings.json`** (Windows deprecated path) | Dropped in CC v2.1.75; emitting it has no effect and confuses admins | `C:\Program Files\ClaudeCode\managed-settings.json` + registry key |
+| **`SessionStop`** as a hook event name | Not a valid event; correct name is `SessionEnd`. Hooks using `SessionStop` silently fail | `SessionEnd` |
+| **`exit 1`** in new hooks | Kit convention is `exit 2` for blocked/cannot-proceed; `exit 1` is non-blocking error logged but not blocking | `exit 2` in all hook scripts |
+| **Managed-only keys in `.claude/settings.json`** | Keys like `allowManagedHooksOnly`, `minimumVersion`, `forceLoginOrgUUID` are silently ignored if placed in project settings; they only work in `managed-settings.json` | Emit managed-only keys exclusively to `managed-settings.json` |
+| **Relative `..` paths in marketplace plugin sources** | Blocked by `claude plugin validate .` (path traversal check) | Use `./` relative paths within repo, or `github`/`url` source objects for cross-repo |
+| **`npm` source type for plugin distribution** | Introduces npm publish + registry dep; git-based distribution is simpler and no package name squatting risk | `github` source with pinned ref/sha |
+| **`strict: false` in plugin entries by default** | `strict: false` means the marketplace entry is the full definition; any `plugin.json` component declarations become a conflict. Only use for deliberate curation control. | Default `strict: true` (omit the field; true is default) |
+| **Parallelizing `conjure workspace` by default** | Concurrent adopt runs produce interleaved terminal output; debugging failures becomes hard | Sequential by default; `--parallel N` as future opt-in |
+
+---
+
+### v0.7.0 Integration Points
+
+| New Capability | Integrates With | Integration Approach |
+|----------------|----------------|---------------------|
+| Plugin/marketplace emission | `scripts/init-project.sh` + `lib/mutate.sh` | Add `emit_plugin_manifest()` and `emit_marketplace_json()` functions called after harness scaffold; use `mutate_write` for DRY_RUN gate |
+| `extraKnownMarketplaces` wiring | `scripts/init-project.sh` + `.claude/settings.json` template | `jq` merge `extraKnownMarketplaces` object into existing settings.json; conflict-safe (object key merge, not array append) |
+| Sandbox block emission | Compliance overlays (`compliance/*.sh`) | Each overlay script adds a `sandbox{}` fragment; `jq` merge into settings.json at `conjure init --overlay` time |
+| `managed-settings.json` emission | `scripts/init-project.sh` + compliance overlays | New `emit_managed_settings()` function; reads managed-only keys from overlay config; writes to `managed-settings.json` via `mutate_write` |
+| MDM artifact generation | `cmd_init` + new `scripts/emit-mdm.sh` | Post-init step for `--emit-mdm` flag; calls `plutil`/python3/bash string ops |
+| `conjure eval` | New `cmd_eval()` in `cli/conjure` + `scripts/eval.sh` | Preflight Node.js ≥20.20 check; invoke `npx promptfoo@<pinned>` eval; passthrough `$@` |
+| Eval template scaffolding | `templates/eval/promptfooconfig.yaml` | New template; `conjure eval --init` copies to `$target/.conjure/eval/` |
+| Context-budget linter | `scripts/audit-setup.sh` + `lib/caps.sh` | Extend existing audit with `check_skill_budget()` function; read `skillListingBudgetFraction` from settings.json via jq |
+| `lib/cc-schema.json` | `scripts/audit-setup.sh` | Load schema; `jq` diff installed settings keys against `valid_settings_keys[]`; hook events against `valid_hook_events[]` |
+| Cross-repo workspace | New `cmd_workspace()` in `cli/conjure` + `scripts/workspace.sh` | `workspace_iter` helper + per-subcommand dispatch; `--target` flag on all subcommands |
+
+---
+
+### v0.7.0 Sources
+
+- [Claude Code plugin-marketplaces docs](https://code.claude.com/docs/en/plugin-marketplaces) — HIGH. Full `marketplace.json` schema: required fields (`name`, `owner`, `plugins[]`); plugin entry fields (`name`, `source`, `description`, `version`, `author`, `homepage`, `repository`, `license`, `keywords`, `category`, `tags`, `strict`, `defaultEnabled`); all source types (`github`, `url`, `git-subdir`, `npm`, relative path); `claude plugin validate .` CLI; `extraKnownMarketplaces` object shape; `strictKnownMarketplaces` managed-only array; reserved names list; `CLAUDE_CODE_PLUGIN_SEED_DIR` for containers. Verified 2026-06-03.
+- [Claude Code plugins docs](https://code.claude.com/docs/en/plugins) — HIGH. Plugin directory layout (`.claude-plugin/plugin.json` manifest; `skills/`, `agents/`, `hooks/`, `.mcp.json` at plugin root NOT inside `.claude-plugin/`); `claude plugin init <name>` scaffolds to `~/.claude/skills/<name>/`; `claude plugin validate .` validation scope; `--plugin-dir` testing flag; `settings.json` at plugin root (only `agent` + `subagentStatusLine` honored); `strict` field semantics; `displayName` (v2.1.143). Verified 2026-06-03.
+- [Claude Code settings docs](https://code.claude.com/docs/en/settings) — HIGH. Full `sandbox{}` schema (filesystem + network sub-keys); all managed-only keys with exact names and value types; MDM deployment paths (macOS plist domain `com.anthropic.claudecode`, Windows registry `HKLM\SOFTWARE\Policies\ClaudeCode` + `Settings` REG_SZ, Linux `/etc/claude-code/`, drop-in `managed-settings.d/` directories); deprecated Windows `C:\ProgramData\ClaudeCode\` path; `forceLoginMethod`, `forceLoginOrgUUID` exact types; new settings since v2.1.117: `disableRemoteControl` (2.1.128), `skillOverrides` (2.1.129), `parentSettingsBehavior` (2.1.133), `policyHelper` (2.1.136), `worktree.bgIsolation` (2.1.143), `workflowKeywordTriggerEnabled` (2.1.157). Verified 2026-06-03.
+- [Claude Code hooks docs](https://code.claude.com/docs/en/hooks) — HIGH. Full hook event list (30+ events); exit code semantics (0=success, 2=block, other=non-blocking); `MessageDisplay` event (no block, 10s timeout); `ConfigChange` event (matcher: `user_settings|project_settings|local_settings|policy_settings|skills`); `SessionEnd` (not `SessionStop`) confirmed; async + asyncRewake semantics; stdout 10,000-char cap; JSON output fields (`continue`, `stopReason`, `suppressOutput`, `systemMessage`, `hookSpecificOutput`). Verified 2026-06-03.
+- [Claude Code week 22 changelog](https://code.claude.com/docs/en/whats-new/2026-w22) — HIGH. v2.1.150–v2.1.157 feature list: `disallowed-tools` frontmatter (v2.1.152); `MessageDisplay` hook event (v2.1.152); `claude plugin init <name>` auto-load from `~/.claude/skills/` (v2.1.157); `defaultEnabled: false` on plugin entries (v2.1.154); `/reload-skills` command (v2.1.157); `SessionStart` hook can return `reloadSkills: true`; `workflowKeywordTriggerEnabled` (v2.1.157). Verified 2026-06-03.
+- [promptfoo releases (GitHub)](https://github.com/promptfoo/promptfoo/releases) — HIGH. Latest stable: v0.121.14, released 2026-06-02. Node.js requirement: `^20.20.0 || >=22.22.0`. Verified 2026-06-03.
+- [promptfoo installation docs](https://www.promptfoo.dev/docs/installation/) — HIGH. `npx promptfoo@latest` is documented pattern; `--yes` suppresses install confirmation; `npx promptfoo@<version>` for pinning. Node.js `^20.20.0 || >=22.22.0` required. Verified 2026-06-03.
+- [promptfoo evaluate-coding-agents guide](https://www.promptfoo.dev/docs/guides/evaluate-coding-agents/) — MEDIUM. Assert types: `javascript`, `contains`, `is-json`, `llm-rubric`, `trajectory:step-count`, `cost`, `latency`. `--no-cache` for CI. `--no-share` for privacy. Exit non-zero on failures. Last updated: 2026-06-02. Verified 2026-06-03.
+- [hesreallyhim/claude-code-json-schema (GitHub)](https://github.com/hesreallyhim/claude-code-json-schema) — MEDIUM. Unofficial JSON Schema definitions for Claude Code plugin.json and marketplace.json; useful for IDE autocomplete validation; NOT used as the authoritative source (official CC docs take precedence).
+- [anthropics/claude-code `marketplace.json` (GitHub)](https://github.com/anthropics/claude-code/blob/main/.claude-plugin/marketplace.json) — HIGH. Anthropic's own repo marketplace.json; confirms real-world schema usage. Verified 2026-06-03.
+
+---
+*Stack research for: Conjure v0.3.0 Testing + telemetry tooling*
+*Updated: 2026-06-03 — v0.7.0 Plugin-native + Policy-grade additions appended*

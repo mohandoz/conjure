@@ -1,238 +1,475 @@
-# Feature Research — v0.6.0 Safe Brownfield Adoption
+# Feature Research — v0.7.0 Plugin-native + Policy-grade
 
-**Domain:** CLI-driven brownfield project rehabilitation — inventory, classify, scaffold, condense, archive, rollback
-**Researched:** 2026-05-28
-**Milestone:** v0.6.0 — Safe Brownfield Adoption
-**Confidence:** HIGH for safety primitives (existing codebase verified directly + comparable tool patterns); HIGH for UX
-expectations from codemod/linter-with-autofix/migration-tool comparators; MEDIUM for LLM-skill UX patterns (design-space area)
-
----
-
-## How Comparable Tools Handle This Problem
-
-Before feature-by-feature analysis, comparator tools surface strong user expectations for any "safe adopt / rehabilitate" workflow.
-
-### jscodeshift / Next.js Codemods (codemods with dry-run + skip reporting)
-- `--dry` flag: applies transform but writes nothing; `-p` (`--print`) shows generated output to stdout
-- Produces per-file SKIP / OK / ERROR report at end of run
-- Idempotent by design: re-running on already-transformed code is a no-op (transform detects its post-condition is already met)
-- "Phase 5: Validate at scale" is explicit in the recommended codemod workflow: dry-run first on the full corpus, review a sample, then re-run with `--fail-on-error`
-- Guidance: insert TODO comments at edge cases rather than failing or silently skipping — surface ambiguity instead of suppressing it
-- **Expectation this sets:** users want `--dry-run` to show every file that WOULD change and why, then an explicit apply step
-
-### ESLint `--fix` / `--fix-dry-run` + Ruff safe/unsafe fixes
-- ESLint `--fix-dry-run`: applies fixes in memory, reports the fixed content without writing files; requires a custom formatter to make output readable
-- ESLint-interactive: groups violations by rule, shows count of fixable problems per rule, lets the user act on one rule at a time — granular, human-gated
-- Ruff safe vs unsafe: safe fixes are applied by default; unsafe fixes (may change semantics) require `--unsafe-fixes` opt-in. Per-rule safety level is configurable
-- **Expectation this sets:** mutation safety must be categorized — some changes are deterministic and safe to apply automatically; others require human review before application. The user must be able to see what category each proposed change falls into before approving
-
-### OpenRewrite (large-scale Java refactoring)
-- "Do no harm": if a recipe cannot determine a change is safe, it makes no change
-- Dry-run via `dryRun` Maven goal: prints which visitors would make changes to which files, without altering source
-- Every change is previewable as a structured diff before commit; rollback is supported
-- Search-only recipes surface findings for human review rather than applying automatically
-- **Expectation this sets:** for any change that requires judgment, tools should produce a "findings report" first, not apply changes silently. Human approval gates the transition from "report" to "apply"
-
-### Terraform plan/apply (show-before-mutate)
-- `terraform plan` is a required pre-step: shows every change with symbols (+/-/~) before any infrastructure is touched
-- Plan output is saveable to a binary file; `apply` consumes that exact plan — what was reviewed is exactly what gets applied, no surprises
-- Idempotent: if desired state matches current state, no changes are made
-- **Expectation this sets:** "plan then apply" is the canonical UX for any tool that touches infrastructure. Users trained on Terraform expect to see a numbered list of changes before executing them
-
-### Flyway / Liquibase (migration-state tracking)
-- Maintain a `DATABASECHANGELOG` (or equivalent) table that records every applied migration with: id, description, checksum, execution timestamp
-- On re-run, check the log to skip already-applied changesets — idempotency by state record
-- Pre-conditions: `ON_FAIL: MARK_RAN` allows safe idempotent re-runs
-- **Expectation this sets:** a persisted log of "what was done and when" is not optional. Users need it for audits, for debugging, and for safe re-runs. The log IS the rollback key
-
-### chezmoi (dotfile manager — state-aware adoption)
-- `chezmoi import` reads existing dotfiles and absorbs them into the managed state
-- Additive by default: never deletes unmanaged files during initial adoption
-- `chezmoi diff` (read-only) before `chezmoi apply` (write); never mutates without an explicit apply
-- `chezmoi data` shows the current managed state inventory
-- **Expectation this sets:** "import existing" flows must be non-destructive. The tool reads first, classifies, then proposes — never deletes without explicit user action
-
-### "Import existing config" brownfield onboarding flows (VMware VCF, spec-driven-development, Terraform brownfield import)
-- Core pattern: read current state → build inventory → compare to desired state → show delta → apply with approval
-- Pilot conversion in a sandbox / dry-run before live apply is universal
-- Archiving historical data outside the live system (rather than deleting it) is standard in all SAP/VMware brownfield migrations — "move only what you need, archive the rest"
-- **Expectation this sets:** the inventory step is not optional and must be visible to the user before any mutations. Archive-not-delete is expected default behavior
+**Domain:** CLI harness scaffolding — plugin emission, deployable policy, eval-gating, schema-aware audit, cross-repo orchestration
+**Researched:** 2026-06-03
+**Milestone:** v0.7.0 — Plugin-native + Policy-grade
+**Confidence:** HIGH for plugin/marketplace (official docs verified); HIGH for sandbox/managed-settings (official docs + MDM examples verified); MEDIUM for promptfoo eval harness (docs + integrations verified, but Claude Code harness-specific patterns are novel); MEDIUM for schema-aware audit (hooks schema from docs, disallowed-tools behaviour confirmed but enforcement gaps noted); MEDIUM for cross-repo orchestration (no native Claude Code workspace feature; patterns inferred from community practice and filed feature requests)
 
 ---
 
-## "Lose Nothing" — Concrete, Testable Behaviors
+## Feature Area A: Plugin + Marketplace Emission
 
-The user's explicit demand "lose nothing" maps to these observable, testable requirements:
+### What the native rail produces
 
-1. **Full snapshot before any mutation.** Before `conjure adopt` writes a single byte, every path it will touch must be copied to a timestamped backup directory (e.g., `.conjure-adopt-backup-<ISO8601>/`). Testable: backup dir exists and contains exact copies of all mutated files, verifiable by sha256 comparison before vs. after adopt run.
+A Claude Code plugin lives in a directory with `.claude-plugin/plugin.json` at its root. The manifest carries `name`, `description`, `version` (semver string), plus optional fields: `skills` (path or array), `agents`, `hooks`, `mcpServers`, `lspServers`. Plugin contents are copied into `~/.claude/plugins/cache/` on install — files outside the plugin directory cannot be referenced.
 
-2. **Archive-not-delete.** Files classified as "stale" or "superseded" are moved to `.conjure-archive-<timestamp>/`, never `rm`'d. Testable: no file that existed before `conjure adopt` is absent after the run; `find <repo> -name <stale_file>` returns the file in the archive location.
+A **marketplace** wraps one or more plugins in `.claude-plugin/marketplace.json` at the repo root. Required fields: `name` (kebab-case, unique per user), `owner.name`, `plugins` (array). Plugin entries carry a `source` field (relative path `"./plugins/foo"`, `{"source":"github","repo":"org/repo","ref":"v1.0","sha":"..."}`, npm, or git URL). Version pinning: set `version` in `plugin.json` or in the marketplace entry; omit it to use git commit SHA as the version. Reserved marketplace names: `claude-code-marketplace`, `claude-plugins-official`, and a dozen Anthropic-controlled names.
 
-3. **`--dry-run` shows every planned mutation without writing anything.** `DRY_RUN=1` must produce the same plan output as a live run but zero filesystem side-effects. Testable: `DRY_RUN=1 conjure adopt` followed by `find <repo> -newer <timestamp_before>` finds only files the test itself created — no conjure writes.
+Consumers add a marketplace once with `/plugin marketplace add <source>` or via `extraKnownMarketplaces` in project `settings.json`. They install individual plugins with `/plugin install <plugin>@<marketplace>`. They update with `/plugin marketplace update`. Pinning happens at the `sha` field in the marketplace entry.
 
-4. **`--rollback` restores the snapshot exactly.** After a live run, `conjure adopt --rollback` must restore every mutated file to its pre-adopt state from the backup dir. Testable: sha256 of every mutated file after rollback equals sha256 recorded in the backup manifest before the run.
+**Settings integration:** `extraKnownMarketplaces` (project or managed) pre-registers marketplaces so users do not have to run `/plugin marketplace add` manually. `strictKnownMarketplaces` (managed only) restricts which marketplaces users can add. Pairing both in `managed-settings.json` gives IT full control: allow only approved sources, auto-register them.
 
-5. **`RESTRUCTURE-LOG.md` is written at every step, not only at the end.** Each individual mutation (scaffold layer, mutate CLAUDE.md, archive file) appends a log entry before the next mutation starts. Testable: if the process is killed mid-run, the log reflects the exact steps completed so far — no silent gaps.
+**Important CI constraint:** `extraKnownMarketplaces` requires an interactive trust dialog; it does not work in headless/CI mode. Managed settings bypass this — they are trusted at the OS level.
 
-6. **Idempotent re-run.** Running `conjure adopt` a second time on an already-adopted project must detect the existing state and produce "nothing to do" or "N steps already applied, 0 pending" — not re-apply work or corrupt already-correct state. Testable: sha256 of all managed files after second run equals sha256 after first run.
+### How conjure publish / publish-skill relate
 
-7. **`--force` required to proceed on dirty git tree.** If `git status` shows any uncommitted changes, `conjure adopt` refuses with a clear message pointing to the `--force` flag. Testable: `conjure adopt` in a repo with a staged change exits non-zero without writing anything; with `--force` it proceeds and writes a warning to the log.
+- `conjure publish` (v0.4.0): validates and publishes a plugin (the `.claude-plugin/` in a repo)
+- `conjure publish-skill` (v0.4.0): 4-gate validation + PR flow for a single skill
+- v0.7.0 gap: neither command *generates* the harness as a plugin + marketplace entry, nor wires `extraKnownMarketplaces`/`strictKnownMarketplaces` into the project's settings
 
-8. **Never-delete is unconditional.** No flag or option causes `conjure adopt` to permanently delete any user file. `mutate_rm` must not be called by `adopt.sh` on user content — only on conjure-internal temporary files. Testable: audit `adopt.sh` for any call to `mutate_rm` on non-temporary paths; fuzz the doc corpus and verify all input files are present in either the repo or the archive after any run.
+### Table Stakes
 
----
+| Feature | Why Expected | Complexity | Conjure Dependencies |
+|---------|--------------|------------|---------------------|
+| `conjure publish-plugin` emits `.claude-plugin/plugin.json` from the scaffolded harness | Users expect the harness to be distributable as a first-class plugin; the native rail exists and is the install path | MEDIUM — must read existing harness structure, assemble `plugin.json` with correct `skills`/`agents`/`hooks`/`mcpServers` paths, version from `.conjure-version` | `cli/conjure`; `scripts/init-project.sh` (knows harness structure); existing `.claude-plugin/` stub (v0.2.0) |
+| `conjure publish-plugin --marketplace` generates `.claude-plugin/marketplace.json` | If a team distributes the harness plugin from a git repo, the marketplace file is required for others to discover and install it | MEDIUM — generate marketplace entry with correct `source` (github or url), bump `version` field, write via `lib/mutate.sh` | `lib/mutate.sh`; existing `conjure publish` validation gates |
+| Wire `extraKnownMarketplaces` + `enabledPlugins` into `.claude/settings.json` | Teams need members to get the marketplace pre-registered without a manual `/plugin marketplace add`; this is the install UX | LOW — append/merge the two keys into `.claude/settings.json` using `mutate_write`; idempotent (check before write) | `lib/mutate.sh`; `conjure audit` to verify settings file validity post-write |
+| `conjure publish-plugin --validate` runs `claude plugin validate` + JSON schema check | Broken manifests cause silent install failures; validation before push is the expected QA gate (same model as `conjure publish` today) | LOW — shell out to `claude plugin validate`; check reserved-name list; validate `plugin.json` against schema | Existing `conjure publish` gate pattern; JSON schema tooling already present |
+| Version bump in `plugin.json` / `marketplace.json` without `version` field → git SHA | Users who omit version get auto-versioning via git SHA; those who set version get semver pinning | LOW — detect presence of `version` field; if absent, emit `"version"` set to `$(git rev-parse HEAD)` | `git` (hard dep) |
 
-## Feature Landscape
+### Differentiators
 
-### Table Stakes (Users Expect These)
+| Feature | Value Proposition | Complexity | Conjure Dependencies |
+|---------|-------------------|------------|---------------------|
+| Managed marketplace wiring: emit `strictKnownMarketplaces` block into `managed-settings.json` template | Security teams need to lock users to approved plugin sources; Conjure can generate the correct managed-settings snippet alongside the plugin manifest, not just the project settings | MEDIUM — generate a `managed-settings.json` fragment containing `strictKnownMarketplaces` and `extraKnownMarketplaces`; designed to be merged with the compliance overlay's managed-settings output | New; wraps sandbox/managed-settings feature area |
+| `conjure publish-plugin --pin-sha` — locks all plugin sources to exact commit SHA | Reproducible harness installs across teams; prevents supply-chain drift when upstream plugins update | LOW — iterate `marketplace.json` plugins; for each `github`/`url` source missing `sha`, call `git ls-remote` to resolve current `ref` → SHA; write back | `lib/mutate.sh`; `git` |
+| Cross-marketplace dependency declaration (`allowCrossMarketplaceDependenciesOn`) auto-wired | Harnesses that bundle plugins from multiple sources need this field or installs are blocked; Conjure can detect the pattern and emit the field | MEDIUM — detect when `marketplace.json` references plugins from sources not listed in `allowCrossMarketplaceDependenciesOn`; auto-populate | Marketplace schema knowledge |
 
-Features users assume exist in any "safe adopt" tool. Missing these = product feels incomplete or untrustworthy.
-
-| Feature | Why Expected | Complexity | Dependencies on Existing Conjure Features |
-|---------|--------------|------------|------------------------------------------|
-| `--dry-run` flag — shows full plan, writes nothing | Every migration tool in the comparator set ships this. Without it, users cannot safely explore what adopt will do. Terraform plan, jscodeshift `--dry`, ESLint `--fix-dry-run` — all three enforce this contract. | LOW — `lib/mutate.sh` already implements `DRY_RUN=1` for all write primitives; adopt.sh must source it and honor the flag throughout | `lib/mutate.sh` (fully shipped); all mutate_* calls already dry-run safe |
-| Full timestamped snapshot backup before first mutation | Any tool that touches a project without a backup first will be blamed for data loss. The expectation is hardened by git-before-refactor conventions and chezmoi's import model. | MEDIUM — new `mutate_snapshot` primitive or inline cp loop; must handle large directories (argus has 2180 markdown files); needs a manifest file listing what was captured | `lib/mutate.sh` (must extend with snapshot primitive); existing `mutate_cp` for file-by-file copies |
-| Markdown inventory: list every `.md` file with its path, line count, and classification | Users cannot approve or review changes to files they haven't seen listed. chezmoi's `data` command and Terraform's plan output both surface the full scope before any action. The argus fixture (2180 files) makes this non-trivial but mandatory. | MEDIUM — POSIX `find` + `wc -l` loop; classification buckets must be defined (harness core / skill-candidate / agent-candidate / reference-doc / planning-artifact / stale-candidate); write inventory to `.conjure-adopt-inventory.md` | None — pure read path, no existing feature dependency |
-| Size-cap audit gate embedded in adopt flow | Users must see which files violate caps before and after restructure. Shipping adopt without the size-cap audit would mean users could adopt into a broken harness. | LOW — `scripts/audit-setup.sh` already implements size-cap checks; adopt calls it as a read-only pre-flight and again as post-flight verification | `scripts/audit-setup.sh` (fully shipped, used by `conjure audit`) |
-| `RESTRUCTURE-LOG.md` — per-step persisted changelog | The user's explicit demand: "clear message of what changed at each step." Liquibase's DATABASECHANGELOG, Flyway's schema_history, and Terraform's state file all serve this function. Without persistence, users cannot recover from a partial run or understand what was done. | MEDIUM — new `log_step` helper; appends one line per step in ISO8601 + action + source + destination format; written via `mutate_write --append`; creates the file if absent; survives mid-run kill | `lib/mutate.sh` (mutate_write --append already implemented) |
-| `--rollback` flag — restore from snapshot | Users who ran adopt and dislike the result need an escape. Terraform's rollback, chezmoi's revert, and every database migration tool's down-migration serve this expectation. Must be a single command, not a manual copy. | MEDIUM — reads backup manifest; iterates entries; copies backup/ → original path via `mutate_cp`; emits per-file restore log to RESTRUCTURE-LOG.md | `lib/mutate.sh` (mutate_cp); snapshot backup (new, required first) |
-| Git-clean precondition — refuse dirty working tree | Every migration tool that does large-scale mutation (jscodeshift, chezmoi apply, OpenRewrite) recommends or enforces a clean git state before running. This is the cheapest safety net: if something goes wrong, `git checkout -- .` is the escape. | LOW — `git status --porcelain` output check; if non-empty, print error + `--force` hint and exit 2; same pattern as conjure hooks exit 2 convention | `git` (hard dep already); exit 2 convention already established in conjure |
-| Scaffold missing harness layers | `conjure adopt` must wire up missing `.claude/` structure (skills/, agents/, hooks/) without overwriting what already exists. This is `conjure init`'s additive scaffold, reused as a sub-step of adopt. | LOW — call `scripts/init-project.sh` in additive mode (already skips existing files); adopt wraps this as one logged step | `scripts/init-project.sh` (fully shipped); additive-only behavior already correct |
-| Never-delete: archive stale files to `.conjure-archive-<timestamp>/` | Users trust adopt only if they know nothing will be permanently erased. Archive-not-delete is the "lose nothing" contract made concrete. The SAP/VMware brownfield migration pattern universally separates "active" from "archived" rather than deleting. | LOW — `mutate_archive` primitive = `mutate_cp src archive/ && note_in_log "archived $src"`; never calls `mutate_rm` on user content | `lib/mutate.sh` (mutate_cp); new `mutate_archive` wrapper |
-| `--force` flag — override git-clean precondition | CI/CD pipelines and users who understand the risk must be able to bypass the git-clean gate explicitly. The `--force` pattern is established by git itself and by jscodeshift's `--fail-on-error`. | LOW — parse `--force` flag; skip git status check when set; write a warning line to RESTRUCTURE-LOG.md noting that git-clean was bypassed | None |
-
-### Differentiators (What Sets v0.6.0 Apart)
-
-| Feature | Value Proposition | Complexity | Dependencies on Existing Conjure Features |
-|---------|-------------------|------------|------------------------------------------|
-| `restructure` skill — LLM judgment in-session, human-gated | The classification problem (what goes to skills vs. agents vs. reference docs vs. stale) requires reading and understanding content, not just measuring it. An LLM skill can propose decomposition of an oversized CLAUDE.md; a human approves each proposal; CLI primitives execute each approval. This hybrid (deterministic execution + LLM judgment + human gate) is unique in this space. | HIGH — skill SKILL.md must be written; it must read the adopt inventory, oversized CLAUDE.md, and doc sprawl; propose structured output; each proposal is human-gated; approved proposals are dispatched to CLI safe primitives. No existing pattern in conjure; the first skill that outputs structured commands for CLI execution | `scripts/audit-setup.sh` (size caps); inventory file (new); `conjure adopt` CLI primitives (new); existing skill frontmatter schema (fully shipped) |
-| Inventory classification with actionable buckets | Classifying files into: `harness-core` / `skill-candidate` / `agent-candidate` / `reference-doc` / `planning-artifact` / `stale-candidate` gives users a structured view of their doc sprawl before they do anything. No comparator tool does this for markdown/doc sprawl specifically. | MEDIUM — classification heuristics per bucket (path pattern + line count + frontmatter presence + keyword match); written to `.conjure-adopt-inventory.md` in a table format; the `restructure` skill reads this file | None — new capability; uses POSIX tools only |
-| `RESTRUCTURE-LOG.md` in human-readable structured format | Liquibase's changelog is a machine format. Conjure's log targets human readability (step number, timestamp, action verb, source path, destination path, outcome) while being grep-able. This makes it a usable audit trail for teams and a recovery guide when runs are interrupted. | LOW — define a log line format: `[YYYY-MM-DDTHH:MM:SSZ] STEP N: ACTION source → destination (OUTCOME)`; `log_step` function appends via `mutate_write --append` | `lib/mutate.sh` (mutate_write --append already works) |
-| Idempotent re-run via state detection | Re-running adopt on an already-adopted project should not duplicate scaffold, re-archive files, or corrupt the log. State is detected by checking `.conjure-adopt-state` marker (written by adopt on first successful run) and comparing inventory hashes. This follows Flyway's "check the log before applying" pattern. | MEDIUM — write a `.conjure-adopt-state` file (JSON or simple key=value) recording which steps completed with their input sha256; on re-run, skip steps whose pre-condition sha256 still matches | None — new state file convention; consistent with `.conjure-version` and `.conjure-overlay` existing marker files |
-| Machine-readable inventory output (`--json`) | Teams that integrate adopt into CI pipelines or dashboards need programmatic access to the inventory. `--json` emits the classification table as JSONL to stdout. Consistent with `conjure check --json` (v0.5.0 differentiator). | LOW — serialize inventory array as JSONL; one object per file with: path, lines, classification, action | `conjure check --json` precedent (v0.5.0); `jq` already a hard dep |
-| Adoption report summarizing the before/after state | After `conjure adopt` completes, print a structured summary: files inventoried, layers scaffolded, files archived, CLAUDE.md before/after line count, size-cap compliance status. This closes the loop the way OpenRewrite's build-log summary and Terraform's apply output close theirs. | LOW — collect counts during execution; print summary at end; mirror it to the tail of RESTRUCTURE-LOG.md | All adopt sub-steps |
-
-### Anti-Features (Explicit Non-Goals)
+### Anti-Features
 
 | Anti-Feature | Why Requested | Why Problematic | What to Do Instead |
 |--------------|---------------|-----------------|-------------------|
-| Fully autonomous adopt (no-human-approval restructure) | "Just fix it for me" — the appeal of zero-friction | Content judgment (what is stale, what should become a skill) cannot be made safely without human sign-off. A wrong autonomous decision on CLAUDE.md content changes the AI's behavior on every future session. Silent autonomous rewrites break user trust when they notice unexpected changes. PROJECT.md explicitly calls this a non-goal. | The `restructure` skill proposes; the human approves each step; CLI primitives execute. Never execute content judgment without a human gate. |
-| Deleting any user file permanently | "Clean up the mess" — users want clutter gone | Permanent deletion during an adopt run would violate "lose nothing." Any file that looks stale might be the one the user needs next week. Recovery after accidental deletion during a tool run is a support nightmare. | Archive to `.conjure-archive-<timestamp>/`; the user can delete the archive manually when satisfied |
-| Rewriting CLAUDE.md content autonomously | "Fix my oversized CLAUDE.md" — users see an obvious problem | Content rewriting changes the AI's behavior. Even a well-intentioned rewrite could remove important constraints or add unwanted ones. This is a judgment call, not a deterministic operation. | The `restructure` skill proposes extractions; the human approves each one; `conjure adopt` applies via `mutate_write` only on explicit approval |
-| Cross-repo or workspace orchestration | "Adopt all my repos at once" | Scope explosion: cross-repo concerns belong to v0.7.0. Including cross-repo logic in v0.6.0 would delay shipping the single-repo story and introduce complex rollback semantics. | Single-repo only in v0.6.0. Cross-repo orchestration deferred explicitly in PROJECT.md to v0.7.0. |
-| Interactive TUI (curses, fzf, dialog) for the inventory approval flow | "Show me a nice interface" | Breaks CI usage, adds runtime deps, excludes Windows Git Bash users. v0.5.0 `conjure resolve` intentionally avoided this. The `restructure` skill's interaction happens in Claude Code's session, not in the CLI. | CLI prints proposals; human responds with `y/n` or `s` (skip); editor is `$EDITOR` for edits. Same model as `conjure resolve`. |
-| Automatic commit or push after adopt | "One-command commit" | Silent commits to a repo are a trust violation. Any mutation to the repo's history must be initiated by the user. | Print "commit when ready" in the post-adopt summary; never `git commit` or `git push` from within `conjure adopt` |
-| Incorporating `conjure migrate` logic | "Detect if this came from Cursor/Aider and migrate it too" | `conjure migrate` already handles competitor-to-conjure migration. Combining it with brownfield adopt creates a single script that does too much. Users who need migration should run `conjure migrate` first, then `conjure adopt`. | Document the recommended two-step sequence in RESTRUCTURE-LOG.md preamble; keep `adopt` and `migrate` separate |
-| Size-cap auto-fix (truncate oversized files) | "Just trim the file for me" | Truncating a file at a line count boundary almost certainly destroys content coherence. The correct response to an oversized CLAUDE.md is extraction, not truncation. | Audit reports the cap violation; `restructure` skill proposes what to extract; extraction is human-gated |
+| Replace `conjure publish` / `conjure publish-skill` with a single new command | "Simplify the CLI" | Breaking change; both commands have validation gates and PR flows that are independently useful; merge would conflate skill publication (which targets a skill marketplace PR) with plugin manifest generation (which targets the repo) | Add `conjure publish-plugin` as a new subcommand; keep `publish` and `publish-skill` unchanged |
+| Auto-install the plugin after generation | "Zero-friction" | `claude plugin install` requires an interactive session and user trust; running it from `conjure` (a non-Claude-Code context) is out of scope and would require TTY assumptions | Print the install command for the user to run; document it in the output |
+| Publish to npm as the primary distribution channel | npm distribution is supported by the native rail | Adds `npm publish` to Conjure's scope; complicates the release pipeline; most teams use git-based distribution | Support npm source in `marketplace.json` generation, but do not run `npm publish`; that remains the user's responsibility |
+
+---
+
+## Feature Area B: Sandbox + Managed-Settings / MDM
+
+### What the native rail provides
+
+**Sandbox block** in `settings.json` (merges across all scopes — user + project + managed arrays concatenate):
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "filesystem": {
+      "allowWrite": ["/tmp/build", "./src", "~/.kube"],
+      "denyWrite": ["/etc", "/usr/local/bin"],
+      "denyRead": ["~/.aws/credentials", "~/.ssh"],
+      "allowRead": ["."],
+      "allowManagedReadPathsOnly": true
+    },
+    "network": {
+      "allowedDomains": ["*.npmjs.org", "api.github.com"],
+      "allowLocalBinding": true
+    }
+  }
+}
+```
+
+**Critical enforcement gap:** `sandbox.denyRead` blocks bash subprocess reads but does NOT block Claude's `Read` tool. To protect reads at the tool level, mirror `denyRead` paths in `permissions.deny` as `Read(<path>)` rules.
+
+**Managed-settings file locations:**
+
+| Platform | Path |
+|----------|------|
+| macOS (file) | `/Library/Application Support/ClaudeCode/managed-settings.json` |
+| macOS (MDM) | `com.anthropic.claudecode` plist domain (Jamf / Kandji) |
+| Linux/WSL | `/etc/claude-code/managed-settings.json` |
+| Windows (file) | `C:\Program Files\ClaudeCode\managed-settings.json` |
+| Windows (MDM) | `HKLM\SOFTWARE\Policies\ClaudeCode` (REG_SZ JSON) |
+
+Drop-in directory: `managed-settings.d/` (e.g., `10-telemetry.json`, `20-security.json`, `30-compliance.json`). Files merge alphabetically; scalars override, arrays concatenate and deduplicate.
+
+**MDM artifacts shipped by Anthropic** (`claude-code/examples/mdm`):
+- `macos/com.anthropic.claudecode.plist` — Jamf / Kandji Custom Settings payload
+- `macos/com.anthropic.claudecode.mobileconfig` — full macOS Configuration Profile
+- `windows/Set-ClaudeCodePolicy.ps1` — Intune Platform Script
+- `windows/ClaudeCode.admx` + `en-US/ClaudeCode.adml` — Group Policy / Intune ADMX template
+
+All Anthropic examples baseline on `disableBypassPermissionsMode`.
+
+### Compliance regime → concrete policy keys
+
+**HIPAA:**
+```json
+{
+  "disableBypassPermissionsMode": "disable",
+  "allowManagedPermissionRulesOnly": true,
+  "forceLoginOrgUUID": "<org-uuid>",
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "filesystem": {
+      "denyRead": ["~/.aws/credentials", "~/.ssh", "**/PHI/**", "**/patient_data/**", "**/*.hl7", "**/*.ccda"],
+      "denyWrite": ["/etc", "/usr/local/bin"]
+    },
+    "network": {
+      "allowedDomains": ["<approved-endpoints-only>"]
+    }
+  },
+  "permissions": {
+    "deny": ["Bash(curl http://*)", "Bash(wget http://*)", "Read(**/.env*)", "Read(**/secrets/**)", "Read(**/.ssh/**)"]
+  }
+}
+```
+
+**SOC 2:**
+```json
+{
+  "disableBypassPermissionsMode": "disable",
+  "allowManagedPermissionRulesOnly": true,
+  "allowManagedHooksOnly": true,
+  "forceRemoteSettingsRefresh": true,
+  "sandbox": { "enabled": true, "failIfUnavailable": true },
+  "permissions": {
+    "deny": ["Bash(curl*)", "Bash(wget*)", "Read(**/.env*)", "Read(**/secrets/**)", "Read(**/.ssh/**)"]
+  }
+}
+```
+
+**GDPR:**
+```json
+{
+  "disableBypassPermissionsMode": "disable",
+  "allowManagedPermissionRulesOnly": true,
+  "sandbox": {
+    "filesystem": {
+      "denyRead": ["**/pii/**", "**/personal/**", "**/user_profiles/**", "**/email*lists/**", "~/.aws/credentials"]
+    }
+  },
+  "permissions": {
+    "deny": ["Read(**/.env*)", "Read(**/secrets/**)", "WebFetch(http://**)"]
+  }
+}
+```
+
+**PCI DSS:**
+```json
+{
+  "disableBypassPermissionsMode": "disable",
+  "allowManagedPermissionRulesOnly": true,
+  "sandbox": {
+    "filesystem": {
+      "denyRead": ["**/*card*", "**/payment*", "**/*token*", "**/*crypto*keys*", "~/.aws/credentials", "~/.ssh"]
+    }
+  },
+  "permissions": {
+    "deny": ["Bash(git push*)", "Bash(curl*)", "Read(**/.env*)", "Write(**/*vault**)"]
+  }
+}
+```
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Conjure Dependencies |
+|---------|--------------|------------|---------------------|
+| Compliance overlay generates `sandbox{}` block and writes it to `.claude/settings.json` | Security teams deploying HIPAA/SOC2/GDPR/PCI expect the overlay to produce enforceable runtime restrictions, not just documentation | MEDIUM — extend each overlay script to emit a `sandbox` JSON block; merge into existing `.claude/settings.json` via `jq` + `mutate_write`; include both `denyRead` and mirrored `permissions.deny` for the Read-tool gap | `compliance/` overlay scripts; `lib/mutate.sh`; `jq` (hard dep) |
+| Generate `managed-settings.json` from overlay | IT/MDM teams need a ready-to-deploy file, not a settings.json that can be overridden by users | MEDIUM — each compliance overlay emits a `managed-settings.json` alongside the project `settings.json`; keys include `disableBypassPermissionsMode`, `allowManagedPermissionRulesOnly`, `allowManagedHooksOnly`, `forceLoginOrgUUID` (placeholder), sandbox block | `compliance/` overlays; `lib/mutate.sh` |
+| macOS plist artifact from overlay | Jamf/Kandji deployments need the plist; teams cannot hand-craft it correctly | MEDIUM — generate `com.anthropic.claudecode.plist` from the managed-settings JSON using a shell-based JSON-to-plist converter (Python `plistlib` or `plutil`); write via `lib/mutate.sh` | `compliance/` overlays; Python 3 (soft dep for plist generation) |
+| Windows registry / PowerShell artifact from overlay | Intune/Group Policy deployments need `Set-ClaudeCodePolicy.ps1` | MEDIUM — generate a parameterised PowerShell script that writes the managed-settings JSON to `HKLM\SOFTWARE\Policies\ClaudeCode`; adapt from Anthropic's example | `compliance/` overlays; `lib/mutate.sh` |
+| `conjure audit` flags missing sandbox block and missing mirrored `permissions.deny` for denyRead paths | Teams that partially configure sandbox (denyRead without the mirrored Read deny) have a false sense of security | LOW — add two new audit checks: (1) if `sandbox.filesystem.denyRead` is set, verify each path also appears in `permissions.deny` as `Read(<path>)`, (2) if overlay is active, verify `sandbox.enabled: true` and `disableBypassPermissionsMode: "disable"` are present in managed-settings | `scripts/audit-setup.sh`; JSON schema validation |
+
+### Differentiators
+
+| Feature | Value Proposition | Complexity | Conjure Dependencies |
+|---------|-------------------|------------|---------------------|
+| `managed-settings.d/` drop-in generation: emit regime-specific fragments (e.g., `20-hipaa.json`, `30-marketplace.json`) | Orgs with layered IT policies (HIPAA + SOC2 base) need composable fragments, not a single monolithic file | MEDIUM — instead of generating one `managed-settings.json`, emit named fragments into `managed-settings.d/`; number them so merge order is predictable; document the merge semantics in the emitted README | `compliance/` overlays |
+| `conjure refresh-overlay --emit-mdm` re-generates MDM artifacts when overlay policy changes | Overlays evolve; teams need re-generated MDM files on policy update, not manual edits | LOW — add `--emit-mdm` flag to `refresh-overlay` script; calls the plist + PS1 generators; dry-run safe | `scripts/refresh-overlay.sh` (existing); new plist/PS1 generators |
+| Inline documentation comments in generated `managed-settings.json` | Security engineers reading deployed files need to know which Conjure overlay produced each key and why | LOW — emit a `"_conjure_source"` annotation object alongside each policy block (JSON doesn't support comments; use a parallel annotation key) | `lib/mutate.sh` |
+
+### Anti-Features
+
+| Anti-Feature | Why Requested | Why Problematic | What to Do Instead |
+|--------------|---------------|-----------------|-------------------|
+| Auto-deploy MDM artifacts to Jamf/Intune via their APIs | "One command" | Requires API credentials and org-specific Jamf/Intune tenant IDs; Conjure should not store or handle MDM credentials; deployment is an IT ops concern | Generate the artifacts; document the deployment steps; do not call MDM APIs |
+| Claim overlays make a project "compliant" | Compliance is a natural aspiration | Compliance requires people, process, audit, and a signed BAA/DPA; the overlay only configures Claude Code's behaviour | Keep the existing disclaimer in overlay output: "reduces non-compliant output; real compliance needs people + process" |
+| Auto-detect credential paths at scan time (crawl repo for .env files) | "Smart protection" | Scanning the full repo for credential-looking files adds scope, risk of false positives, and significantly increases runtime | Ship standard deny-read path patterns per regime; document how teams add project-specific paths |
+
+---
+
+## Feature Area C: conjure eval (promptfoo + context-budget linter)
+
+### How promptfoo eval for a Claude Code harness works
+
+promptfoo uses `anthropic:claude-agent-sdk` (alias `anthropic:claude-code`) as a provider. A `promptfooconfig.yaml` specifies `working_dir` (the repo under test), `permission_mode`, `setting_sources` (loads the project's `.claude/skills/`, `settings.json`), `skills: all` (or named list), and `max_turns`.
+
+**Assertion types relevant to harness testing:**
+
+| Assertion | What it proves | Syntax |
+|-----------|---------------|--------|
+| `skill-used` | A named skill was actually invoked (normalised from Claude's `Skill` tool call) | `type: skill-used, value: skill-name` |
+| `not-skill-used` | A skill was NOT invoked (appropriate skills stay idle) | `type: not-skill-used, value: skill-name` |
+| `javascript` with `context.providerResponse?.metadata?.toolCalls` | Exact tool-call sequence; can assert hooks fired (via PostToolUse) | custom JS |
+| `llm-rubric` | Semantic quality — whether output follows CLAUDE.md rules (e.g., "response is in English", "no @import used") | `type: llm-rubric, value: "must not contain @import"` |
+| `contains` / `icontains` | Literal string in output | standard |
+| `is-json` | Output is valid JSON | standard |
+
+**Hook firing cannot be directly asserted** via a promptfoo assertion today — hooks are shell processes in the sandbox. The practical approach is: configure PostToolUse hooks to write to a logfile in `/tmp/`, then use a `javascript` assertion that reads that file and checks for expected entries.
+
+**CLAUDE.md adherence eval:** use `llm-rubric` with the specific rule text from CLAUDE.md as the rubric. Example: `"Claude must not call Bash(rm -rf *) — check that no such command appears in the tool calls"`. Combine with `javascript` assertions on `metadata.toolCalls` for deterministic checks.
+
+**PR gate:** `promptfoo/promptfoo-action@v1` runs on `pull_request`; posts before/after comparison as a PR comment; fails if success rate drops below `fail-on-threshold` (e.g., 80). Requires `ANTHROPIC_API_KEY` secret and `permissions: pull-requests: write`.
+
+```yaml
+# .github/workflows/eval.yml (minimal)
+on:
+  pull_request:
+    paths: ['.claude/**', 'CLAUDE.md', 'templates/**']
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: promptfoo/promptfoo-action@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          config: .conjure/eval/promptfooconfig.yaml
+          fail-on-threshold: 80
+```
+
+### Context-budget linting
+
+Claude Code tracks token usage per turn internally (visible via `/usage`). There is no first-party per-turn token count written to a file. The best proxy for a static linter:
+
+- **CLAUDE.md line count** as a cap-compliance proxy (Conjure already enforces ≤100 lines; `conjure audit` already checks this)
+- **Skills body line count** (≤200 lines; already enforced)
+- **Chars/4 heuristic** for estimated token count — already in Conjure's cost estimator
+- **Context load estimate** = CLAUDE.md chars/4 + sum(skills marked `disable-model-invocation: false` body chars/4) per session start
+
+A new `conjure audit --budget` check would: (1) measure CLAUDE.md token estimate, (2) sum always-loaded skill tokens, (3) flag if session-start context exceeds a configurable threshold (default 8,000 tokens = ~32,000 chars), (4) list the top contributors. This is a static check, not a runtime hook.
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Conjure Dependencies |
+|---------|--------------|------------|---------------------|
+| `conjure eval init` — scaffold `promptfooconfig.yaml` with harness-specific assertions | Teams need a working eval config, not a blank slate; the harness structure is known so Conjure can generate assertions for each skill | MEDIUM — read `.claude/skills/` inventory; emit one `skill-used` test per skill; emit one `llm-rubric` test per CLAUDE.md rule line; write to `.conjure/eval/promptfooconfig.yaml` via `mutate_write` | `scripts/audit-setup.sh` (reads harness); `lib/mutate.sh` |
+| `conjure eval run` — executes `promptfoo eval` against the generated config | Teams need a single command, not "install promptfoo, figure out config path, run eval" | LOW — shell out to `npx promptfoo eval -c .conjure/eval/promptfooconfig.yaml`; require `node` (already a soft dep for hooks); pass through exit code for CI gate | `cli/conjure`; `node` (soft dep) |
+| PR gate workflow template — `conjure eval --emit-workflow` generates `.github/workflows/conjure-eval.yml` | GitHub Actions gate is table-stakes for "eval-backed" to mean anything in a PR review | LOW — emit a parameterised workflow YAML; paths trigger on `.claude/**`, `CLAUDE.md`, `templates/**`; uses `promptfoo/promptfoo-action@v1`; requires `ANTHROPIC_API_KEY` secret | `lib/mutate.sh`; GitHub Actions knowledge |
+| `conjure audit --budget` — static context-budget linter | Teams asked for "eval-backed"; context size is measurable statically and a leading indicator of poor harness hygiene | LOW — chars/4 heuristic on CLAUDE.md + always-loaded skills; flag if >8,000 tokens; list top contributors; output as part of `conjure audit` report | `scripts/audit-setup.sh`; `lib/caps.sh` (already measures lines; extend to chars) |
+| `conjure audit` reports which skills have no eval coverage (no `skill-used` assertion in promptfooconfig.yaml) | Uncovered skills are a gap in the eval suite; surfacing the gap is the first step to closing it | LOW — parse `.conjure/eval/promptfooconfig.yaml`; extract `skill-used` assertion values; diff against `.claude/skills/` directory listing; report uncovered skills | `scripts/audit-setup.sh` |
+
+### Differentiators
+
+| Feature | Value Proposition | Complexity | Conjure Dependencies |
+|---------|-------------------|------------|---------------------|
+| `conjure eval snapshot` — records a baseline pass/fail before a harness change, for before/after comparison | promptfoo-action does before/after comparison automatically in CI, but teams want a local baseline record before pushing | LOW — run eval, write result JSON to `.conjure/eval/baseline.json`; subsequent `conjure eval run` compares against baseline; flag regressions in local output | `lib/mutate.sh`; promptfoo JSON output |
+| Per-skill eval template with trajectory assertions for tool sequences | Skills that use `Bash` or `Read` in a specific sequence should assert that sequence; Conjure can generate trajectory stubs from skill `allowed-tools` frontmatter | MEDIUM — read `allowed-tools` from each skill's frontmatter; emit `javascript` assertion stubs that check `metadata.toolCalls` for those tools | Frontmatter parser (already present in audit) |
+| Budget linter per-skill breakdown in `conjure audit --budget` output (porcelain + human) | CI can parse per-skill token estimates and flag the one skill that doubled in size | LOW — emit `--porcelain` JSON breakdown alongside human output; consistent with `conjure check --porcelain` pattern | `lib/caps.sh`; `conjure check` precedent |
+
+### Anti-Features
+
+| Anti-Feature | Why Requested | Why Problematic | What to Do Instead |
+|--------------|---------------|-----------------|-------------------|
+| Bundle promptfoo as a Conjure dependency | "Zero setup" | promptfoo is a large npm package; Conjure's constraint is `dependencies: {}`; bundling breaks the minimal-runtime-deps rule | Shell out to `npx promptfoo` (downloads on first use); document that `node` is required for `conjure eval` |
+| Run eval on every `conjure audit` call by default | "Comprehensive audit" | Eval makes real API calls; cost is non-trivial ($0.50–$5 per run); unexpected costs on routine audit would break CI budgets | Keep `conjure eval` as an explicit subcommand; `conjure audit` runs the static budget linter only |
+| Write eval results to RESTRUCTURE-LOG.md | "Unified log" | Eval results are structured JSON with per-test pass/fail; mixing them into a prose log loses structure | Write eval results to `.conjure/eval/results/` with timestamps; keep RESTRUCTURE-LOG.md for adopt/restructure operations |
+| Assert that hooks "fired" via exit-code inspection | Hooks are shell processes; exit codes are not visible to promptfoo's assertion engine without extra infrastructure | Use the PostToolUse logfile pattern instead; or accept that hook firing is validated by unit tests in `tests/run.sh`, not by promptfoo evals |
+
+---
+
+## Feature Area D: Schema-version-aware Audit/Check
+
+### What drift/validation checks exist today
+
+`conjure audit` (v0.2.0+) checks: CLAUDE.md line count ≤100, SKILL.md line count ≤200, agent frontmatter JSON schema, anti-pattern detection (`@import` in CLAUDE.md), overlay drift. `conjure check` (v0.5.0) does 3-way sha256 drift detection on harness files.
+
+### What the current schema actually contains
+
+**SKILL.md frontmatter fields (all optional):** `name`, `description`, `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `disallowed-tools`, `model`, `effort`, `context` (fork), `agent`, `hooks`, `paths`, `shell`.
+
+Critical enforcement note: `allowed-tools` is parsed by Claude Code but not enforced at the tool-permission level (open bug: issue #37683). `disallowed-tools` removes tools from Claude's pool during the skill's active turn; the restriction clears on the next user message.
+
+**Hook schema:** 34 named events (as of 2026-06); handler types: `command`, `http`, `mcp_tool`, `prompt`, `agent`; `if` field uses permission-rule syntax. No explicit schema version field in the config JSON. Version-gated features: `terminalSequence` (v2.1.141+); `displayName` in marketplace (v2.1.143+); `defaultEnabled` in marketplace (v2.1.154+).
+
+**Settings keys added in recent versions** that old harnesses may be missing or may have with wrong types: `disableBypassPermissionsMode` (string `"disable"`, not boolean), `allowManagedPermissionRulesOnly` (boolean), `allowManagedHooksOnly` (boolean), `sandbox.filesystem.allowManagedReadPathsOnly` (boolean).
+
+**VS Code schema validator drift:** the VS Code extension's SKILL.md schema validator rejects valid fields (`allowed-tools`, `model`, `context`, `agent`, `hooks`) and includes undocumented fields — meaning any SKILL.md schema Conjure validates against must be Conjure-maintained, not deferred to the extension.
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Conjure Dependencies |
+|---------|--------------|------------|---------------------|
+| `conjure audit` validates all SKILL.md frontmatter keys against current known-field list | Skill authors adding new keys (e.g., `disallowed-tools`) expect validation to pass; currently old schema may reject valid fields | LOW — update Conjure's JSON schema for SKILL.md frontmatter to include all 14 documented fields; re-run against `tests/fixtures/` to verify no regressions | `scripts/audit-setup.sh`; JSON schema files |
+| `conjure audit` flags `disableBypassPermissionsMode` set to boolean `true` instead of string `"disable"` | Teams copying old examples set this incorrectly; boolean is silently ignored | LOW — add a type check in audit: if `disableBypassPermissionsMode` is present and is not the string `"disable"`, emit a warning with the correct value | `scripts/audit-setup.sh` |
+| `conjure check` flags settings keys that reference removed or renamed hook events | Hook events were added in recent Claude Code versions; harnesses built on old event names (or using an event name that was a pre-release alias) may silently never fire | MEDIUM — maintain a Conjure-internal table of current hook event names (34 events); audit `settings.json` `hooks:` keys against this table; flag unknown event names | `scripts/audit-setup.sh`; hook-events table (new) |
+| `conjure audit` validates `disallowed-tools` field in SKILL.md is an array or space-separated string (not a YAML mapping) | `disallowed-tools: Bash AskUserQuestion` is valid; `disallowed-tools: {Bash: true}` is not | LOW — add type-check rule for `disallowed-tools` in SKILL.md schema validation | `scripts/audit-setup.sh` |
+| `conjure check --schema` reports which Claude Code version introduced each setting key found in the harness | Teams pinned to an older Claude Code version need to know if their settings include keys that did not exist in their pinned version | MEDIUM — maintain a version-gate table mapping setting key → minimum Claude Code version; emit a `check --schema` report comparing harness setting keys against the pinned `.conjure-version` | `scripts/check.sh`; `.conjure-version` (existing); version-gate table (new) |
+
+### Differentiators
+
+| Feature | Value Proposition | Complexity | Conjure Dependencies |
+|---------|-------------------|------------|---------------------|
+| `conjure audit --strict` cross-validates `allowed-tools` declarations against the hook `matcher` patterns | A skill that declares `allowed-tools: Read Bash` but has a hook that blocks `Bash` is self-contradicting; flagging this prevents confusing harness behaviour | MEDIUM — parse both `allowed-tools` from SKILL.md and `PreToolUse` hook matchers from `settings.json`; emit a warning if the allowed tool is also blocked by a hook | `scripts/audit-setup.sh`; frontmatter parser; hooks JSON parser |
+| `conjure audit` flags `sandbox.denyRead` paths not mirrored in `permissions.deny` as `Read(...)` | The denyRead / Read-tool gap is a known gotcha; automated detection prevents false security | LOW — parse `sandbox.filesystem.denyRead` array; for each entry, check `permissions.deny` for a matching `Read(...)` rule; flag gaps | `scripts/audit-setup.sh` |
+| Auto-update schema table from `claude --version` output when run in a connected environment | Schema drift between Conjure's table and the installed Claude Code version is detected at run time | MEDIUM — `conjure check --schema` optionally calls `claude --version`; if version is newer than the table's `schema_version_known_through` field, emit a notice to update Conjure | `scripts/check.sh`; `claude` (soft dep) |
+
+### Anti-Features
+
+| Anti-Feature | Why Requested | Why Problematic | What to Do Instead |
+|--------------|---------------|-----------------|-------------------|
+| Auto-fix schema violations (rewrite settings.json keys) | "One-command fix" | Automated rewriting of settings.json is a mutation with non-trivial semantic implications; the wrong key name is a symptom, not the problem | Emit clear error messages with the correct key name and value; let the user apply the fix |
+| Pin to a specific Claude Code schema version and refuse to audit on mismatch | "Reproducible audits" | Claude Code versions in the wild vary widely; refusing to audit on version mismatch would break CI for most teams | Warn (not error) when the installed version is newer than the known schema; always proceed with the audit |
+
+---
+
+## Feature Area E: Cross-repo / Workspace Orchestration
+
+### Current native Claude Code support
+
+There is no native Claude Code workspace feature as of 2026-06. Issue #35362 (multi-repo workspace support) is closed without public resolution. Community patterns rely on: TOML/YAML repo manifests (mani, ttal), layered CLAUDE.md files (org → team → repo), `--add-dir` to grant read access to sibling repos, and manual task scripting.
+
+`claude --workspace /path/a /path/b` syntax does not exist yet. The closest native primitive is `--add-dir`, which grants file access (not skill/config loading) from additional directories.
+
+### What teams actually do
+
+- A `workspace.toml` or `repos.yaml` lists project name, local path, git URL, and tags
+- A root `CLAUDE.md` describes the workspace structure and cross-repo discovery
+- Repo manager tools (mani, ttal) run tasks across repos via `mani run <task> --all-projects`
+- Rollback is via `git` per repo; no cross-repo atomic rollback exists in any tool
+
+### Conjure-native workspace model
+
+Since no native rail exists, Conjure must define its own workspace manifest format. The most defensible approach is a JSON file (consistent with Conjure's existing JSON manifests) that lists repos with local paths:
+
+```json
+{
+  "name": "acme-workspace",
+  "repos": [
+    { "name": "backend", "path": "../backend", "tags": ["node", "api"] },
+    { "name": "frontend", "path": "../frontend", "tags": ["react"] },
+    { "name": "infra", "path": "../infra", "tags": ["terraform"] }
+  ]
+}
+```
+
+Stored at `.conjure-workspace.json` in the workspace root. Commands accept `--workspace .conjure-workspace.json` or discover it by walking parent directories (same pattern as `conjure check` discovering `.conjure-version`).
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Conjure Dependencies |
+|---------|--------------|------------|---------------------|
+| `.conjure-workspace.json` manifest — defines repos by local path and optional git URL | Teams with many repos need a declarative list; ad-hoc scripting is not repeatable; the manifest is the coordination primitive | LOW — define JSON schema; validate on load; no dependencies beyond `jq` | `lib/mutate.sh`; JSON schema tooling |
+| `conjure workspace init` — creates the manifest by discovering sibling repos with a `.claude/` directory | First-run UX: users should not hand-write the manifest; discovery by convention is safer | MEDIUM — scan parent directory for dirs containing `.claude/`; prompt (TTY) or auto-add (non-TTY with `--yes`); write manifest via `mutate_write` | `lib/mutate.sh`; TTY detection (existing pattern) |
+| `conjure workspace check` — runs `conjure check` across all repos in the manifest; emits a per-repo status table | The primary value: one command to see harness drift across 20 repos | MEDIUM — iterate manifest repos; shell out to `conjure check --porcelain` in each repo's path; aggregate results; emit a markdown table with repo name, drift status, and check exit code | `scripts/check.sh`; `lib/mutate.sh`; `--porcelain` output format |
+| `conjure workspace audit` — runs `conjure audit` across all repos; aggregates cap violations and schema errors | Same motivation as workspace check; audit is the health check | MEDIUM — iterate repos; shell out to `conjure audit --json` in each; aggregate; emit per-repo pass/fail and a global summary | `scripts/audit-setup.sh`; `--json` output (new) |
+| Per-repo rollback semantics: `conjure workspace adopt --rollback` rolls back each repo independently | Cross-repo atomic rollback is impossible without a distributed transaction; per-repo rollback is the safe degradation | LOW — for each repo in manifest, call `conjure adopt --rollback` if `.conjure-adopt-backup-*` exists; report per-repo outcome | `scripts/adopt.sh` (existing rollback); `lib/snapshot.sh` |
+| `conjure workspace update` — runs `conjure update` across all repos; reports per-repo merge/conflict status | Harness updates across many repos is the primary workspace pain point today | HIGH — iterate repos; call `conjure update`; capture exit code and sidecar conflict list; report per-repo; stop on first error unless `--continue-on-error` | `scripts/update.sh`; conflict sidecar pattern (existing) |
+
+### Differentiators
+
+| Feature | Value Proposition | Complexity | Conjure Dependencies |
+|---------|-------------------|------------|---------------------|
+| `conjure workspace report` — markdown table of per-repo health (version, drift status, overlay, eval coverage) emitted to stdout or a file | Tech leads need a single-pane view; this is the multi-repo equivalent of `conjure audit` | MEDIUM — aggregate outputs from check, audit, and eval (if present); emit a markdown table; `--json` for CI dashboards | All workspace subcommands above |
+| Workspace-scoped managed-settings merge — `conjure workspace emit-managed` generates a single `managed-settings.json` that covers all repos' compliance requirements | An org with mixed HIPAA + SOC2 repos needs a unified MDM policy; Conjure can union the denyRead paths and permission rules | HIGH — collect compliance overlay config from each repo's `.conjure-overlay`; union denyRead paths; union permission deny rules; emit a single managed-settings.json | Overlay system (existing); B-area managed-settings generator (new) |
+| `conjure workspace adopt` — runs `conjure adopt` across repos matching a tag filter | Bootstrapping a new compliance requirement across 20 repos is a multi-day manual task; workspace adopt with `--tags terraform` makes it a one-command operation | HIGH — tag filtering from manifest; serial execution (not parallel — avoids masking errors); per-repo snapshot before any mutation; stop on first failure unless `--continue-on-error` | `scripts/adopt.sh`; `lib/snapshot.sh` |
+
+### Anti-Features
+
+| Anti-Feature | Why Requested | Why Problematic | What to Do Instead |
+|--------------|---------------|-----------------|-------------------|
+| Parallel execution of workspace commands | "Faster" | Parallel mutations across repos mask failures; if one repo fails mid-adopt, others may complete, leaving the workspace in an inconsistent state that is hard to diagnose | Serial execution by default; `--jobs N` only for read-only commands (check, audit, report) where failure isolation is trivial |
+| Cross-repo atomic rollback (all-or-nothing) | "If one fails, undo all" | Distributed transactions require coordination state that Conjure does not have; the complexity is disproportionate to the gain; per-repo snapshot rollback is sufficient | Per-repo rollback; document the `conjure workspace adopt --rollback` procedure; teams can re-run per-repo rollback on failed repos |
+| Auto-clone missing repos from the manifest git URL | "Workspace setup in one command" | Cloning repos involves credentials, SSH keys, and network; this is out of Conjure's scope | Document the `git clone` step; workspace init only discovers already-cloned repos |
+| Native integration with mani, ttal, or other repo managers | "Use the standard tool" | No repo manager has enough adoption to be "standard"; adding a dep on any specific one fragments the user base | Accept `--workspace <path>` pointing to `.conjure-workspace.json`; provide a `conjure workspace import-mani` helper that converts a mani YAML to `.conjure-workspace.json` |
 
 ---
 
 ## Feature Dependencies
 
 ```
-[git-clean precondition]
-    └──required-by──> [conjure adopt (any live run)]
-                          cannot safely mutate without a clean recovery path
+[B: managed-settings generator]
+    └──required-by──> [A: managed marketplace wiring (strictKnownMarketplaces)]
+    └──required-by──> [E: workspace emit-managed]
+    └──requires──>    [compliance/ overlay scripts (existing)]
 
-[full snapshot backup]
-    └──required-by──> [--rollback flag]
-                          rollback needs the snapshot to restore from
-    └──required-by──> ["lose nothing" guarantee]
-                          testable only if backup manifest exists
+[A: plugin.json emission]
+    └──requires──>    [existing .claude-plugin/ stub (v0.2.0)]
+    └──requires──>    [conjure publish gate (existing)]
+    └──enhances──>    [B: extraKnownMarketplaces wiring]
 
-[markdown inventory + classification]
-    └──required-by──> [restructure skill]
-                          skill reads inventory to propose extractions
-    └──required-by──> [adoption report summary]
-                          summary aggregates inventory counts
-    └──required-by──> [idempotent re-run]
-                          state comparison uses inventory hashes
+[C: conjure eval init]
+    └──requires──>    [scripts/audit-setup.sh harness inventory (existing)]
+    └──requires──>    [SKILL.md frontmatter parser (existing)]
+    └──enhances──>    [D: audit coverage check (eval coverage gap)]
 
-[RESTRUCTURE-LOG.md]
-    └──required-by──> [--rollback flag]
-                          rollback reads log to identify steps to undo
-    └──required-by──> [idempotent re-run]
-                          state file records completed steps
-    └──enables──>     [audit trail / team review]
+[D: schema-aware audit]
+    └──requires──>    [scripts/audit-setup.sh (existing)]
+    └──extends──>     [existing JSON schema for frontmatter (existing)]
+    └──required-by──> [C: conjure audit --budget]
+    └──required-by──> [B: audit flags missing sandbox mirror]
 
-[scaffold missing harness layers]
-    └──requires──>    [scripts/init-project.sh (already shipped)]
-                          adopt calls init-project in additive mode
-    └──required-by──> [adoption report summary]
-                          summary reports what was scaffolded
+[E: workspace orchestration]
+    └──requires──>    [scripts/check.sh --porcelain (existing)]
+    └──requires──>    [scripts/audit-setup.sh --json (new flag)]
+    └──requires──>    [scripts/adopt.sh --rollback (existing)]
+    └──requires──>    [B: managed-settings generator (for workspace emit-managed)]
+    └──requires──>    [.conjure-workspace.json manifest (new)]
 
-[size-cap audit gate]
-    └──requires──>    [scripts/audit-setup.sh (already shipped)]
-                          adopt calls audit as pre-flight + post-flight
-    └──required-by──> [restructure skill]
-                          skill knows which files violate caps from pre-flight
-
-[lib/mutate.sh (already shipped)]
-    └──required-by──> [all write operations in adopt.sh]
-    └──extend-with──> [mutate_snapshot (new)]
-    └──extend-with──> [mutate_archive (new)]
-    └──extend-with──> [log_step (new, uses mutate_write --append)]
-
-[restructure skill]
-    └──requires──>    [inventory file (new)]
-    └──requires──>    [conjure adopt CLI primitives (new)]
-    └──requires──>    [human approval per step (design)]
-    └──outputs──>     [structured commands dispatched to CLI]
-
-[--dry-run]
-    └──requires──>    [lib/mutate.sh DRY_RUN=1 (already shipped)]
-    └──enables──>     [safe exploration before any commitment]
-
-[conjure adopt (all steps)]
-    └──requires──>    [git-clean precondition OR --force flag]
-    └──requires──>    [full snapshot backup]
-    └──produces──>    [RESTRUCTURE-LOG.md]
-    └──produces──>    [.conjure-adopt-inventory.md]
-    └──produces──>    [.conjure-adopt-state]
-    └──may-produce──> [.conjure-archive-<timestamp>/]
+[C: PR gate workflow]
+    └──requires──>    [conjure eval init (generates promptfooconfig.yaml)]
+    └──requires──>    [node (soft dep, already required by .mjs hooks)]
+    └──enhances──>    [D: audit coverage check (surfaced in PR comment)]
 ```
 
 ### Dependency Notes
 
-- **Snapshot backup requires lib/mutate.sh extension:** `mutate_snapshot` is a new primitive that wraps `mutate_cp` in a loop over all touched paths. It must write a manifest file (sha256 per file) for rollback verification. Without this manifest, rollback cannot verify fidelity.
+- **Build order within the milestone:** D (schema-aware audit) unblocks C (eval coverage check). B (managed-settings) and A (plugin emission) can proceed in parallel. E (workspace) requires D's `--json` audit flag and can start after D ships. C's PR gate requires C's eval init.
 
-- **RESTRUCTURE-LOG.md requires mutate_write --append:** This already works in `lib/mutate.sh`. The `log_step` function is a thin wrapper that formats the line and calls `mutate_write --append`. It must also work under `DRY_RUN=1` (printing `[dry-run] would log: <line>` instead of writing).
+- **`conjure audit --json`** is a new flag needed by both C (coverage reporting) and E (workspace audit aggregation); ship it as part of D since audit-setup.sh is the natural owner.
 
-- **Idempotent re-run conflicts with stateless adoption:** The `.conjure-adopt-state` file is the resolution. On first run it does not exist; adopt runs fully. On subsequent runs it exists; adopt compares current sha256 values of managed paths against the state file's recorded hashes and skips steps whose pre-condition is already met.
+- **`node` soft dep:** C's `conjure eval run` shells out to `npx promptfoo`; the `.mjs` hooks already require node, so this is not a new hard dep, but should be documented in the preflight check.
 
-- **`restructure` skill depends on the CLI adopt command existing:** The skill cannot run before `conjure adopt` is implemented, because it dispatches approved proposals to adopt's CLI primitives (e.g., `conjure adopt --archive <path>`, `conjure adopt --extract-skill <file>`). Build order: adopt CLI first, then skill.
-
-- **`conjure migrate` and `conjure adopt` must not be called simultaneously:** Both modify `.claude/` and would produce conflicting state. Document as sequential: migrate first (converts tool-specific config), then adopt (rehabilitates the full project structure).
+- **plist generation in B** requires Python 3 `plistlib` or `plutil` (macOS only). On Linux/Windows, emit the plist as a JSON + base64 blob with a note that macOS is required for the MDM deployment step. Python 3 is available on all target platforms.
 
 ---
 
 ## MVP Definition
 
-### Must Ship (v0.6.0 core)
+### Ship First (foundational — unblocks everything)
 
-The minimum viable `conjure adopt` that delivers on "lose nothing, report everything":
+- [x] **D: Schema-aware audit** — SKILL.md frontmatter validation + hook event table + `--json` flag — unblocks E; closes known schema debt; LOW–MEDIUM complexity
+- [x] **B: sandbox block emission from overlays** — concrete denyRead/permissions.deny per regime — HIGH security value; MEDIUM complexity; standalone
+- [x] **B: managed-settings.json generation** — IT deployment artifact; MEDIUM complexity; standalone
 
-- [x] **Git-clean precondition + `--force` override** — why essential: the cheapest safety net; no other safety measure compensates for a dirty tree that can't be recovered via `git checkout`
-- [x] **Full snapshot backup with sha256 manifest** — why essential: "lose nothing" is untestable without this; rollback requires it
-- [x] **`--dry-run` plan output** — why essential: users will not run adopt live without first seeing the plan; every comparator tool ships this; absence makes adopt feel unsafe
-- [x] **Markdown inventory + 6-bucket classification** — why essential: without an inventory, the restructure skill has nothing to read and users have no basis for approval decisions
-- [x] **Scaffold missing harness layers (calls init-project.sh)** — why essential: adopt's primary deliverable is a correct four-layer harness; without scaffold, adopt is just an audit
-- [x] **Size-cap audit gate (pre-flight + post-flight, calls audit-setup.sh)** — why essential: shipping adopt that produces a harness violating caps would be worse than not shipping
-- [x] **Never-delete / archive-not-delete (`mutate_archive`)** — why essential: this is the user-visible "lose nothing" guarantee; must be present from day one
-- [x] **`RESTRUCTURE-LOG.md` per-step structured changelog** — why essential: the user explicitly demanded "clear message of what changed at each step"; this is non-negotiable
-- [x] **`--rollback` from snapshot** — why essential: without rollback, users cannot safely run adopt on a production project; it would be a one-way door
-- [x] **`restructure` skill (SKILL.md)** — why essential: the oversized CLAUDE.md problem cannot be solved by deterministic rules alone; the skill is the judgment layer for the main user pain point
+### Ship Second (core milestone value)
 
-### Add After Validation (v0.6.x)
+- [x] **A: `conjure publish-plugin`** — plugin.json + marketplace.json emission; MEDIUM complexity; depends on existing publish gate
+- [x] **A: `extraKnownMarketplaces` wiring** — project settings integration; LOW complexity
+- [x] **C: `conjure eval init` + `conjure eval run`** — scaffold eval + execute; MEDIUM complexity; requires D for coverage check
+- [x] **C: PR gate workflow template** — `--emit-workflow`; LOW complexity
+- [x] **C: `conjure audit --budget`** — static context linter; LOW complexity; extends D's audit
 
-- [ ] **Idempotent re-run via `.conjure-adopt-state`** — trigger: first field reports of users re-running adopt and getting duplicate log entries or scaffold re-application; adds MEDIUM complexity; most users won't re-run immediately
-- [ ] **`--json` inventory output** — trigger: first CI pipeline integration request; LOW complexity; can ship as a fast follow
+### Ship Third (workspace, highest complexity)
 
-### Defer to v0.7.0+
+- [x] **E: `.conjure-workspace.json` + `conjure workspace init`** — manifest + discovery; LOW–MEDIUM complexity
+- [x] **E: `conjure workspace check` + `conjure workspace audit`** — multi-repo health; MEDIUM complexity
+- [x] **E: `conjure workspace update`** — multi-repo harness update; HIGH complexity
 
-- [ ] **Cross-repo / workspace orchestration** — explicitly deferred in PROJECT.md; depends on v0.6.0 single-repo story being validated first
-- [ ] **TUI conflict resolution for restructure approvals** — low priority; the `y/n` prompt model from `conjure resolve` is adequate; full TUI deferred as in v0.5.0
-- [ ] **Autonomous (no-approval) restructure** — explicit non-goal per PROJECT.md; requires a fundamentally different trust model
+### Defer to v0.7.x or v0.8.0
+
+- [ ] **E: `conjure workspace adopt`** — multi-repo brownfield adoption; HIGH complexity + HIGH risk
+- [ ] **E: workspace emit-managed** — union managed-settings across repos; HIGH complexity; needs all overlay work to stabilise first
+- [ ] **A: `--pin-sha` for all marketplace sources** — nice-to-have; LOW complexity but low urgency
+- [ ] **B: MDM plist/PS1 artifact generation** — useful but can start without; MEDIUM complexity
 
 ---
 
@@ -240,57 +477,53 @@ The minimum viable `conjure adopt` that delivers on "lose nothing, report everyt
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| `--dry-run` (inherits lib/mutate.sh) | HIGH | LOW | P1 |
-| Git-clean precondition + `--force` | HIGH | LOW | P1 |
-| RESTRUCTURE-LOG.md per-step log | HIGH | LOW | P1 |
-| Never-delete / mutate_archive primitive | HIGH | LOW | P1 |
-| Scaffold missing layers (calls init-project.sh) | HIGH | LOW | P1 |
-| Size-cap audit gate pre/post (calls audit-setup.sh) | HIGH | LOW | P1 |
-| Markdown inventory + 6-bucket classification | HIGH | MEDIUM | P1 |
-| Full snapshot backup + sha256 manifest | HIGH | MEDIUM | P1 |
-| `--rollback` from snapshot | HIGH | MEDIUM | P1 |
-| `restructure` skill (SKILL.md) | HIGH | HIGH | P1 |
-| Adoption summary report (before/after) | MEDIUM | LOW | P2 |
-| Idempotent re-run via state file | MEDIUM | MEDIUM | P2 |
-| `--json` inventory output | LOW-MEDIUM | LOW | P2 |
-| Machine-readable RESTRUCTURE-LOG entries | LOW | LOW | P3 |
-
-**Priority key:** P1 = ships in v0.6.0 core; P2 = ships in v0.6.x fast-follow or in v0.6.0 if time allows; P3 = nice-to-have
-
----
-
-## Comparator Tool Analysis
-
-| UX Behavior | jscodeshift / Next.js codemods | ESLint-interactive / Ruff | Terraform plan/apply | Flyway / Liquibase | chezmoi import | conjure adopt v0.6.0 |
-|-------------|-------------------------------|--------------------------|---------------------|--------------------|----------------|---------------------|
-| Dry-run before mutate | `--dry` + `-p` (print) | `--fix-dry-run` + formatter | `terraform plan` (required pre-step) | `dryRun` goal | `chezmoi diff` | `--dry-run` via lib/mutate.sh |
-| Inventory / scope preview | Per-file SKIP/OK/ERROR report | Per-rule problem count | Full change list (+/-/~) | Schema history table | `chezmoi data` | `.conjure-adopt-inventory.md` |
-| Safety categorization | Idempotent by post-condition check | safe vs. unsafe fixes | "plan then apply" gating | "already ran" state table | Additive by default | 6-bucket classification + size-cap pre-flight |
-| Per-step changelog | No persistent log; stdout only | No persistent log | Terraform state file | DATABASECHANGELOG table | No persistent log | `RESTRUCTURE-LOG.md` append-per-step |
-| Rollback | git history (implicit) | git history (implicit) | `terraform destroy` / state manipulation | Down-migrations | `chezmoi revert` | `--rollback` from sha256 snapshot manifest |
-| Archive-not-delete | No (git history is the backup) | No | No | No (down-migration) | No | Yes — `mutate_archive` to dated dir |
-| Idempotent re-run | Yes (post-condition check) | Yes (rule re-check) | Yes (state comparison) | Yes (DATABASECHANGELOG) | Yes (state hash) | Yes via `.conjure-adopt-state` (P2) |
-| Human gate | `--fail-on-error` review step | Per-rule interactive prompt | PR review of plan | DBA review of changelog | `chezmoi apply` confirmation | `restructure` skill per-step approval |
-| Dirty-tree guard | Recommends clean git state | No | No | No | Yes (warns on conflict) | `git status --porcelain` exit 2 |
+| D: SKILL.md frontmatter full schema | HIGH | LOW | P1 |
+| D: hook event name validation | HIGH | MEDIUM | P1 |
+| D: `disableBypassPermissionsMode` type check | HIGH | LOW | P1 |
+| D: `conjure audit --json` flag | HIGH | LOW | P1 |
+| B: sandbox block from overlays | HIGH | MEDIUM | P1 |
+| B: managed-settings.json generation | HIGH | MEDIUM | P1 |
+| A: `conjure publish-plugin` (plugin.json + marketplace.json) | HIGH | MEDIUM | P1 |
+| A: `extraKnownMarketplaces` wiring | HIGH | LOW | P1 |
+| C: `conjure eval init` | HIGH | MEDIUM | P1 |
+| C: `conjure eval run` | HIGH | LOW | P1 |
+| C: PR gate workflow template | HIGH | LOW | P1 |
+| C: `conjure audit --budget` | MEDIUM | LOW | P1 |
+| E: `.conjure-workspace.json` manifest | HIGH | LOW | P1 |
+| E: `conjure workspace init` | HIGH | MEDIUM | P1 |
+| E: `conjure workspace check` | HIGH | MEDIUM | P2 |
+| E: `conjure workspace audit` | HIGH | MEDIUM | P2 |
+| E: `conjure workspace update` | HIGH | HIGH | P2 |
+| B: MDM plist artifact | MEDIUM | MEDIUM | P2 |
+| B: Windows PS1 artifact | MEDIUM | MEDIUM | P2 |
+| A: `--pin-sha` | MEDIUM | LOW | P2 |
+| D: `allowed-tools` vs hook matcher cross-validation | MEDIUM | MEDIUM | P2 |
+| B: managed-settings.d/ fragments | MEDIUM | MEDIUM | P2 |
+| C: `conjure eval snapshot` baseline | MEDIUM | LOW | P3 |
+| E: `conjure workspace adopt` | HIGH | HIGH | P3 |
+| E: workspace emit-managed | MEDIUM | HIGH | P3 |
 
 ---
 
 ## Sources
 
-- jscodeshift dry-run and codemod workflow: [My Workflow for Codemods](https://www.skovy.dev/blog/codemod-workflow) — MEDIUM confidence (community article, patterns verified against jscodeshift docs)
-- jscodeshift `--dry` flag: [jscodeshift npm](https://www.npmjs.com/package/jscodeshift) — HIGH confidence (package docs)
-- Codemods as large-scale refactoring pattern: [Codemods: Automated API Refactoring](https://martinfowler.com/articles/codemods-api-refactoring.html) — HIGH confidence (Martin Fowler, verified)
-- ESLint `--fix-dry-run` and `--fix-type`: [ESLint CLI Reference](https://eslint.org/docs/latest/use/command-line-interface) — HIGH confidence (official docs)
-- ESLint-interactive per-rule interactive fixing: [eslint-interactive GitHub](https://github.com/mizdra/eslint-interactive) — HIGH confidence (README verified)
-- Ruff safe vs. unsafe fixes: [The Ruff Linter](https://docs.astral.sh/ruff/linter/) and [Ruff unsafe fixes issue](https://github.com/astral-sh/ruff/issues/4181) — HIGH confidence (official docs + issue)
-- OpenRewrite "do no harm" + dry-run: [Understanding OpenRewrite](https://www.moderne.ai/blog/understanding-openrewrite-beyond-the-myths) and [Recipe conventions](https://docs.openrewrite.org/authoring-recipes/recipe-conventions-and-best-practices) — HIGH confidence (official docs)
-- Terraform plan/apply idempotency: [terraform plan reference](https://developer.hashicorp.com/terraform/cli/commands/plan) — HIGH confidence (official HashiCorp docs)
-- Flyway/Liquibase state tracking: [Flyway vs Liquibase](https://www.bytebase.com/blog/flyway-vs-liquibase/) and [Idempotent Liquibase Changesets](https://imhoratiu.wordpress.com/2023/05/30/idempotent-liquibase-change-sets/) — MEDIUM confidence (verified against known behavior)
-- Brownfield VITA framework: [Brownfield (software development) Wikipedia](https://en.wikipedia.org/wiki/Brownfield_(software_development)) — MEDIUM confidence (taxonomy useful, not prescriptive)
-- chezmoi import + diff + apply workflow: inferred from previous v0.5.0 research (HIGH confidence, chezmoi docs verified in that session)
-- Git clean precondition / requireForce: [git-clean documentation](https://git-scm.com/docs/git-clean) — HIGH confidence (official git docs)
-- Conjure internal: `lib/mutate.sh`, `scripts/audit-setup.sh`, `scripts/init-project.sh`, `scripts/check.sh`, `scripts/resolve.sh`, `.planning/PROJECT.md` — HIGH confidence (read directly this session)
+- Claude Code plugin marketplace docs (official): [Create and distribute a plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces) — HIGH confidence
+- Claude Code settings and sandbox schema (official): [Claude Code settings](https://code.claude.com/docs/en/settings) — HIGH confidence
+- Anthropic MDM examples: [claude-code/examples/mdm](https://github.com/anthropics/claude-code/tree/main/examples/mdm) — HIGH confidence
+- Claude Code hooks reference (official): [Hooks reference](https://code.claude.com/docs/en/hooks) — HIGH confidence
+- SKILL.md frontmatter reference (official): [Extend Claude with skills](https://code.claude.com/docs/en/skills) — HIGH confidence
+- promptfoo Claude Agent SDK provider (official): [Claude Agent SDK | Promptfoo](https://www.promptfoo.dev/docs/providers/claude-agent-sdk/) — HIGH confidence
+- promptfoo skill testing (official): [Test Agent Skills | Promptfoo](https://www.promptfoo.dev/docs/guides/test-agent-skills/) — HIGH confidence
+- promptfoo-action GitHub Action: [promptfoo/promptfoo-action](https://github.com/promptfoo/promptfoo-action) — HIGH confidence
+- Claude Code cost and context management (official): [Manage costs effectively](https://code.claude.com/docs/en/costs) — HIGH confidence
+- `allowed-tools` enforcement gap: [allowed-tools does not restrict tool access · Issue #37683](https://github.com/anthropics/claude-code/issues/37683) — HIGH confidence (open bug)
+- VS Code skill schema drift: [YAML Frontmatter Validation Schema Outdated · Issue #23330](https://github.com/anthropics/claude-code/issues/23330) — HIGH confidence (open bug)
+- `extraKnownMarketplaces` + trust dialog CI constraint: [Clarify extraKnownMarketplaces requires interactive trust dialog · Issue #13097](https://github.com/anthropics/claude-code/issues/13097) — HIGH confidence
+- Multi-repo workspace feature request: [Feature request: Multi-repo workspace support · Issue #35362](https://github.com/anthropics/claude-code/issues/35362) — HIGH confidence (closed without native implementation)
+- Multi-repo workspace structuring patterns: [Structuring Claude Code for Multi-Repo Workspaces](https://karun.me/blog/2026/03/26/structuring-claude-code-for-multi-repo-workspaces/) — MEDIUM confidence (community article)
+- Enterprise governance compliance patterns: [Claude Code Governance](https://www.truefoundry.com/blog/claude-code-governance-building-an-enterprise-usage-policy-from-scratch) — MEDIUM confidence (community article, patterns consistent with official docs)
+- `sandbox.denyRead` does not block Read tool: [sandbox denyRead seems ineffective · Issue #32226](https://github.com/anthropics/claude-code/issues/32226) — HIGH confidence (open bug, confirmed by settings doc audit)
 
 ---
-*Feature research for: Conjure v0.6.0 Safe Brownfield Adoption*
-*Researched: 2026-05-28*
+*Feature research for: Conjure v0.7.0 Plugin-native + Policy-grade*
+*Researched: 2026-06-03*

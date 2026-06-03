@@ -1,238 +1,272 @@
 # Project Research Summary
 
-**Project:** Conjure v0.6.0 — Safe Brownfield Adoption
-**Domain:** Deterministic CLI-driven rehabilitation of messy existing repos into the conjure four-layer harness, with LLM judgment supplied by a human-gated skill
-**Researched:** 2026-05-28
-**Confidence:** HIGH
+**Project:** Conjure v0.7.0 — Plugin-native + Policy-grade
+**Domain:** POSIX bash + Node stdlib .mjs CLI harness scaffolder — plugin/marketplace emission, deployable policy/MDM, promptfoo eval gating, schema-version-aware audit, cross-repo workspace orchestration
+**Researched:** 2026-06-03
+**Confidence:** HIGH (official Claude Code docs, live codebase reads, confirmed GitHub issues; MEDIUM for promptfoo CI behavior and cross-repo saga patterns)
+
+---
 
 ## Executive Summary
 
-v0.6.0 adds the ability to take a grown-messy project — the canonical stress fixture ("argus") has 2180 markdown files, a 21 KB / 180-line CLAUDE.md against a 100-line cap, 35 GSD planning docs, and a `.claude/` with settings only — and fold it cleanly into the conjure four-layer harness without losing a single byte. The approach is split across two cooperating components: `conjure adopt` (deterministic bash CLI: snapshot, inventory, scaffold, audit, apply, log) and a `restructure` skill (in-session Claude, human-gated, judgment only). The CLI owns every filesystem mutation; the skill owns all judgment; the skill calls the CLI for every write; the CLI never calls the skill. This split is the design center of v0.6.0.
+Conjure v0.7.0 adds five substantial capability areas on top of the stable v0.6.0 brownfield adoption base (467 passing tests): plugin/marketplace emission, sandbox and managed-settings/MDM policy generation, promptfoo-based eval gating with context-budget linting, schema-version-aware audit, and cross-repo workspace orchestration. The milestone's central challenge is not any single feature — it is scope discipline. Five areas built in parallel will produce five half-built features; four validated areas unlocking the fifth sequentially will produce something teams can actually depend on. Cross-repo orchestration is the capstone and must remain locked until areas 1-4 are each individually verified.
 
-The stack introduces zero new dependencies. Every primitive — `find -print0 | xargs -0 wc -l` for inventory, `cp -a` for snapshot, `git status --porcelain=v1` for the clean gate, `wc -l <` redirect for cap detection, `jq -cn --slurpfile` for manifest construction — is already in the preflight stack. New lib files (`lib/log.sh`, `lib/snapshot.sh`, `lib/inventory.sh`) layer cleanly on the unchanged `lib/mutate.sh` chokepoint. The `adopt-manifest.json` is the integration contract between CLI and skill, with a summary-first structure so the skill can load the 2180-file index selectively rather than injecting all 175 KB of JSON into context at once.
+The recommended build sequence (Plugin → Sandbox/MDM → Eval → Schema-audit → Workspace) tracks a dependency graph that research across all four files confirms with high consistency. Plugin helpers must be extracted before emit-plugin ships; schema-aware audit must be available before workspace can aggregate per-repo audit outputs. The unifying architectural theme is unchanged from v0.6.0: every emitted artifact must have a testable verification command. The v0.6.1 hook-reads-argv regression — a shipped config that silently did nothing — is the template for the highest-risk failure class in v0.7.0. MDM artifacts that silently no-op because a key is misspelled, marketplace entries that fail `claude plugin validate` after a CC schema update, and hook events named `SessionStop` (invalid; correct name is `SessionEnd`) are all the same bug class wearing different costumes.
 
-The research surfaces seven critical pitfalls that directly drive implementation requirements, the most severe being: (1) LLM condensation silently dropping embedded constraints — caught by a pre-pass constraint extraction and a post-LLM invariant check before user approval; (2) partial-apply corruption from interrupts — caught by a step-completion manifest and signal traps from day one; (3) the snapshot vs git-state interaction — addressed by recording git HEAD sha in a `snapshot-meta.json` and warning explicitly when `--force` is used on a dirty tree; and (4) approval fatigue at 2000+ files — addressed by hierarchical grouped approvals, never 2180 individual prompts. These are not hardening concerns; they are day-one requirements.
+The zero-dependency runtime envelope (`dependencies: {}` stays empty) and POSIX bash 3.2+ constraints apply throughout. Net new runtime dependencies are zero: promptfoo is invoked via `npx promptfoo@0.121.14` at eval time only (never bundled); plist generation uses `python3`/`plutil` (macOS system tools); everything else is `jq` + bash arithmetic already in the envelope. The scope is genuinely large for a tool with a strict safety bar, but each area is independently shippable and has well-documented patterns from the official Claude Code docs verified in this research session.
+
+---
 
 ## Key Findings
 
-### Recommended Stack
+### Recommended Stack (v0.7.0 additions)
 
-The v0.6.0 stack is a strict zero-new-dependencies extension of v0.5.0. All inventory, snapshot, classification, manifest generation, and patch application primitives are assembled from tools already in the preflight gate. Three new `lib/` files are added (`lib/log.sh`, `lib/snapshot.sh`, `lib/inventory.sh`), one new `scripts/` worker (`scripts/adopt.sh`), one new constant file (`lib/caps.sh` — 5 lines extracting the hardcoded line caps from `audit-setup.sh`), and one new skill template (`templates/skills/restructure/SKILL.md`). `lib/mutate.sh` is unchanged; `scripts/audit-setup.sh` and `scripts/init-project.sh` are unchanged and called as subprocesses.
+All five areas add zero new runtime dependencies. The full v0.7.0 stack table is documented in `.planning/research/STACK.md` (lines 1283-2028). Key additions:
 
-**Core techniques:**
-- `find <root> -name '*.md' -print0 | xargs -0 wc -l` — batch inventory without per-file fork; 2180 files in under 2 seconds on NVMe; POSIX 3.2+
-- `cp -a <target> <backup>` — full timestamped snapshot before any mutation; `-a` preserves timestamps + symlink structure (macOS 10.5+, all GNU); `cp -Rp` as documented POSIX fallback
-- `git -C "" status --porcelain=v1` — clean gate; empty output = clean; unaffected by color/locale config; catches untracked files that `git diff --quiet` misses
-- `wc -l < "$path"` (redirect form, no filename noise) — cap detection; compare to constants in `lib/caps.sh` (`CLAUDE_MD_CAP=100`, `SKILL_MD_CAP=200`, `AGENT_MD_CAP=80`)
-- `jq -cn --arg ... --slurpfile` — manifest construction with no shell string interpolation (injection-safe); `--slurpfile` reads JSONL temp file as JSON array; `group_by + from_entries` for per-class summary
-- `adopt-manifest.json` as CLI→skill contract; summary-first structure enables `!jq '\{summary, claude_md\}' .claude/adopt-manifest.json` selective injection in the skill rather than loading 175 KB into context
-- Per-step patch files under `.claude/adopt-patches/<step-id>.json`; skill writes via `Write` tool; CLI reads via `jq -r ".operations[\]..."` loop and executes via `mutate_*` primitives
-- `lib/log.sh` writes `RESTRUCTURE-LOG.md` via `mutate_write --append`; all writes honor `DRY_RUN`; log is human-readable markdown with grep-parseable `[TIMESTAMP] [PHASE] message` format
-- `allowed-tools: [Read, Bash]` on the restructure skill — physically cannot call Write/Edit on project files; all mutations are forced through CLI, preserving the audit trail
+**Core technologies:**
+- `claude plugin validate .` (Claude Code built-in CLI) — plugin/marketplace CI validation at emit time, no external tool
+- `lib/cc-schema.json` (bundled JSON, ~2KB) — schema-version-aware audit; MUST be bundled, NOT fetched at runtime (zero-egress CI constraint; schema fetching is an anti-pattern)
+- `npx --yes promptfoo@0.121.14 eval` — eval gate; pinned, invoked at eval time only; `CONJURE_PROMPTFOO_VERSION` env var allows team override; Node >=20.20.0 required for `conjure eval` specifically
+- `while read -r` workspace iteration (POSIX bash 3.2+) — cross-repo orchestration without any new dep
+- `jq` (existing hard dep) — all JSON merges for sandbox block, managed-settings, marketplace wiring
+- `python3 -c "import plistlib..."` OR `plutil` (macOS system tools) — macOS plist generation; advisory dep, no install required
 
-**What NOT to add:**
-- `ripgrep`, GNU `parallel`, or any tool not already in preflight — `find + xargs` is sufficient for 2180 files
-- Full 2180-file `files[]` array injection into skill context — use summary + selective `jq` filters
-- Inline JSON passed via CLI args for patch content — use patch files (quoting limits, non-reviewable)
-- `mutate_rm` on user content files — only `archive` op (copy to `.conjure-archive/` then rm)
-- `git status --short` — affected by user color config; `--porcelain=v1` is the contract-stable form
+**Critical schema facts (must-not-get-wrong):**
+- `SessionStop` is NOT a valid hook event; correct name is `SessionEnd` — hooks using `SessionStop` silently fail
+- `extraKnownMarketplaces` is an **object** (keys = marketplace names), NOT an array
+- `strictKnownMarketplaces` goes in `managed-settings.json` ONLY — silently ignored if placed in `.claude/settings.json`
+- `disableBypassPermissionsMode` must be string `"disable"`, NOT boolean `true`
+- `sandbox.filesystem.denyRead` does NOT block Claude's `Read` tool — must be mirrored in `permissions.deny` as `Read(<path>)` rules
+- Windows `C:\ProgramData\ClaudeCode\` path deprecated since v2.1.75 — do NOT emit; use `C:\Program Files\ClaudeCode\managed-settings.json` + registry key
+- `promptfoo@0.121.14` requires Node `^20.20.0 || >=22.22.0` — add preflight check to `conjure eval` only; do not raise global Conjure Node requirement
 
 ### Expected Features
 
-The research frames v0.6.0 around 8 concrete, testable "lose nothing" behaviors, drawn from comparator tools (jscodeshift, ESLint `--fix-dry-run`, Terraform plan/apply, Flyway/Liquibase, chezmoi import):
+Full feature tables are in `.planning/research/FEATURES.md`. Synthesized priorities:
 
-**Must have (table stakes):**
-- `--dry-run` shows every planned mutation without writing anything; `DRY_RUN=1` already honored by `lib/mutate.sh`; adopt must pass it throughout
-- Full timestamped snapshot backup with sha256 manifest before first mutation — "lose nothing" is untestable without it; `--rollback` requires it
-- Git-clean precondition (`git status --porcelain=v1`) with `exit 2` on dirty tree and `--force` override; required for safe recovery path
-- Markdown inventory with 6-bucket classification (`harness-core`, `harness-skill`, `harness-agent`, `planning-doc`, `reference-doc`, `unknown`) emitted as `adopt-manifest.json`
-- Scaffold missing harness layers via `scripts/init-project.sh` in additive mode (already idempotent)
-- Size-cap audit gate pre-flight and post-flight via `scripts/audit-setup.sh` as subprocess
-- Never-delete: `mutate_archive` moves stale files to `.conjure-archive-<ts>/`, never `rm`
-- `RESTRUCTURE-LOG.md` append per step (not only at end); survives mid-run kill; each entry before the next step begins
-- `--rollback` restores snapshot exactly; sha256 of every mutated file after rollback equals sha256 recorded before the run
-- `restructure` skill (SKILL.md) — the oversized CLAUDE.md problem requires LLM judgment; skill proposes, human approves each step, CLI applies
+**Must have (P1 — foundational):**
+- D: `conjure audit` validates all SKILL.md frontmatter keys (including new `disallowed-tools`) + hook event names against bundled table + `disableBypassPermissionsMode` type check + `--json` flag (needed by workspace aggregation)
+- B: Sandbox block emission from compliance overlays into `.claude/settings.json` with mirrored `permissions.deny` for denyRead paths
+- B: `managed-settings.json` generation per overlay (IT deployment artifact)
+- A: `conjure publish-plugin` emits `plugin.json` + `marketplace.json` from actual on-disk harness contents + wires `extraKnownMarketplaces` into settings
+- C: `conjure eval init` scaffolds `promptfooconfig.yaml` + `conjure eval run` executes via npx + `conjure audit --budget` static context linter
 
-**Should have (differentiators):**
-- RESTRUCTURE-LOG.md in human-readable structured format with per-run sections and summary at top
-- Idempotent re-run via `.conjure-adopt-state` step-completion manifest (detects already-applied steps)
-- Adoption report summarizing before/after state (files inventoried, layers scaffolded, archived, CLAUDE.md line count delta)
-- Hierarchical grouped approvals for large corpora — summary per class, not 2180 individual prompts
-- Pre-write invariant check (constraint extraction pre-pass on CLAUDE.md + verify every constraint present in proposed LLM output before user approval gate)
-- Archive decisions as a separate, last step with decision-vocabulary scan ("decided", "we chose", "rationale", "do not", "never") to flag files for individual review
+**Should have (P2):**
+- E: `.conjure-workspace` manifest + `conjure workspace init` discovery
+- E: `conjure workspace check` + `conjure workspace audit` (multi-repo health aggregation)
+- B: MDM plist (macOS) + Windows .reg fragment generation
+- A: `--pin-sha` for marketplace sources
 
-**Defer to v0.6.x or v0.7.0+:**
-- `--json` inventory output for CI pipelines — fast follow after validation
-- Cross-repo / workspace orchestration — explicitly deferred to v0.7.0 per PROJECT.md
-- Interactive TUI for approvals — `y/n` prompt model from `conjure resolve` is adequate
-- Autonomous (no-approval) restructure — explicit non-goal; requires a fundamentally different trust model
+**Defer to v0.7.x or v0.8.0:**
+- E: `conjure workspace adopt` — multi-repo brownfield adoption (HIGH complexity + HIGH risk)
+- E: Workspace emit-managed (union managed-settings across repos)
+- B: `managed-settings.d/` fragment generation (composable drops for layered IT policies)
 
-**Anti-features (explicit non-goals):**
-- Fully autonomous restructure with no human approval — judgment cannot be made safely without sign-off
-- Permanently deleting any user file under any flag or option
-- Rewriting CLAUDE.md content autonomously without human-approved extraction steps
-- Auto-committing or pushing after adopt — trust violation; user must commit
-- Interactive TUI — breaks CI, adds deps, excludes Windows Git Bash
+**Anti-features to exclude:**
+- Auto-deploy MDM artifacts to Jamf/Intune via their APIs (credentials + org-specific tenant IDs out of scope)
+- Bundle promptfoo as a Conjure dependency (violates `dependencies: {}`)
+- Run `conjure eval` from `conjure audit` by default (eval makes real API calls; costs $0.50-$5/run)
+- Parallel workspace execution with all-or-nothing rollback guarantee (invariant cannot be maintained with concurrent bash processes)
 
 ### Architecture Approach
 
-The architecture enforces a strict split-responsibility model: the CLI owns all filesystem mutations (every write routes through `lib/mutate.sh`); the skill owns all LLM judgment; the skill calls the CLI for every write; the CLI never calls the skill. Three new libs layer on unchanged `lib/mutate.sh` without modifying it. Two existing scripts (`init-project.sh`, `audit-setup.sh`) are reused as subprocesses. The `adopt-manifest.json` is the integration contract — written by the CLI inventory phase, read by the skill, updated by the skill via `conjure adopt --update-manifest`, executed step-by-step via `conjure adopt --apply-step <id>`. The restructure skill's `allowed-tools: [Read, Bash]` restriction physically enforces the constraint that it cannot write project files directly.
+The v0.6.0 architecture baseline is fixed and fully shipped. All v0.7.0 work is additive: 3 new dispatcher entries in `cli/conjure`, 3 new worker scripts, 3 new shared libs, 1 bundled data file, and template/compliance additions. The core invariant is preserved: every filesystem write routes through `lib/mutate.sh`. No new area may bypass this. `lib/snapshot.sh` is reused by workspace orchestration without modification — its per-repo snapshot primitives provide the rollback foundation for aggregate workspace rollback.
 
-**Major components:**
-1. `lib/log.sh` (NEW) — `log_init` / `log_step` / `log_fail`; all writes via `mutate_write --append`; produces `RESTRUCTURE-LOG.md`; must be built first (everything else depends on logging)
-2. `lib/snapshot.sh` (NEW) — `snapshot_create` (`cp -a`, unconditional in live mode) / `snapshot_rollback` / `snapshot_list`; uses raw `cp -a`, not `mutate_cp`, because it precedes all `mutate_*` calls
-3. `lib/inventory.sh` (NEW) — `inventory_scan` / `inventory_classify` / `inventory_emit_manifest`; read-only; writes `adopt-manifest.json` via `mutate_write`; must support selective injection for large corpora
-4. `scripts/adopt.sh` (NEW) — orchestrates the full pipeline (5 steps); sources all three new libs; calls `init-project.sh` and `audit-setup.sh` as subprocesses; handles `--rollback`, `--apply-step`, `--update-manifest`, `--inventory`, `--status` sub-operations; dispatched by new `cmd_adopt` in `cli/conjure`
-5. `templates/skills/restructure/SKILL.md` (NEW) — installed to `.claude/skills/restructure/SKILL.md` by `adopt.sh` Step 3; reads manifest, proposes restructure plan, requires human approval per step, calls `conjure adopt --apply-step` for each approved step; restricted to `[Read, Bash]`
-6. `lib/caps.sh` (NEW, 5 lines) — `CLAUDE_MD_CAP=100`, `SKILL_MD_CAP=200`, `AGENT_MD_CAP=80`; sourced by both `audit-setup.sh` (call site change only) and `adopt.sh` to prevent cap drift
-7. `adopt-manifest.json` schema — the CLI to skill contract; `schema_version`, `summary` (first), `files[]`, `size_cap_violations`, `restructure_steps[]`; written at inventory time; `restructure_steps[]` populated by skill before `--apply-step` is called
+**New components (full details in `.planning/research/ARCHITECTURE.md`):**
+1. `lib/plugin-helpers.sh` — jq transforms for plugin.json/marketplace.json; shared by emit-plugin.sh and refactored publish-plugin.sh
+2. `lib/policy-helpers.sh` — emit sandbox{}, managed-settings.json, MDM artifacts; shared by all 4 compliance overlays
+3. `lib/workspace.sh` — workspace load/state/rollback/report; sources snapshot.sh + log.sh
+4. `lib/cc-schema.json` — bundled CC schema table (hook events, settings keys, version gates); read by audit-setup.sh via jq; NO runtime fetch
+5. `scripts/emit-plugin.sh` — generates .claude-plugin/ from harness; wires extraKnownMarketplaces
+6. `scripts/eval.sh` — runs promptfoo via npx --yes; --gate exits 2 on failure
+7. `scripts/workspace.sh` — 4-step pipeline: preflight all repos, snapshot all repos, execute ops sequentially, aggregate rollback on any failure
 
-**Build order (dependency-ordered):**
-Step 1 `lib/log.sh` → Step 2 `lib/snapshot.sh` → Step 3 `lib/inventory.sh` + manifest schema → Step 4 `scripts/adopt.sh` + `cmd_adopt` → Step 5 `templates/skills/restructure/SKILL.md` → Step 6 integration tests (`tests/fixtures/brownfield-argus/`)
+**Modified components:** `cli/conjure` (3 new subcommands), `scripts/audit-setup.sh` (schema-version + budget-linter sections), `compliance/*/apply.sh` (all 4 overlays gain `--emit-policy` flag path), `scripts/publish-plugin.sh` (refactored to source lib/plugin-helpers.sh)
 
-**Key anti-patterns to avoid:**
-- Restructure skill using `Write`/`Edit` tools directly — bypasses `mutate.sh`, breaks `DRY_RUN` and audit trail
-- `snapshot_create` routed through `mutate_cp` — snapshot must be unconditional in live mode; suppressing it under `DRY_RUN` removes the safety net
-- Manifest written via shell heredoc/printf — bypasses `mutate_write`, `DRY_RUN` not honored
-- `adopt.sh` re-implementing scaffold logic from `init-project.sh` — duplicate maintenance; call `init-project.sh existing $target` instead
+**Unchanged:** `lib/mutate.sh`, `lib/snapshot.sh`, `lib/log.sh`, `lib/inventory.sh`, `scripts/adopt.sh`, `scripts/check.sh`, `scripts/init-project.sh`
 
 ### Critical Pitfalls
 
-Seven critical pitfalls drive requirements directly. They are not hardening — they are day-one constraints.
+Full analysis with prevention checklists in `.planning/research/PITFALLS.md`. Top pitfalls by severity:
 
-1. **LLM invariant/constraint drop during condensation (CR-1)** — Run a constraint-extraction pre-pass on CLAUDE.md before invoking the skill (grep for `must`, `never`, `always`, `forbidden`, `exit 2`, `@imports`, size-cap numbers into `INVARIANTS.txt`); require the model to confirm each invariant appears in the proposed output; run the invariant check against proposed content before user approval (not after write). This is the highest-severity pitfall: a dropped constraint like "hooks must exit 2, never exit 1" is invisible to size-cap audit and only surfaces as a production incident.
+1. **"Silent no-op emitted config" class (CR-2, CR-1, CR-5)** — THE unifying pitfall across all 5 areas. Same root cause as the v0.6.1 hook-reads-argv bug. MDM artifacts that deploy silently but are ignored (wrong key name, wrong type, deprecated Windows path), plugin manifests that fail `claude plugin validate` after a CC schema update, and audit that passes on deprecated settings keys are all variants of the same pattern. Prevention: every emitted artifact requires a testable verification command at emit time, not just in CI. Compliance overlays that cannot be verified are not compliance overlays.
 
-2. **Partial-apply corruption (CR-2)** — Write a step-completion manifest at the end of each successfully completed step (not at end of run); add `trap 'echo interrupted; exit 2' INT TERM` from day one; on restart after partial completion, detect the manifest and offer `[r]ollback / [c]ontinue / [s]tart fresh`. Snapshot is taken once at the start and reused on re-run — never re-snapshot an already-mutated tree.
+2. **Cross-repo aggregate rollback inconsistency (CR-6)** — Highest-risk pitfall in v0.7.0. If repo 7 of 20 fails mid-apply, repos 1-6 are modified with no automatic rollback. The saga pattern is mandatory: snapshot ALL repos before applying to ANY; workspace manifest records each repo's snapshot path before the first op; `aggregate_rollback()` reads the manifest and calls `snapshot_rollback` per applied repo. Durable `.conjure-workspace-state.json` persists across SIGKILL.
 
-3. **Snapshot/git-state interaction (CR-3)** — Capture git HEAD sha and `git stash list` in a `snapshot-meta.json` alongside the backup; warn prominently in RESTRUCTURE-LOG when `--force` is used on a dirty tree ("snapshot includes uncommitted changes; git rollback will NOT restore these — use `conjure adopt --rollback` only"); `--rollback` uses filesystem snapshot exclusively, never `git checkout --` or `git reset`.
+3. **`SessionStop` / schema drift producing false green audits (CR-5, area D)** — `SessionStop` is not a valid hook event; correct name is `SessionEnd`. Existing harnesses using `SessionStop` silently never fire. `lib/cc-schema.json` must include the full validated event list. Schema is BUNDLED (matches zero-egress constraint) with a staleness advisory at >90 days — live-fetch at audit time is the anti-pattern resolved against in this summary.
 
-4. **Archive is not rollback (CR-4)** — `--rollback` uses only the timestamped snapshot backup, not the archive folder (archive = "things adopted away from harness", not "pre-adopt state"). The step-completion manifest must record each file actually written (path + sha256 before + sha256 after) so rollback knows what to restore after an interrupted run, not just what was planned.
+4. **Flaky promptfoo CI gate (CR-7, CR-8)** — LLM outputs are non-deterministic. Evals that mimic unit-test pass/fail patterns will produce false reds. Prevention: deterministic assertions (`contains`, `javascript`, `is-json`) first; `llm-rubric` last and only for genuinely subjective checks; `repeat: 3, minPassCount: 2` for any `llm-rubric` assertion; eval must never be called from `conjure audit` path.
 
-5. **Pre-write audit gate (CR-5)** — Run `conjure audit` against proposed LLM output before presenting to the user for approval. If the proposed output contains `@imports` (grep `^@`) or breaches the size cap, block the approval step with the audit output. The user must never be asked to approve invalid content — post-write audit is too late.
+5. **Scope explosion without sequencing discipline (SD-1)** — 5 areas built simultaneously will be 5 half-built features. Phase 5 (workspace) must be explicitly locked until Phases 1-4 each pass their own validation checklist. workspace.sh calls all other conjure subcommands as subprocesses; they must be stable first.
 
-6. **Archive decisions require highest skepticism (CR-6)** — Archive steps must be sequenced last, individually confirmed, and gated by a decision-vocabulary scan ("decided", "we chose", "rationale", "do not", "never"). Files > 50 lines always require individual confirmation. Never batch more than 5 files in a single archive approval.
-
-7. **Scaling to 2000+ files / approval fatigue (CR-7)** — Cap default inventory at 500 files (require `--full-inventory` for more); use streaming classification with a progress indicator; use hierarchical grouped approvals (per-class strategy, not per-file prompts); limit RESTRUCTURE-LOG entries for bulk operations to a summary line ("archived 31 of 35 GSD planning docs"). CI must assert `--dry-run` on a 500-file fixture completes in < 30 seconds.
+---
 
 ## Implications for Roadmap
 
-The research is unambiguous about build order: the dependency chain (log → snapshot → inventory → adopt.sh + manifest schema → skill) is deterministic. The pitfall-to-phase mapping from PITFALLS.md maps directly onto this sequence.
+Based on the combined dependency graph confirmed across all 4 research files, the recommended build sequence is:
 
-### Phase 1: Foundation Libs + Inventory
+### Phase 1: Plugin + Marketplace Foundation (Area A)
 
-**Rationale:** `lib/log.sh` and `lib/snapshot.sh` have no inward dependencies (only `lib/mutate.sh`, already shipped). Everything else depends on them. The inventory + manifest schema must be finalized before the skill (reader) and `adopt.sh` (writer) are built. This phase also addresses CR-7 (scaling) by designing streaming classification and hierarchical grouping before any code is written.
+**Rationale:** Plugin helpers must be extracted from `publish-plugin.sh` before `emit-plugin.sh` is written. Plugin emission is the simplest new command with the clearest spec from official docs. Establishes the emit-and-validate-at-emit-time pattern that all subsequent areas must follow. The smallest/safest area to ship first for early stabilization.
 
-**Delivers:** `lib/log.sh`, `lib/snapshot.sh`, `lib/inventory.sh`, `lib/caps.sh`, finalized `adopt-manifest.json` schema, streaming classification with 6-bucket heuristics, progress indicator pattern
+**Delivers:** `lib/plugin-helpers.sh` refactor; `scripts/emit-plugin.sh` + `cmd_emit_plugin`; `extraKnownMarketplaces` wiring into settings; `conjure publish` extended to validate marketplace.json reserved-name list; reconciliation check (manifest vs on-disk files).
 
-**Addresses:** Git-clean precondition (LOW complexity, P1 feature), never-delete / `mutate_archive` primitive, cap constant extraction to `lib/caps.sh`
+**Must ship together:** `claude plugin validate .` called at emit time (not just CI); SHA pinning at publish time; ref-without-sha audit warning; secret-pattern scan on all emit output before write.
 
-**Avoids:** CR-7 (design hierarchical approvals before implementation), M-2 (symlink + generated-file filters in the initial `find` pass), M-4 (UTC timestamps `date -u +%Y%m%dT%H%M%SZ`, absolute paths, `cp -a` vs `cp -r`)
+**Avoids pitfalls:** CR-1 (schema drift), CR-3 (version-pinning foot-guns), CR-4 (plugin/loose-file drift), M-2 (secrets in emitted config), M-5 (wrapping unstable CLI)
 
-**Research flag:** Standard patterns — no additional research needed. All primitives verified in STACK.md.
+**Research flag:** Standard patterns — plugin schema is HIGH confidence from official docs. No research-phase needed.
 
-### Phase 2: `scripts/adopt.sh` + `cmd_adopt` + Rollback
+---
 
-**Rationale:** This is the CLI core. Once the three libs exist, `adopt.sh` can be written end-to-end: git-clean gate → snapshot → inventory → scaffold → audit → summary. The `--rollback` implementation requires the snapshot manifest (Phase 1) and the step-completion manifest (this phase). Signal traps and partial-apply recovery belong here — they are day-one requirements per CR-2, not hardening.
+### Phase 2: Sandbox + Managed-Settings / MDM (Area B)
 
-**Delivers:** Full `conjure adopt` pipeline (5 steps), `--dry-run` plan output, `--rollback` from snapshot, `--force` override, `--inventory` sub-operation, `cmd_adopt` dispatch in `cli/conjure`, step-completion manifest (`.conjure-adopt-state`), signal traps, `snapshot-meta.json` with git state (CR-3)
+**Rationale:** Policy emission depends only on `lib/mutate.sh` (shipped); no dependency on Phase 1 at the lib level. Building second lets compliance overlays adopt the emit-and-verify pattern established in Phase 1. MDM artifacts are the highest-stakes "looks done but isn't" surface.
 
-**Addresses:** All 8 "lose nothing" behaviors; `mutate_snapshot` as new `lib/mutate.sh` primitive; `--update-manifest` and `--apply-step` sub-operations (required by skill in Phase 3); `.gitignore` / `.claudeignore` additions for `.conjure-adopt-backups/`
+**Delivers:** `lib/policy-helpers.sh`; all 4 compliance overlays gain `--emit-policy` flag path; `sandbox{}` block emitted into `.claude/settings.json` per overlay with mirrored `permissions.deny` for denyRead paths; `managed-settings.json` generation; platform-tagged MDM bundle (macos/, linux/, windows/); macOS plist via `plutil`/python3; Windows .reg fragment via bash string ops.
 
-**Avoids:** CR-2 (step manifest + signal traps from day one), CR-3 (snapshot-meta.json with git state), CR-4 (written-files log in manifest; rollback uses snapshot not archive), M-3 (sha256 no-op check in every `mutate_write` for adopt), M-4 (UTC timestamps, quote-safe paths), MN-2 (rollback guard when no snapshot exists)
+**Key schema facts to implement correctly:** `disableBypassPermissionsMode` must be string `"disable"` not boolean; `strictKnownMarketplaces` in managed-settings.json ONLY; denyRead must be mirrored in `permissions.deny` as `Read(<path>)` rules; deprecated Windows path `C:\ProgramData\ClaudeCode\` must NOT be emitted.
 
-**Research flag:** Standard patterns for most. The `--apply-step` / `--update-manifest` CLI→skill callback contract may need a planning-phase review of the step-id format and JSON schema validation depth (see Open Questions).
+**Must ship together:** `conjure check --managed-settings` verification command; `conjure audit` flags missing `permissions.deny` mirror for denyRead paths; `conjure audit --compliance` flags uncustomized sandbox template.
 
-### Phase 3: `restructure` Skill + Pre-Write Audit Gate
+**Avoids pitfalls:** CR-2 (silent MDM no-op), M-1 (sandbox too strict/loose), M-2 (secrets in emitted config), M-4 (cross-platform MDM paths)
 
-**Rationale:** The skill can only be finalized after `--apply-step` and `--update-manifest` in Phase 2 are tested and locked. Writing the skill before the CLI callbacks exist produces documentation that cannot be verified. The pre-write audit gate (CR-5) and invariant check (CR-1) belong here because they operate on proposed LLM content before it reaches the user approval step.
+**Research flag:** Windows drop-in directory (`managed-settings.d/`) behavior is MEDIUM confidence — verify against live CC before generating Windows drop-in configs during Phase 2 planning.
 
-**Delivers:** `templates/skills/restructure/SKILL.md` (installed by `adopt.sh` Step 3), constraint-extraction pre-pass (`INVARIANTS.txt` generation), pre-write `conjure audit` gate against proposed content, archive-as-last-step sequencing with decision-vocabulary scan (CR-6), RESTRUCTURE-LOG per-run structure with summary section (M-5), adoption report summary (before/after)
+---
 
-**Addresses:** `restructure` skill SKILL.md ≤200-line cap; `allowed-tools: [Read, Bash]` restriction; summary-first manifest injection pattern for 2180-file corpus; hierarchical grouped approvals
+### Phase 3: promptfoo Eval + Context-Budget Linter (Area C)
 
-**Avoids:** CR-1 (invariant extraction + post-LLM verification gate blocks approval on missing constraint), CR-5 (`conjure audit` on proposed content before user sees it), CR-6 (archive as last step, decision-vocabulary scan, individual confirmation > 5 files), M-1 (approve-and-record with sha256 for non-reproducible LLM output), M-5 (per-run log structure + 1000-line rotation)
+**Rationale:** eval.sh has no hard dependency on Phases 1-2 (only needs `npx`). Placing eval before schema-audit means workspace (Phase 5) can include `conjure eval` as a supported workspace op. Budget linter extends `audit-setup.sh` — a natural prereq for schema-audit Phase 4 additions.
 
-**Research flag:** Needs planning-phase review. The skill structured-output format and the step-id naming convention are design decisions not yet locked (see Open Questions). The skill body must stay ≤200 lines — tight given the instruction detail required. May need a planning spike to verify fit.
+**Delivers:** `templates/evals/` directory (base + 4 compliance suites); `scripts/eval.sh` + `cmd_eval`; Node >=20.20.0 preflight check in `conjure eval` (not global); `conjure audit --budget` static context-budget linter; `conjure eval --init` scaffolds promptfooconfig.yaml; `conjure eval --emit-workflow` generates `.github/workflows/conjure-eval.yml`.
 
-### Phase 4: Integration Tests + Argus Fixture
+**Promptfoo invocation pattern:** `npx --yes "promptfoo@${CONJURE_PROMPTFOO_VERSION:-0.121.14}" eval -c <config> --no-cache --no-share`
 
-**Rationale:** The "looks done but isn't" checklist in PITFALLS.md is 9 items, all requiring fixture-based verification. Tests cannot be written until Phases 1-3 are complete. The argus stress fixture (2180 files) must be synthetic but representative — 500-file variant for CI performance assertion (< 30 seconds).
+**Must ship together:** Deterministic-assertion-first discipline (`contains`/`javascript` before `llm-rubric`); `repeat: 3, minPassCount: 2` for any llm-rubric assertion; eval absent from `conjure audit` code path; enforcement vs disposition taxonomy documented.
 
-**Delivers:** `tests/fixtures/brownfield-argus/` fixture, tests covering: adopt `--dry-run` output, live run with manifest validation, `--rollback` zero-diff assertion, `--apply-step` execution + log entry, idempotent re-run (zero mutations), SIGKILL mid-run + recovery, 500-file performance assertion, symlink skip, `@import` guard (proposed content with `@import` must be blocked pre-write)
+**Avoids pitfalls:** CR-7 (flaky CI gate), CR-8 (evals test wrong thing), CR-9 (promptfoo as hidden runtime dep)
 
-**Avoids:** All "looks done but isn't" checklist items; validates rollback fidelity (sha256 diff vs pre-adopt); validates approval fatigue mitigation (hierarchical output confirmed in dry-run)
+**Research flag:** Phase 3 warrants a `--research-phase 3` pass to validate promptfoo's `claude-code-agent` provider behavior against Conjure's specific harness structure — novel integration not well documented outside promptfoo's own guides.
 
-**Research flag:** Standard patterns — bats-core integration tests following the v0.3.0 pattern. No additional research needed.
+---
+
+### Phase 4: Schema-Version-Aware Audit (Area D)
+
+**Rationale:** Schema audit additions to `audit-setup.sh` are targeted and isolated. `lib/cc-schema.json` is a data file with no code dependencies. This phase also delivers `conjure audit --json` (needed by workspace Phase 5 for per-repo audit aggregation). Building D before E ensures workspace has a stable audit interface to call.
+
+**Delivers:** `lib/cc-schema.json` (bundled; updated at Conjure release time; NO runtime fetch); schema-version section in `scripts/audit-setup.sh` (hook event name validation, settings key validation, version-gate checks, staleness warning at >90 days); `conjure audit --json` output flag; `disableBypassPermissionsMode` type check (string "disable" vs boolean); `disallowed-tools` frontmatter validation; SKILL.md frontmatter schema updated to include all 14 documented fields.
+
+**Schema conflict resolved:** PITFALLS.md CR-5 advocates live-fetch schema with local cache. ARCHITECTURE.md and STACK.md both specify BUNDLED schema. This summary resolves in favor of BUNDLED — matches zero-egress CI constraint, zero-dep rule, and air-gapped enterprise compliance targets. Staleness is handled via >90-day advisory warning + `conjure update` prompt. Runtime fetch is an anti-pattern for this codebase.
+
+**Must ship together:** `SessionEnd` (not `SessionStop`) in valid_hook_events; CC version detection falls back gracefully when `claude` not on PATH (warn, not fail); schema staleness advisory is a WARN not an ERR.
+
+**Avoids pitfalls:** CR-5 (stale schema false green), CR-2 (managed-only key placement)
+
+**Research flag:** Standard patterns — schema table content is HIGH confidence from official docs. No research-phase needed.
+
+---
+
+### Phase 5: Cross-Repo / Workspace Orchestration (Area E)
+
+**Rationale:** MUST be last. workspace.sh calls `conjure init`, `conjure adopt`, `conjure audit`, `conjure check`, and `conjure eval` as subprocesses — all must be stable. Phase 5 is explicitly locked until Phases 1-4 each pass their own validation checklist. This is the same deferral rationale from v0.6.0 (safe single-repo operation before multi-repo orchestration) applied one level up.
+
+**Delivers:** `.conjure-workspace` file format (one repo per line, comment-stripped); `lib/workspace.sh` (workspace_load, workspace_state_init, workspace_state_update, workspace_aggregate_rollback, workspace_report); `scripts/workspace.sh` 4-step pipeline; `cmd_workspace` in `cli/conjure`; `conjure workspace init` (discovers sibling repos with `.claude/`); `conjure workspace check` + `conjure workspace audit` (multi-repo health, fail-tolerant default); `conjure workspace rollback` reads `.conjure-workspace-state.json` and calls `snapshot_rollback` per applied repo.
+
+**Critical design requirements (all day-one, not hardening):**
+- Snapshot ALL repos in Step 2 before applying to ANY in Step 3 (all-snapshot-before-any-apply — the aggregate rollback invariant)
+- `.conjure-workspace-state.json` written before each repo op and updated after (durable crash recovery; persists across SIGKILL)
+- Default mode: fail-tolerant (continue on single-repo failure, collect all failures, report at end); abort-on-first-failure requires `--fail-fast`
+- `parallel: false` only in v0.7.0 — parallel execution breaks the all-or-nothing rollback invariant; deferred as future opt-in with `rollback_policy: best-effort` only
+- Disk space estimate before snapshot phase; warn at >2 GB and require `--allow-large-snapshots`
+
+**Defer to v0.7.x or v0.8.0:** `conjure workspace adopt` (multi-repo brownfield); workspace emit-managed (union managed-settings); `conjure workspace update` (HIGH complexity + conflict sidecar aggregation)
+
+**Avoids pitfalls:** CR-6 (aggregate rollback inconsistency), M-3 (single bad repo aborts batch), SD-1 (scope explosion)
+
+**Research flag:** Phase 5 requires a `--research-phase 5` pass to validate the workspace manifest schema and state machine transitions before implementation begins. Aggregate rollback with durable state is novel territory for this codebase.
+
+---
+
+### Phase 6: Integration Tests for All Areas
+
+**Rationale:** Per-area test fixtures must be added to `tests/run.sh` as graceful-red blocks. The integration fixtures are batched here because each tests the assembled result of its area.
+
+**Delivers:** `tests/fixtures/_workspace-trio/` (3 small repos for workspace orchestration fixture); mock promptfoo stub (deterministic npx replacement for CI speed); golden fixture diffs for all new emit paths; `tests/run.sh` extended with blocks for Areas A-E.
+
+**Addresses:** All pitfall "looks done but isn't" checklists from PITFALLS.md (9 checklist items spanning all areas)
+
+---
 
 ### Phase Ordering Rationale
 
-The dependency chain is hard: `lib/log.sh` must exist before `lib/snapshot.sh` (snapshot calls `log_step`), which must exist before `scripts/adopt.sh` (adopt calls `snapshot_create`), which must exist before `templates/skills/restructure/SKILL.md` (skill calls `conjure adopt --apply-step`). No phase can be reordered without breaking a build-time dependency.
-
-The pitfall-to-phase mapping confirms this order: CR-7 (scaling design) belongs in Phase 1 because classification heuristics cannot be retrofitted; CR-2 and CR-3 (partial-apply and snapshot/git) belong in Phase 2 because the manifest and traps are structural; CR-1 and CR-5 (LLM invariant and pre-write audit) belong in Phase 3 because they operate on skill output.
-
-The only flexibility is Phase 4 (tests) — individual test stubs can be added incrementally alongside Phases 1-3, but the full integration suite must wait for Phase 3 to complete.
+- **A and B** can proceed in parallel at the lib level (`lib/plugin-helpers.sh` and `lib/policy-helpers.sh` have no inter-dependency), but A must ship the emit-and-verify-at-emit-time pattern first as the discipline template.
+- **C (eval)** has no hard code dependency on A or B; placed third because it extends `audit-setup.sh` which Phase D also extends, allowing a clean sequential modification.
+- **D (schema-audit)** after C because `conjure audit --json` (Phase D's deliverable) is needed by workspace. Workspace planning needs this interface stable before Phase E implementation begins.
+- **E (workspace) MUST be last** — calls every other subcommand as subprocess; aggregate rollback depends on per-repo snapshot primitives being hardened across all single-repo ops. No exceptions.
+- Within any phase, researchers consistently agree: schema-audit (D) before eval (C) is slightly preferable if sequencing is strict, but C and D can be built concurrently with care to avoid `audit-setup.sh` conflicts.
 
 ### Research Flags
 
-Phases needing deeper research or design review during planning:
-- **Phase 2 (adopt.sh):** Step-id format is unresolved (see Open Questions). The `--apply-step` / `--update-manifest` callback contract needs a planning-phase schema review before `adopt.sh` is coded, because the skill depends on this contract being stable.
-- **Phase 3 (skill):** Skill structured-output format and manifest JSON vs key=value state file are open questions. The skill body must fit in ≤200 lines while covering: manifest loading, constraint checking, plan proposal, per-step approval loop, patch writing, and final audit. Tight. May need a planning-phase spike to verify fit.
+Phases needing deeper research during planning:
+- **Phase 3 (eval):** promptfoo-action integration with Conjure's specific harness structure is novel; run `--research-phase 3` to validate provider config and assertion taxonomy
+- **Phase 5 (workspace):** Aggregate rollback state machine design is new territory; run `--research-phase 5` to validate workspace manifest schema + state transitions
 
-Phases with standard patterns (skip additional research):
-- **Phase 1 (libs):** All primitives are POSIX-verified in STACK.md. `lib/log.sh`, `lib/snapshot.sh`, `lib/inventory.sh` follow the same pattern as `lib/mutate.sh` and `lib/merge.sh`.
-- **Phase 4 (tests):** bats-core fixture patterns are established from v0.3.0. The argus synthetic fixture is 500-file for CI; generation script is a simple loop.
+Phases with well-documented patterns (skip research-phase):
+- **Phase 1 (plugin):** Plugin schema is HIGH confidence from official docs; `claude plugin validate` is built-in CLI
+- **Phase 2 (sandbox/MDM):** All key names, paths, and platform variants verified from official CC docs (note Windows drop-in uncertainty — verify during planning, not a full research phase)
+- **Phase 4 (schema-audit):** Schema table content is HIGH confidence; implementation extends existing audit-setup.sh patterns
 
-## Open Questions
-
-The research raised five open questions that are not resolvable from external sources — they require design decisions during planning. The roadmapper should create explicit decision points for each.
-
-| Question | Why It Matters | Recommended Resolution Approach |
-|----------|---------------|----------------------------------|
-| **Step-id format** — human-readable slug (`extract-gsd-skill-01`) vs UUID vs monotonic integer | The skill writes step-ids; the CLI reads them; they appear in RESTRUCTURE-LOG.md and patch filenames. A collision or unparseable id corrupts the manifest. | Decide in Phase 2 planning before `adopt.sh` is coded. Recommendation: human-readable slug with a collision check (append `-N` suffix if exists). |
-| **Manifest state format** — JSON (`adopt-manifest.json` + `restructure_steps[]`) vs separate key=value `.adopt-progress` file | A single JSON file is convenient for jq but requires read-modify-write atomicity. A key=value file is simpler but harder to extend. | Decide in Phase 2 planning. Recommendation: JSON manifest for the rich schema; key=value `.adopt-progress` for the simple step-completion state (avoids read-modify-write race on large manifests). |
-| **Inventory scan time at 2180 files** — is `find + xargs wc -l` actually < 2s on NVMe, < 30s on network storage? | CR-7 requires a performance CI gate. If scan time exceeds 30s on the CI runner, the 500-file cap may not be sufficient. | Add a timing probe in Phase 1: run `find + xargs wc -l` against a 500-file synthetic fixture on the CI runner and measure; adjust cap or add a `--quick` mode that skips `wc -l` for files > N KB. |
-| **Skill structured-output format** — does the skill write a patch JSON via `Write` tool and then the human runs `--apply-patch`, or does the skill call `--update-manifest --step-json` and then `--apply-step`? | STACK.md and ARCHITECTURE.md describe slightly different handshake variants (patch files vs manifest `restructure_steps[]`). The implementation must choose one. | The ARCHITECTURE.md approach (manifest `restructure_steps[]` + `--apply-step`) is preferred because it keeps all state in one file. STACK.md's patch-file approach is a valid alternative if manifest atomicity is a concern. Decide in Phase 3 planning. |
-| **`--update-manifest` validation depth** — should the CLI schema-validate the step JSON passed by the skill, or trust it? | A malformed step JSON written to the manifest by the skill could corrupt subsequent `jq` reads. But full JSON Schema validation adds complexity. | Recommend: `jq` parse-check only (does it parse as valid JSON? does it have the required `id`, `op`, `status` fields?); reject with `exit 2` if not. Full schema validation deferred to v0.6.x. |
+---
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All v0.6.0 primitives verified against official docs (`find -print0 | xargs -0`, `git status --porcelain=v1`, `cp -a`, `wc -l <`, `jq -cn --slurpfile`, `!cmd` skill injection). Zero new deps confirmed. |
-| Features | HIGH | 8 "lose nothing" behaviors are concrete and testable. Anti-features are explicit. Comparator tool analysis (jscodeshift, Terraform, chezmoi, Flyway) gives strong user expectation baseline. |
-| Architecture | HIGH | Derived directly from live codebase (cli/conjure, lib/mutate.sh, lib/merge.sh, scripts/init-project.sh, scripts/audit-setup.sh all read this session). Component boundaries and dependency order are exact. |
-| Pitfalls | HIGH for structural (CR-2, CR-3, CR-4, CR-7); MEDIUM for LLM-specific (CR-1, CR-5, CR-6) | LLM pitfalls are derived from published research on LLM summarization failure modes, not from empirical conjure runs. Treat as HIGH-priority requirements, not hypothetical risks. |
+| Stack | HIGH | All v0.7.0 stack additions verified against official Claude Code docs (June 2026); promptfoo version and Node.js requirement confirmed from official release notes; zero new runtime deps confirmed |
+| Features | HIGH | Plugin/marketplace, sandbox/MDM, and hook schema from official docs (HIGH); promptfoo eval patterns from official promptfoo docs (HIGH); cross-repo patterns from GitHub issue analysis + community sources (MEDIUM raised toward HIGH by convergence) |
+| Architecture | HIGH | Based on live codebase reads + official CC docs; all integration points derived from source code; component interaction map confirmed against existing script interfaces |
+| Pitfalls | HIGH | Critical pitfalls derived from confirmed GitHub issues (#51978, #33739, #9686, #58873, #32226, #37683) and official docs; MEDIUM for promptfoo CI flakiness patterns (confirmed from multiple community sources) |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **Skill body fits in ≤200 lines:** The restructure skill must cover substantial ground (manifest loading, invariant checking, plan proposal, per-step approval, patch writing, audit). This has not been prototyped. If it does not fit, either the skill body must be split or the instruction style must be compressed significantly. Address in Phase 3 planning as a spike.
+- **Windows drop-in directory behavior:** `managed-settings.d/` is confirmed for macOS and Linux but MEDIUM confidence on Windows; verify against live CC before generating Windows drop-in configs (Phase 2 planning)
+- **`extraKnownMarketplaces` in managed-settings scope — open Q:** Whether `extraKnownMarketplaces` is honored or silently ignored in `managed-settings.json` scope is not definitively documented; resolve at Phase 1 planning by testing against a live CC install or querying Anthropic docs
+- **`allowed-tools` enforcement gap:** Open bug (#37683) — `allowed-tools` in SKILL.md frontmatter is parsed but not enforced at the tool-permission level; `conjure audit` should document this limitation in warning messages rather than treating it as a config error (carry through Phase 4)
+- **promptfoo provider config for Conjure harnesses:** The `claude-code-agent` provider with `setting_sources` and `skills: all` against a real Conjure harness has not been end-to-end validated; primary Phase 3 research gap
+- **Schema-aware audit bundled vs live-fetch:** Resolved in favor of BUNDLED in this summary (zero-egress + zero-dep constraint wins). Teams must update Conjure after CC releases to get fresh schema; the >90-day staleness advisory in `audit-setup.sh` is the mitigation.
 
-- **`cp -a` on older macOS:** `-a` is documented as supported since macOS 10.5+. The kit's CI matrix will validate. If a field report surfaces an older macOS, fall back to `cp -Rp` (already documented in STACK.md as the POSIX fallback). No action needed before Phase 2.
-
-- **`--apply-step` atomicity under concurrent Claude Code sessions:** If two Claude Code sessions invoke the restructure skill simultaneously, both could attempt `--update-manifest` and produce a corrupted manifest. `jq`-based read-modify-write is not atomic on all filesystems. A temp-file-then-rename (`mv -f`) pattern would address it. Defer to Phase 2 planning.
+---
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- Conjure `cli/conjure`, `lib/mutate.sh`, `lib/merge.sh`, `scripts/init-project.sh`, `scripts/audit-setup.sh`, `.planning/PROJECT.md` — read directly this session; all component boundaries and integration points derived from live source
-- [git-status docs](https://git-scm.com/docs/git-status) — `--porcelain=v1` stable format, untracked file behavior
-- [jq manual](https://jqlang.org/jq/manual/) — `-c`, `-n`, `--arg`, `--argjson`, `--slurpfile`, `group_by`, `from_entries`
-- [wc POSIX spec](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/wc.html) — `-l` redirect form; `-c` for byte count
-- [cp POSIX spec](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/cp.html) — `-a` (GNU/BSD extension, macOS 10.5+); `-Rp` as POSIX fallback
-- [xargs man page](https://man7.org/linux/man-pages/man1/xargs.1.html) — `-0` null-delimiter; batched ARG_MAX behavior
-- [Claude Code Skills docs](https://code.claude.com/docs/en/skills) — `!cmd` dynamic injection; `allowed-tools` space-separated string; `disable-model-invocation: true`
+- [Claude Code plugin-marketplaces docs](https://code.claude.com/docs/en/plugin-marketplaces) — full marketplace.json schema, plugin.json schema, extraKnownMarketplaces shape, strictKnownMarketplaces, reserved names, source types; verified 2026-06-03
+- [Claude Code settings docs](https://code.claude.com/docs/en/settings) — full sandbox{} schema, all managed-only keys with exact names/types, MDM deployment paths per platform, deprecated Windows path, all settings keys since v2.1.117; verified 2026-06-03
+- [Claude Code hooks docs](https://code.claude.com/docs/en/hooks) — full 30+ event list, exit code semantics, MessageDisplay event, ConfigChange event, SessionEnd (not SessionStop); verified 2026-06-03
+- [Claude Code week 22 changelog](https://code.claude.com/docs/en/whats-new/2026-w22) — v2.1.150-v2.1.157 features including disallowed-tools, MessageDisplay, defaultEnabled, workflowKeywordTriggerEnabled; verified 2026-06-03
+- [promptfoo releases (GitHub)](https://github.com/promptfoo/promptfoo/releases) — v0.121.14 stable, Node ^20.20.0 requirement; verified 2026-06-03
+- [anthropics/claude-code#51978](https://github.com/anthropics/claude-code/issues/51978) — marketplace schema drift: 14 plugins uninstallable after source field format change
+- [anthropics/claude-code#32226](https://github.com/anthropics/claude-code/issues/32226) — sandbox denyRead does not block Read tool; confirmed from settings docs
+- [anthropics/claude-code#37683](https://github.com/anthropics/claude-code/issues/37683) — allowed-tools not enforced at tool-permission level (open bug)
+- Conjure live codebase: `cli/conjure`, `lib/mutate.sh`, `lib/snapshot.sh`, `lib/caps.sh`, `scripts/audit-setup.sh`, `scripts/publish-plugin.sh`, `compliance/hipaa/apply.sh`, `.claude-plugin/`
+- [anthropics/claude-plugins-official marketplace.json](https://github.com/anthropics/claude-plugins-official/blob/main/.claude-plugin/marketplace.json) — authoritative real-world schema confirmation
 
 ### Secondary (MEDIUM confidence)
-- [Codemods: Automated API Refactoring (Martin Fowler)](https://martinfowler.com/articles/codemods-api-refactoring.html) — plan-then-apply UX contract
-- [ESLint CLI Reference](https://eslint.org/docs/latest/use/command-line-interface) — `--fix-dry-run` UX pattern
-- [terraform plan reference](https://developer.hashicorp.com/terraform/cli/commands/plan) — show-before-mutate as canonical UX
-- [From Single to Multi: How LLMs Hallucinate in Multi-Document Summarization (arXiv)](https://arxiv.org/pdf/2410.13961) — up to 75% hallucination rate; "lost in the middle" effect
-- [Semantic Override Hallucinations in LLM Reasoning (arXiv)](https://arxiv.org/html/2602.17520) — models revert to pretrained defaults despite explicit redefinition; constraint dropping
-- [The Agent Approval Fatigue Problem](https://molten.bot/blog/agent-approval-fatigue/) — rubber-stamping when approval rate exceeds cognitive bandwidth
-- [Backup Integrity Verification Framework](https://oneuptime.com/blog/post/2026-01-30-backup-verification-testing/view) — five-level verification model
+- [promptfoo Claude Agent SDK provider](https://www.promptfoo.dev/docs/providers/claude-agent-sdk/) — claude-code-agent provider config; verified 2026-06-03
+- [promptfoo evaluate-coding-agents guide](https://www.promptfoo.dev/docs/guides/evaluate-coding-agents/) — assert types, --no-cache, --no-share patterns
+- [promptfoo promptfoo-action GitHub Action](https://github.com/promptfoo/promptfoo-action) — PR gate integration
+- [Multi-repo workspace structuring patterns](https://karun.me/blog/2026/03/26/structuring-claude-code-for-multi-repo-workspaces/) — community patterns for cross-repo orchestration
+- [Compensating Transaction Pattern — Azure Architecture Center](https://learn.microsoft.com/en-us/azure/architecture/patterns/compensating-transaction) — saga pattern for aggregate workspace rollback design
+- [anthropics/claude-code#33739](https://github.com/anthropics/claude-code/issues/33739) — official marketplace fails to load after single schema incompatibility (cascade failure)
+- [anthropics/claude-code#9686](https://github.com/anthropics/claude-code/issues/9686) — $schema URL in marketplace.json does not exist causes full validator failure
+
+### Tertiary (LOW confidence — needs validation during planning)
+- Windows `managed-settings.d/` drop-in directory behavior — not definitively documented
+- `extraKnownMarketplaces` behavior in managed-settings.json scope — open question, not confirmed from docs
 
 ---
-*Research completed: 2026-05-28*
+*Research completed: 2026-06-03*
 *Ready for roadmap: yes*
