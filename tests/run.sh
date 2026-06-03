@@ -4586,6 +4586,29 @@ fi
 rm -rf "$P26_POL04M_DIR"
 trap - EXIT
 
+# POL-04-macos-xmlmeta: build_plist_xml rejects XML metacharacters in deny entries
+# and allowedDomains values (WR-05). Source the helper and feed a deny entry / a
+# domain containing '<' — the function must return 2 (not silently emit broken XML).
+P26_XMLMETA_RC1=0
+( set -uo pipefail
+  source "$CONJURE_HOME/lib/policy-helpers.sh"
+  build_plist_xml '["~/.aws"]' '["Read(~/.aws)","Read(<evil>)"]' \
+    '{"filesystem":{"denyRead":["~/.aws"],"denyWrite":[]},"network":{"allowedDomains":[]}}' \
+    >/dev/null 2>&1
+) || P26_XMLMETA_RC1=$?
+P26_XMLMETA_RC2=0
+( set -uo pipefail
+  source "$CONJURE_HOME/lib/policy-helpers.sh"
+  build_plist_xml '["~/.aws"]' '["Read(~/.aws)"]' \
+    '{"filesystem":{"denyRead":["~/.aws"],"denyWrite":[]},"network":{"allowedDomains":["a&b.example.com"]}}' \
+    >/dev/null 2>&1
+) || P26_XMLMETA_RC2=$?
+if [ "$P26_XMLMETA_RC1" -eq 2 ] && [ "$P26_XMLMETA_RC2" -eq 2 ]; then
+  pass "build_plist_xml rejects XML metachars in deny entries and allowedDomains (POL-04-macos-xmlmeta)"
+else
+  fail "build_plist_xml did not reject XML metachars — entry_rc=$P26_XMLMETA_RC1 domain_rc=$P26_XMLMETA_RC2 (POL-04-macos-xmlmeta)"
+fi
+
 # POL-04-win: emit-policy produces Windows ps1 with correct path (no deprecated ProgramData)
 P26_POL04W_DIR="$(mktemp -d)"
 trap 'rm -rf "$P26_POL04W_DIR"' EXIT

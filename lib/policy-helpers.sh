@@ -305,6 +305,34 @@ EOF
   sandbox_deny_write="$(printf '%s' "$sandbox_json" | jq -r '.filesystem.denyWrite // [] | .[]' 2>/dev/null)"
   sandbox_allowed_domains="$(printf '%s' "$sandbox_json" | jq -r '.network.allowedDomains // [] | .[]' 2>/dev/null)"
 
+  # WR-05: also validate the deny_entries (Read() strings) and allowedDomains
+  # values for XML metacharacters. These are embedded into <string>...</string>
+  # (below) but were previously unchecked — once allowedDomains is wired up or an
+  # independent deny entry is introduced, an unescaped &/</> yields malformed plist
+  # XML that plutil catches on macOS but is written silently on Linux (no plutil).
+  local entry_check
+  entry_check="$(printf '%s' "$deny_entries_json" | jq -r '.[]' 2>/dev/null)"
+  while IFS= read -r chk_entry; do
+    case "$chk_entry" in
+      *'&'*|*'<'*|*'>'*)
+        echo "✗ build_plist_xml: deny entry contains XML metacharacter (&, <, >): $chk_entry" >&2
+        return 2
+        ;;
+    esac
+  done <<EOF
+$entry_check
+EOF
+  while IFS= read -r chk_domain; do
+    case "$chk_domain" in
+      *'&'*|*'<'*|*'>'*)
+        echo "✗ build_plist_xml: allowedDomains value contains XML metacharacter (&, <, >): $chk_domain" >&2
+        return 2
+        ;;
+    esac
+  done <<EOF
+$sandbox_allowed_domains
+EOF
+
   # Build deny (Read()) entries array strings for plist
   local deny_entries_plist=""
   while IFS= read -r entry; do
