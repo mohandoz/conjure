@@ -210,7 +210,7 @@ Plans:
 Plans:
 **Wave 0**
 
-- [ ] 30-00-PLAN.md — Wave 0: _workspace-trio fixture (3 adoptable repos alpha/beta/gamma + manifest with tags) + Phase 30 graceful-red block in tests/run.sh (WS-05/06/07 + SIGKILL saga test, Nyquist)
+- [x] 30-00-PLAN.md — Wave 0: _workspace-trio fixture (3 adoptable repos alpha/beta/gamma + manifest with tags) + Phase 30 graceful-red block in tests/run.sh (WS-05/06/07 + SIGKILL saga test, Nyquist)
 
 **Wave 1** *(blocked on Wave 0 completion)*
 
@@ -243,4 +243,4 @@ Plans:
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 3/3 | Complete    | 2026-06-03 |
-| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/5 | Not started | - |
+| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 1/5 | In Progress|  |

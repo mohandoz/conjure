@@ -52,9 +52,9 @@ Build order (research consensus): **A plugin → B policy → C eval → D schem
 - [x] **WS-02**: `conjure workspace init` discovers sibling repos containing `.claude/` (TTY prompt; non-TTY requires `--yes`); writes manifest via `mutate_write`
 - [x] **WS-03**: `conjure workspace check` runs `conjure check --porcelain` per repo → aggregated per-repo status table
 - [x] **WS-04**: `conjure workspace audit` runs `conjure audit --json` per repo → aggregated pass/fail + global summary
-- [ ] **WS-05**: `conjure workspace update` runs `conjure update` per repo serially, reports per-repo merge/conflict status, `--continue-on-error` (default stop-on-first-error)
-- [ ] **WS-06**: `conjure workspace adopt` across repos (optional tag filter), serial, **all snapshots taken before any apply** (saga); per-repo `.conjure-workspace-state.json` crash durability; stop-on-fail
-- [ ] **WS-07**: `conjure workspace adopt --rollback` rolls back each repo independently from its pre-run snapshot; SIGKILL-mid-batch → rollback yields per-repo sha256 zero-diff (CI fixture test)
+- [x] **WS-05**: `conjure workspace update` runs `conjure update` per repo serially, reports per-repo merge/conflict status, `--continue-on-error` (default stop-on-first-error)
+- [x] **WS-06**: `conjure workspace adopt` across repos (optional tag filter), serial, **all snapshots taken before any apply** (saga); per-repo `.conjure-workspace-state.json` crash durability; stop-on-fail
+- [x] **WS-07**: `conjure workspace adopt --rollback` rolls back each repo independently from its pre-run snapshot; SIGKILL-mid-batch → rollback yields per-repo sha256 zero-diff (CI fixture test)
 
 ## v2 / Future Requirements
 
@@ -135,9 +135,9 @@ Which phases cover which requirements. Populated during roadmap creation.
 | WS-02 | Phase 29 | Complete |
 | WS-03 | Phase 29 | Complete |
 | WS-04 | Phase 29 | Complete |
-| WS-05 | Phase 30 | Pending |
-| WS-06 | Phase 30 | Pending |
-| WS-07 | Phase 30 | Pending |
+| WS-05 | Phase 30 | Complete |
+| WS-06 | Phase 30 | Complete |
+| WS-07 | Phase 30 | Complete |
 
 **Coverage:**
 - v1 requirements: 27 total (PLUG 5, POL 5, EVAL 5, SCHM 5, WS 7)
