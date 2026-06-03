@@ -51,9 +51,17 @@ ws_do_check() {
   local manifest_dir="$2"
   local overall_rc=0
   local repo_json repo_name repo_relpath repo_abs repo_rc repo_status porcelain_out
+  local manifest_root repo_real
 
   printf '\n%-30s %-15s %s\n' "REPO" "STATUS" "EXIT"
   printf '%-30s %-15s %s\n' "----" "------" "----"
+
+  # Resolve the workspace root once (pwd -P) so the per-repo boundary re-check below
+  # compares resolved paths against a resolved base. (CR-02)
+  manifest_root="$(cd "$manifest_dir" 2>/dev/null && pwd -P)" || {
+    echo "✗ cannot resolve workspace root: $manifest_dir" >&2
+    return 2
+  }
 
   while IFS= read -r repo_json; do
     repo_name="$(printf '%s' "$repo_json" | jq -r '.name')"
@@ -67,6 +75,26 @@ ws_do_check() {
       overall_rc=1
       continue
     fi
+
+    # Defense-in-depth traversal re-check (CR-02): even though workspace_manifest_load
+    # validated the manifest, re-confirm each repo stays under the resolved workspace root
+    # before invoking a command against it. Out-of-bounds → skip with a SECURITY warning,
+    # NEVER execute. Counts as partial-success like a bad-path skip.
+    repo_real="$(cd "$repo_abs" 2>/dev/null && pwd -P)" || {
+      printf '%-30s %-15s %s\n' "$repo_name" "SKIP" "bad-path"
+      printf '  ⚠ skipping %s: cannot resolve path (%s)\n' "$repo_name" "$repo_abs" >&2
+      overall_rc=1
+      continue
+    }
+    case "$repo_real" in
+      "$manifest_root"|"$manifest_root/"*) ;;
+      *)
+        printf '%-30s %-15s %s\n' "$repo_name" "SKIP" "out-of-bounds"
+        printf '  ⚠ SECURITY: skipping %s: escapes workspace root (%s)\n' "$repo_name" "$repo_real" >&2
+        overall_rc=1
+        continue
+        ;;
+    esac
 
     # Per-repo check invocation — MUST pass --porcelain as an argv flag, NOT via env var.
     # cmd_check in cli/conjure initializes porcelain=0 from scratch on every invocation,
@@ -120,9 +148,16 @@ ws_do_audit() {
   local pass_count=0
   local skip_count=0
   local repo_json repo_name repo_relpath repo_abs repo_rc repo_status table_status
+  local manifest_root repo_real
 
   printf '\n%-30s %-15s %s\n' "REPO" "STATUS" "EXIT"
   printf '%-30s %-15s %s\n' "----" "------" "----"
+
+  # Resolve the workspace root once (pwd -P) for the per-repo boundary re-check. (CR-02)
+  manifest_root="$(cd "$manifest_dir" 2>/dev/null && pwd -P)" || {
+    echo "✗ cannot resolve workspace root: $manifest_dir" >&2
+    return 2
+  }
 
   # Allocate script-level tempfile for this run (cleaned up by _ws_cleanup on EXIT)
   TMPJSON="$(mktemp)"
@@ -139,6 +174,28 @@ ws_do_audit() {
       skip_count=$((skip_count + 1))
       continue
     fi
+
+    # Defense-in-depth traversal re-check (CR-02): re-confirm each repo stays under the
+    # resolved workspace root before invoking. Out-of-bounds → skip with SECURITY warning,
+    # NEVER execute. Counts toward skip_count and partial-success like a bad-path skip.
+    repo_real="$(cd "$repo_abs" 2>/dev/null && pwd -P)" || {
+      printf '%-30s %-15s %s\n' "$repo_name" "SKIP" "bad-path"
+      printf '  ⚠ skipping %s: cannot resolve path (%s)\n' "$repo_name" "$repo_abs" >&2
+      skip_count=$((skip_count + 1))
+      continue
+    }
+    case "$repo_real" in
+      "$manifest_root"|"$manifest_root/"*) ;;
+      *)
+        printf '%-30s %-15s %s\n' "$repo_name" "SKIP" "out-of-bounds"
+        printf '  ⚠ SECURITY: skipping %s: escapes workspace root (%s)\n' "$repo_name" "$repo_real" >&2
+        skip_count=$((skip_count + 1))
+        if [ "$overall_rc" -lt 1 ]; then
+          overall_rc=1
+        fi
+        continue
+        ;;
+    esac
 
     # Per-repo audit --json invocation — MUST pass --json as an argv flag, NOT via env var.
     # cmd_audit in cli/conjure initializes do_json=0 from scratch on every invocation,

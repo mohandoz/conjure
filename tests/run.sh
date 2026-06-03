@@ -6091,6 +6091,41 @@ fi
 trap - EXIT
 rm -rf "$P29_OOB_ROOT"
 
+# WS-SEC-defense-in-depth: ws_do_check / ws_do_audit re-confirm the boundary at EXECUTION
+# time even if a caller bypasses workspace_manifest_load. We drive the worker functions
+# directly (extracted into a sourceable harness so the script's dispatch tail does not run)
+# with a manifest whose repo escapes the workspace root, and assert it is SKIPPED as
+# out-of-bounds and never executed. Regression for CR-02.
+P29_DID_ROOT="$(mktemp -d)"
+trap 'rm -rf "$P29_DID_ROOT"' EXIT
+mkdir -p "$P29_DID_ROOT/ws"
+mkdir -p "$P29_DID_ROOT/sibling/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_DID_ROOT/sibling/CLAUDE.md"
+printf '{"schema_version":1,"generated":"2026-06-03T00:00:00Z","repos":[{"name":"escapee","path":"../sibling","tags":[]}]}\n' > "$P29_DID_ROOT/ws/.conjure-workspace.json"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  # Extract just the two worker function definitions (skip the dispatch tail that exits).
+  P29_DID_FNS="$P29_DID_ROOT/_fns.sh"
+  sed -n '/^ws_do_check()/,/^}/p;/^ws_do_audit()/,/^}/p' "$P29_WS_SH" > "$P29_DID_FNS"
+  P29_DID_OUT="$(
+    CONJURE_HOME="$CONJURE_HOME"
+    # shellcheck source=/dev/null
+    . "$CONJURE_HOME/lib/workspace.sh"
+    # shellcheck source=/dev/null
+    . "$P29_DID_FNS"
+    ws_do_check "$P29_DID_ROOT/ws/.conjure-workspace.json" "$P29_DID_ROOT/ws" 2>&1
+  )"
+  if printf '%s\n' "$P29_DID_OUT" | grep -qi "out-of-bounds\|SECURITY" && \
+     ! printf '%s\n' "$P29_DID_OUT" | grep -qi "escapee.*drift\|escapee.*clean"; then
+    pass "ws_do_check re-checks boundary at execution time and skips out-of-bounds repo (WS-SEC-defense-in-depth)"
+  else
+    fail "ws_do_check did not skip out-of-bounds repo at execution time (WS-SEC-defense-in-depth)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 1 must create it (WS-SEC-defense-in-depth)"
+fi
+trap - EXIT
+rm -rf "$P29_DID_ROOT"
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
