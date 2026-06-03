@@ -751,22 +751,24 @@ The `--json` output is the load-bearing contract for Phase 29 `conjure workspace
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Hook event count: 30 vs 34**
-   - What we know: Official docs enumerate exactly 30 events as of 2026-06-03 (CC v2.1.161)
-   - What's unclear: Where the CONTEXT's count of 34 came from — possibly training data about a future/unreleased CC version or counting sub-variants
-   - Recommendation: Ship 30 in `lib/cc-schema.json`; the >90-day staleness warning ensures maintainers will update it when new events are documented. The non-goal "never hard-fail on newer-than-known schema" means extra events in the user's settings are WARN not FAIL.
+1. **Hook event count: 30 vs 34** — RESOLVED
+   Ship exactly 30 authoritative events from live official docs (CC v2.1.161). The ROADMAP SC "34" was a training-data estimate. Because unknown events from a newer CC release → WARN (never fail) by the non-goal "never hard-fail on newer-than-known schema", the count is forward-safe. lib/cc-schema.json is correct-by-construction from RESEARCH.
 
-2. **SCHM-02 refactor of POL-05c**
-   - What we know: POL-05c already handles `permissions.disableBypassPermissionsMode`; SCHM-02 must also emit to --json and check the top-level path
-   - What's unclear: Does the planner want SCHM-02 to fully replace POL-05c in the code (cleaner) or extend alongside it (lower risk)?
-   - Recommendation: Replace POL-05c with SCHM-02 in Wave 1. SCHM-02 becomes the single source of truth. The behavior (exit 2 for boolean DBPM) is unchanged.
+2. **SCHM-02 refactor of POL-05c** — RESOLVED
+   SCHM-02 is the SUPERSET: it replaces the Phase 26 POL-05c standalone check and extends coverage to the top-level `disableBypassPermissionsMode` path, AND feeds the --json accumulator. Plan 01 (Wave 1) explicitly removes the POL-05c standalone block and replaces it with the SCHM-02 block. Behavior (exit 2 for boolean DBPM) is unchanged. This is a deliberate refactor, NOT an accidental deletion — verification must not flag it as a regression.
 
-3. **check.sh exit code extension**
-   - What we know: Current check.sh exits 0 or 1 only. SCHM-03 must add exit 2 for renamed/unknown hook events.
-   - What's unclear: Does Phase 29 `conjure workspace check` handle exit 2? (The design calls it as a subprocess.)
-   - Recommendation: Add SCHM-03 exit 2 path. Phase 29 is aware (it's reading the docs now). Document the new exit contract in check.sh header comment.
+3. **check.sh exit code extension** — RESOLVED
+   SCHM-03 findings go to a separate `SCHEMA_FAIL` counter in check.sh. Final exit order: `[ "$SCHEMA_FAIL" -gt 0 ] && exit 2` AFTER the existing `exit "$drift"` block. Schema failures override drift (exit 2 > exit 1 > exit 0). The new three-way exit contract (0=clean, 1=drift, 2=schema-error) is documented in the check.sh header comment.
+
+4. **SCHM-04 version semantics** — RESOLVED
+   `.conjure-version` holds the CONJURE KIT version (e.g. 0.7.0), NOT the CC version. SCHM-04 must compare the detected `claude --version` output against each key's `introduced_version` in cc-schema.json; it must NOT compare against `.conjure-version`. The report is info-only (never blocks). The CONTEXT.md note calling .conjure-version "the pinned CC version baseline" was incorrect — the plan overrides it.
+
+5. **renamed_events (SessionStop→SessionEnd) confidence** — RESOLVED
+   Ship the renamed-events map as best-effort advisory. An unknown event still WARNs/fails generically even if not in the renamed map. The SessionStop→SessionEnd entry is the only historically documented rename; absence from the map for other old names causes a generic UNKNOWN-EVENT failure message, which is still actionable.
+
+**Success-criteria reconciliation:** ROADMAP Phase 27 SC literal numbers ("34 events" / "14 fields") are superseded by the authoritative live-doc counts (30 / 16). Verification must accept 30 events and 16 SKILL.md frontmatter fields as correct. The bundled lib/cc-schema.json is correct-by-construction from the RESEARCH data above.
 
 ---
 

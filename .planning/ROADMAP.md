@@ -110,7 +110,25 @@ Plans:
   4. `conjure check --schema` reports which CC version introduced each settings key found in the harness vs the pinned `.conjure-version`; CC version detection falls back gracefully when `claude` is not on PATH (warn, not fail); a staleness advisory fires when `cc-schema.json` is >90 days old (WARN, not ERR)
   5. `conjure audit --json` emits machine-readable JSON output (pass/fail + per-check results); the output is consumed successfully by Phase 29's `conjure workspace audit` aggregation
 
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+
+**Wave 0**
+
+- [ ] 27-00-PLAN.md — Wave 0: lib/cc-schema.json (30 events, 16 fields, verbatim from RESEARCH) + fixtures + graceful-red SCHM test block (SCHM-01..05 Nyquist)
+
+**Wave 1** *(blocked on Wave 0 completion)*
+
+- [ ] 27-01-PLAN.md — Wave 1: SCHM-01 (SKILL.md 16-field type validation) + SCHM-02 (disableBypassPermissionsMode both-path check, replaces POL-05c) in scripts/audit-setup.sh
+
+**Wave 2** *(blocked on Wave 0 completion)*
+
+- [ ] 27-02-PLAN.md — Wave 2: SCHM-03 (hook event validation from cc-schema.json) + SCHM-04 (--schema version report) in scripts/check.sh + cli/conjure --schema wiring
+
+**Wave 3** *(blocked on Waves 1+2 completion)*
+
+- [ ] 27-03-PLAN.md — Wave 3: SCHM-05 (audit --json: JSON-only stdout, stable check IDs, exit 2 on fail) in scripts/audit-setup.sh + cli/conjure --json wiring
+
 **UI hint**: no
 
 ### Phase 28: promptfoo Eval + Context-Budget Linter
@@ -170,7 +188,7 @@ Plans:
 | 24. Integration Tests + Argus Fixture | v0.6.0 | 2/2 | Complete | 2026-05-29 |
 | 25. Plugin + Marketplace Emission | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 27. Schema-Version-Aware Audit | v0.7.0 | 0/? | Not started | - |
+| 27. Schema-Version-Aware Audit | v0.7.0 | 0/4 | Not started | - |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 0/? | Not started | - |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/? | Not started | - |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |
