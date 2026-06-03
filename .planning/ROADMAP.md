@@ -85,7 +85,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 26-01-PLAN.md — Wave 1: lib/policy-helpers.sh + compliance/*/policy.sh + emit-policy.sh + CLI dispatch (POL-01, POL-02)
+- [x] 26-01-PLAN.md — Wave 1: lib/policy-helpers.sh + compliance/*/policy.sh + emit-policy.sh + CLI dispatch (POL-01, POL-02)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -169,7 +169,7 @@ Plans:
 | 23. Restructure Skill + Safety Gates | v0.6.0 | 3/3 | Complete | 2026-05-29 |
 | 24. Integration Tests + Argus Fixture | v0.6.0 | 2/2 | Complete | 2026-05-29 |
 | 25. Plugin + Marketplace Emission | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 1/4 | In Progress|  |
+| 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 2/4 | In Progress|  |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 0/? | Not started | - |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 0/? | Not started | - |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/? | Not started | - |
