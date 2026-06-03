@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
-status: roadmap_ready
-last_updated: "2026-06-03"
-last_activity: 2026-06-03
+status: Roadmap created; awaiting `/gsd-plan-phase 25`
+last_updated: "2026-06-03T00:50:47.287Z"
+last_activity: 2026-06-03 — v0.7.0 roadmap created (Phases 25–30, 27 requirements mapped)
 progress:
   total_phases: 6
   completed_phases: 0
@@ -117,9 +117,9 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03
-Stopped at: v0.7.0 roadmap created (Phases 25–30, 27/27 requirements mapped)
-Resume file: None
+Last session: 2026-06-03T00:50:47.282Z
+Stopped at: Phase 25 context gathered
+Resume file: .planning/phases/25-plugin-marketplace-emission/25-CONTEXT.md
 
 ## Operator Next Steps
 
