@@ -20,13 +20,16 @@ cd "$TARGET" || { echo "✗ Cannot cd to target: $TARGET"; exit 2; }
 
 # SCHM-05: JSON mode — CONJURE_JSON=1 routes all human text to stderr and emits
 # a single JSON object to stdout at the end (Phase 29 aggregation contract).
+# CONJURE_PORCELAIN=1 (--budget --porcelain) similarly routes human text to
+# stderr so stdout carries only the budget JSON object.
 JSON_MODE="${CONJURE_JSON:-0}"
+CONJURE_PORCELAIN="${CONJURE_PORCELAIN:-0}"
 CHECKS_JSONL="$(mktemp)"
 # Single EXIT trap for ALL tempfiles. bash has one EXIT trap slot — the later
 # `--cost` block used to re-register its own trap and silently clobber this one,
 # leaking CHECKS_JSONL (WR-03). _audit_cleanup rm -f's every tempfile the script
 # may create; COST_TMP is unset unless --cost ran, and :- expands it to empty.
-_audit_cleanup() { rm -f "${CHECKS_JSONL:-}" "${COST_TMP:-}"; }
+_audit_cleanup() { rm -f "${CHECKS_JSONL:-}" "${COST_TMP:-}" "${BUDGET_TMP:-}"; }
 trap _audit_cleanup EXIT
 
 PASS=0
@@ -35,7 +38,7 @@ FAIL=0
 
 # human() — output one line of human-readable text.
 # In normal mode: stdout. In JSON mode: stderr (stdout is reserved for the JSON object).
-human() { [ "$JSON_MODE" = "1" ] && printf '%s\n' "$1" >&2 || printf '%s\n' "$1"; }
+human() { { [ "$JSON_MODE" = "1" ] || [ "$CONJURE_PORCELAIN" = "1" ]; } && printf '%s\n' "$1" >&2 || printf '%s\n' "$1"; }
 
 note() { human "  $1"; }
 ok()   { note "✓ $1"; PASS=$((PASS+1)); }
@@ -240,6 +243,73 @@ if [ -d .claude ]; then
   fi
 fi
 
+# EVAL-04 — Context Budget Linter (--budget flag)
+# CONJURE_BUDGET=1 enables per-file token breakdown + threshold flags.
+# CONJURE_PORCELAIN=1 emits JSON (budget --porcelain combination).
+# BUDGET_TMP declared at top level so _audit_cleanup's ${BUDGET_TMP:-} is safe
+# even when --budget was not passed.
+BUDGET_TMP=""
+if [ "${CONJURE_BUDGET:-0}" = "1" ]; then
+  BUDGET_TMP="$(mktemp)"
+  # ALWAYS-LOADED: CLAUDE.md
+  if [ -f CLAUDE.md ]; then
+    _chars="$(wc -c < CLAUDE.md | tr -d ' ')"
+    _tokens=$((_chars / 4))
+    printf '%s %s\n' "$_tokens" "CLAUDE.md" >> "$BUDGET_TMP"
+  fi
+  # ALWAYS-LOADED: each skill's SKILL.md (entire file — conservative)
+  while IFS= read -r _skill_md; do
+    [ -z "$_skill_md" ] && continue
+    _chars="$(wc -c < "$_skill_md" | tr -d ' ')"
+    _tokens=$((_chars / 4))
+    _rel="${_skill_md#./}"
+    printf '%s %s\n' "$_tokens" "$_rel" >> "$BUDGET_TMP"
+  done < <(find .claude/skills -name SKILL.md 2>/dev/null)
+
+  TOTAL_BUDGET_TOKENS="$(awk '{s+=$1} END{print s+0}' "$BUDGET_TMP")"
+
+  # Thresholds: reuse existing 15k/25k tiers
+  BUDGET_THRESHOLD_WARN=15000
+  BUDGET_THRESHOLD_ERR=25000
+
+  if [ "${CONJURE_PORCELAIN:-0}" = "1" ]; then
+    # --porcelain JSON: { total_tokens, threshold, over, contributors[] }
+    _top5_tmp="$(mktemp)"
+    sort -rn "$BUDGET_TMP" | head -5 > "$_top5_tmp"
+    _over="false"
+    [ "$TOTAL_BUDGET_TOKENS" -ge "$BUDGET_THRESHOLD_ERR" ] && _over="true"
+    _contrib_jsonl="$(mktemp)"
+    while IFS=' ' read -r _tok _path; do
+      jq -cn --arg path "$_path" --argjson tokens "$_tok" \
+        '{path: $path, tokens: $tokens}' >> "$_contrib_jsonl"
+    done < "$_top5_tmp"
+    jq -cn \
+      --argjson total "$TOTAL_BUDGET_TOKENS" \
+      --argjson threshold "$BUDGET_THRESHOLD_ERR" \
+      --argjson over "$_over" \
+      --slurpfile contributors "$_contrib_jsonl" \
+      '{total_tokens: $total, threshold: $threshold, over: $over, contributors: ($contributors | flatten)}'
+    rm -f "$_top5_tmp" "$_contrib_jsonl"
+  else
+    # Human output
+    human "── Context Budget ─────────────────────────────────────"
+    human "  Always-loaded: CLAUDE.md + skill SKILL.md indexes"
+    human "  Estimated tokens: ~$TOTAL_BUDGET_TOKENS (chars/4 heuristic)"
+    # Top 5 contributors
+    sort -rn "$BUDGET_TMP" | head -5 | while IFS=' ' read -r _tok _path; do
+      human "  $(printf '%-40s' "$_path") ~${_tok} tokens"
+    done
+    if [ "$TOTAL_BUDGET_TOKENS" -ge "$BUDGET_THRESHOLD_ERR" ]; then
+      err "context budget: ~$TOTAL_BUDGET_TOKENS tokens (>=${BUDGET_THRESHOLD_ERR} — prune CLAUDE.md or skills)"
+    elif [ "$TOTAL_BUDGET_TOKENS" -ge "$BUDGET_THRESHOLD_WARN" ]; then
+      warn "context budget: ~$TOTAL_BUDGET_TOKENS tokens (>=${BUDGET_THRESHOLD_WARN} — watch for growth)"
+    else
+      ok "context budget: ~$TOTAL_BUDGET_TOKENS tokens (well-tuned)"
+    fi
+  fi
+  rm -f "$BUDGET_TMP"
+fi
+
 # Conflict markers — detect unresolved 3-way merge conflicts (MERGE-05)
 if [ -d .claude ]; then
   CONFLICT_FILES="$(grep -rl '^<<<<<<<' .claude/ 2>/dev/null \
@@ -419,6 +489,49 @@ if [ -f "$SCHEMA_FILE" ] && command -v jq >/dev/null 2>&1; then
       fi
     fi
   fi
+fi
+
+# EVAL-05 — Coverage Gap Report: diff installed skills vs skill-used assertions.
+# Always runs (no gate condition) — advisory note() only; never exit 2.
+# _eval_extract_skill_used defined BEFORE its call site (no forward reference).
+_eval_extract_skill_used() {
+  awk '
+    /type: skill-used/ { found=1; next }
+    found && /value:/ {
+      gsub(/^[[:space:]]*value:[[:space:]]*/, "")
+      gsub(/[[:space:]]*$/, "")
+      gsub(/'"'"'/, "")
+      gsub(/"/, "")
+      print
+      found=0
+    }
+    !/value:/ { found=0 }
+  ' "$1"
+}
+
+_eval_cfg="$TARGET/.conjure/eval/promptfooconfig.yaml"
+if [ ! -f "$_eval_cfg" ]; then
+  note "no eval config — run \`conjure eval init\` (EVAL-05)"
+  json_check "EVAL-05-no-config" "note" "no eval config — run conjure eval init"
+else
+  _asserted_tmp="$(mktemp)"
+  _installed_tmp="$(mktemp)"
+  _gap_tmp="$(mktemp)"
+  _eval_extract_skill_used "$_eval_cfg" | sort > "$_asserted_tmp"
+  find .claude/skills -name SKILL.md 2>/dev/null \
+    | sed 's|.*/skills/||;s|/SKILL.md||' \
+    | sort > "$_installed_tmp"
+  comm -23 "$_installed_tmp" "$_asserted_tmp" > "$_gap_tmp"
+  if [ -s "$_gap_tmp" ]; then
+    while IFS= read -r _skill; do
+      [ -z "$_skill" ] && continue
+      note "⚠ [eval] skill '$_skill' has no skill-used assertion — run \`conjure eval init\` to update"
+      json_check "EVAL-05-gap" "note" "skill '$_skill' has no skill-used assertion in eval config"
+    done < "$_gap_tmp"
+  else
+    ok "eval coverage: all installed skills have skill-used assertions"
+  fi
+  rm -f "$_asserted_tmp" "$_installed_tmp" "$_gap_tmp"
 fi
 
 # Summary
