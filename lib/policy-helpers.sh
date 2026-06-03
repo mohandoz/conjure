@@ -147,9 +147,28 @@ merge_deny_read_permissions() {
   local settings_file="$1"
   local deny_read_json="$2"
 
-  # Build Read() entries from deny_read_json
+  local CURRENT
+  CURRENT="$(cat "$settings_file" 2>/dev/null || printf '{}')"
+
+  # WR-03: mirror EVERY sandbox denyRead path — conjure-emitted AND operator-added
+  # — into permissions.deny. Union the conjure deny_read_json with the existing
+  # .sandbox.filesystem.denyRead already present in settings_file. emit calls
+  # merge_sandbox_block FIRST (which writes operator paths into denyRead), so by
+  # the time this runs CURRENT already contains operator-added paths. Without this
+  # union, a hand-added denyRead path is never mirrored and `conjure audit` flags a
+  # POL-02 enforcement gap that re-emit can never close ("false sense of security").
+  local existing_deny_read
+  existing_deny_read="$(printf '%s' "$CURRENT" | jq -c '.sandbox.filesystem.denyRead // []' 2>/dev/null || printf '[]')"
+
+  local combined_deny_read
+  combined_deny_read="$(jq -nc \
+    --argjson a "$deny_read_json" \
+    --argjson b "$existing_deny_read" \
+    '(($a // []) + ($b // [])) | unique')"
+
+  # Build Read() entries from the combined (conjure + operator) denyRead set
   local read_entries
-  read_entries="$(build_deny_read_entries "$deny_read_json")"
+  read_entries="$(build_deny_read_entries "$combined_deny_read")"
 
   # Convert newline-separated Read() entries to a JSON array.
   # Filter empties so an empty deny list yields [] — NOT [""] (WR-01). The naive
@@ -158,9 +177,6 @@ merge_deny_read_permissions() {
   local read_entries_json
   read_entries_json="$(printf '%s\n' "$read_entries" \
     | jq -R . | jq -sc '[.[] | select(length > 0)]')"
-
-  local CURRENT
-  CURRENT="$(cat "$settings_file" 2>/dev/null || printf '{}')"
 
   local UPDATED
   UPDATED="$(printf '%s' "$CURRENT" | jq \

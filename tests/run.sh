@@ -4420,6 +4420,37 @@ fi
 rm -rf "$P26_IDEM_DIR"
 trap - EXIT
 
+# POL-02-operator: operator-added sandbox.filesystem.denyRead path is mirrored into
+# permissions.deny on a subsequent emit (WR-03). Emit once, hand-add a denyRead
+# path to settings.json, re-emit, then confirm the corresponding Read() entry now
+# appears in permissions.deny — closing the "false sense of security" gap.
+P26_POL02OP_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL02OP_DIR"' EXIT
+git -C "$P26_POL02OP_DIR" init -q
+git -C "$P26_POL02OP_DIR" config user.email "test@conjure"
+git -C "$P26_POL02OP_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-policy/harness/." "$P26_POL02OP_DIR/"
+git -C "$P26_POL02OP_DIR" add -A
+git -C "$P26_POL02OP_DIR" commit -q -m "test fixture"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa --output "$P26_POL02OP_DIR/conjure-policy" 2>/dev/null
+  # Operator hand-adds a denyRead path (not present in baseline/regime data).
+  P26_POL02OP_SET="$P26_POL02OP_DIR/.claude/settings.json"
+  P26_POL02OP_PATCHED="$(jq '.sandbox.filesystem.denyRead += ["~/.operator-secret"]' "$P26_POL02OP_SET")"
+  printf '%s' "$P26_POL02OP_PATCHED" > "$P26_POL02OP_SET"
+  # Re-emit: the operator-added denyRead path must now be mirrored.
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa --output "$P26_POL02OP_DIR/conjure-policy" 2>/dev/null
+  if jq -e '.permissions.deny | index("Read(~/.operator-secret)")' "$P26_POL02OP_SET" >/dev/null 2>&1; then
+    pass "operator-added denyRead path mirrored into permissions.deny on re-emit (POL-02-operator)"
+  else
+    fail "operator-added denyRead path NOT mirrored into permissions.deny on re-emit (POL-02-operator)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-02-operator)"
+fi
+rm -rf "$P26_POL02OP_DIR"
+trap - EXIT
+
 # POL-02: emit-policy mirrors denyRead paths into permissions.deny
 P26_POL02_DIR="$(mktemp -d)"
 trap 'rm -rf "$P26_POL02_DIR"' EXIT
