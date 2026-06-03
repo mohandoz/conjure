@@ -288,14 +288,25 @@ fi
 _pol_regime="$(grep -oE '<!-- compliance:(hipaa|soc2|gdpr|pci) -->' CLAUDE.md 2>/dev/null \
   | sed 's/<!-- compliance://;s/ -->//' | head -1)"
 
-# POL-05c — disableBypassPermissionsMode type check (UNCONDITIONAL — not gated on overlay).
-# A boolean disableBypassPermissionsMode is always wrong regardless of compliance state.
+# SCHM-02 — disableBypassPermissionsMode type check (replaces Phase 26 POL-05c).
+# Checks BOTH the top-level path AND the permissions.* sub-path.
+# A boolean disableBypassPermissionsMode is always wrong; the correct value is string "disable".
+# (D-SCHM-02 per 27-CONTEXT.md; subsumes POL-05c which only checked the permissions. path)
 if [ -f ".claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
-  _dbpm_type="$(jq -r '.permissions.disableBypassPermissionsMode | type' .claude/settings.json 2>/dev/null)"
-  _dbpm_val="$(jq -r '.permissions.disableBypassPermissionsMode // empty' .claude/settings.json 2>/dev/null)"
-  if [ "$_dbpm_type" = "boolean" ]; then
-    err "[policy] disableBypassPermissionsMode is boolean (got: $_dbpm_val) — must be string \"disable\". Re-run: conjure emit-policy"
+  _schm02_errs="$(mktemp)"
+  printf '%s\n' '.permissions.disableBypassPermissionsMode' '.disableBypassPermissionsMode' | while IFS= read -r _dbpm_path; do
+    # shellcheck disable=SC2155
+    _dbpm_type="$(jq -r "${_dbpm_path} | type" .claude/settings.json 2>/dev/null || echo null)"
+    # shellcheck disable=SC2155
+    _dbpm_val="$(jq -r "${_dbpm_path} // empty" .claude/settings.json 2>/dev/null || echo '')"
+    if [ "$_dbpm_type" = "boolean" ]; then
+      printf '%s\n' "[schema] disableBypassPermissionsMode is boolean (got: $_dbpm_val at ${_dbpm_path}) — must be string \"disable\" (SCHM-02)" >> "$_schm02_errs"
+    fi
+  done
+  if [ -s "$_schm02_errs" ]; then
+    while IFS= read -r _msg; do err "$_msg"; done < "$_schm02_errs"
   fi
+  rm -f "$_schm02_errs"
 fi
 
 # POL-05a — compliance overlay active but sandbox.enabled not true.
