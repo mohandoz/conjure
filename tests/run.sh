@@ -6209,6 +6209,337 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Phase 30 — Workspace Orchestration — Mutating + Rollback Saga (WS-05..07)
+# All sections are graceful-red until Wave 2-4 feature code exists.
+# SIGKILL poll uses jq applied-count (not .phase field) per 30-PATTERNS.md.
+# ──────────────────────────────────────────────────────────────────────────────
+
+P30_WS_SH="$CONJURE_HOME/scripts/workspace.sh"
+P30_WS_TRIO="$CONJURE_HOME/tests/fixtures/_workspace-trio"
+P30_WS_SH_OK=0
+P30_WS_TRIO_OK=0
+[ -f "$P30_WS_SH" ]  && P30_WS_SH_OK=1
+[ -d "$P30_WS_TRIO" ] && P30_WS_TRIO_OK=1
+
+# p30_sha — cross-platform sha256 of a single file (mirrors p22_sha / adopt.sh sha_of).
+p30_sha() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1 | tr -d '\r'
+  else shasum -a 256 "$1" | cut -d' ' -f1 | tr -d '\r'; fi
+}
+
+echo
+echo "▸ Phase 30 — Workspace Orchestration — Mutating + Rollback Saga (WS-05..07)"
+
+# ── WS-05 — workspace update (serial per-repo conjure update) ─────────────────
+echo
+echo "▸ Phase 30 — workspace update (WS-05)"
+
+P30_UPD_DIR="$(mktemp -d)"
+trap 'rm -rf "$P30_UPD_DIR"' EXIT
+cp -r "$P30_WS_TRIO/." "$P30_UPD_DIR/"
+if [ "$P30_WS_SH_OK" -eq 1 ]; then
+  P30_UPD_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" update "$P30_UPD_DIR/.conjure-workspace.json" \
+    </dev/null >/dev/null 2>&1 || P30_UPD_RC=$?
+  if [ "$P30_UPD_RC" -eq 2 ]; then
+    fail "workspace update not implemented — Wave 2 must add ws_do_update (WS-05)"
+  else
+    pass "workspace update exits $P30_UPD_RC on _workspace-trio (WS-05)"
+  fi
+else
+  fail "workspace update not implemented — Wave 2 must add ws_do_update (WS-05)"
+fi
+trap - EXIT
+rm -rf "$P30_UPD_DIR"
+
+# ── WS-06 — workspace adopt saga invariant + dry-run + du gate ───────────────
+echo
+echo "▸ Phase 30 — workspace adopt saga invariant + dry-run + du gate (WS-06)"
+
+# WS-06-SAGA-INVARIANT: adopt on _workspace-trio → all repos snapshotted before first applied
+P30_SA_DIR="$(mktemp -d)"
+trap 'rm -rf "$P30_SA_DIR"' EXIT
+cp -r "$P30_WS_TRIO/." "$P30_SA_DIR/"
+if [ "$P30_WS_SH_OK" -eq 1 ] && [ "$P30_WS_TRIO_OK" -eq 1 ]; then
+  P30_SA_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --yes "$P30_SA_DIR/.conjure-workspace.json" \
+    </dev/null >/dev/null 2>&1 || P30_SA_RC=$?
+  # After adopt, check that the state file records all repos reached snapshotted
+  # BEFORE any was applied (saga invariant). Graceful-red until ws_do_adopt exists.
+  P30_SA_STATE="$P30_SA_DIR/.conjure-workspace-state.json"
+  if [ -f "$P30_SA_STATE" ]; then
+    P30_SA_INV="$(jq 'if (.repos | map(select(.status == "applied")) | length) > 0 and
+                      (.repos | map(select(.status == "snapshotted" or .status == "applied" or .status == "done")) | length) ==
+                      (.repos | length)
+                      then "ok" else "fail" end' "$P30_SA_STATE" 2>/dev/null || echo fail)"
+    if [ "$P30_SA_INV" = '"ok"' ]; then
+      pass "workspace adopt saga invariant: all repos snapshotted before applied (WS-06-SAGA-INVARIANT)"
+    else
+      fail "workspace adopt saga invariant not verifiable — Wave 3 must implement ws_do_adopt (WS-06-SAGA-INVARIANT)"
+    fi
+  else
+    fail "workspace adopt saga invariant not verifiable — Wave 3 must implement ws_do_adopt (WS-06-SAGA-INVARIANT)"
+  fi
+else
+  fail "workspace adopt saga invariant not verifiable — Wave 3 must implement ws_do_adopt (WS-06-SAGA-INVARIANT)"
+fi
+trap - EXIT
+rm -rf "$P30_SA_DIR"
+
+# WS-06-DRY-RUN: adopt --dry-run → zero files written, exits 0
+P30_DR_DIR="$(mktemp -d)"
+trap 'rm -rf "$P30_DR_DIR"' EXIT
+cp -r "$P30_WS_TRIO/." "$P30_DR_DIR/"
+if [ "$P30_WS_SH_OK" -eq 1 ] && [ "$P30_WS_TRIO_OK" -eq 1 ]; then
+  P30_DR_RC=0
+  CONJURE_HOME="$CONJURE_HOME" DRY_RUN=1 bash "$P30_WS_SH" adopt --dry-run --yes \
+    "$P30_DR_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || P30_DR_RC=$?
+  P30_DR_STATE_WRITTEN=0
+  [ -f "$P30_DR_DIR/.conjure-workspace-state.json" ] && P30_DR_STATE_WRITTEN=1
+  P30_DR_SNAP_COUNT=0
+  P30_DR_SNAP_COUNT="$(find "$P30_DR_DIR" -name '.conjure-adopt-backups' -type d 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "$P30_DR_RC" -eq 0 ] && [ "$P30_DR_STATE_WRITTEN" -eq 0 ] && [ "$P30_DR_SNAP_COUNT" -eq 0 ]; then
+    pass "workspace adopt --dry-run writes no state file, no snapshots, exits 0 (WS-06-DRY-RUN)"
+  else
+    fail "workspace adopt --dry-run not implemented (rc=$P30_DR_RC state=$P30_DR_STATE_WRITTEN snaps=$P30_DR_SNAP_COUNT) (WS-06-DRY-RUN)"
+  fi
+else
+  fail "workspace adopt --dry-run not implemented (WS-06-DRY-RUN)"
+fi
+trap - EXIT
+rm -rf "$P30_DR_DIR"
+
+# WS-06-DU-GATE: stub du via PATH shim → adopt without --allow-large-snapshots → exit 2
+P30_DU_DIR="$(mktemp -d)"
+P30_DU_BIN="$(mktemp -d)"
+trap 'rm -rf "$P30_DU_DIR" "$P30_DU_BIN"' EXIT
+cp -r "$P30_WS_TRIO/." "$P30_DU_DIR/"
+# du shim: reports >2 GiB (2200000 KiB) to trigger the gate
+printf '#!/bin/sh\nprintf "2200000\t%%s\n" "${@:-/path}"\n' > "$P30_DU_BIN/du"
+chmod +x "$P30_DU_BIN/du"
+if [ "$P30_WS_SH_OK" -eq 1 ] && [ "$P30_WS_TRIO_OK" -eq 1 ]; then
+  P30_DU_RC=0
+  PATH="$P30_DU_BIN:$PATH" CONJURE_HOME="$CONJURE_HOME" \
+    bash "$P30_WS_SH" adopt --yes "$P30_DU_DIR/.conjure-workspace.json" \
+    </dev/null >/dev/null 2>&1 || P30_DU_RC=$?
+  if [ "$P30_DU_RC" -eq 2 ]; then
+    pass "workspace adopt du gate: large snapshot refused without --allow-large-snapshots (WS-06-DU-GATE)"
+  else
+    fail "workspace adopt du gate not implemented (exit $P30_DU_RC, expected 2) (WS-06-DU-GATE)"
+  fi
+  # With --allow-large-snapshots: should proceed (not exit 2 on disk estimate)
+  P30_DU_AL_RC=0
+  PATH="$P30_DU_BIN:$PATH" CONJURE_HOME="$CONJURE_HOME" \
+    bash "$P30_WS_SH" adopt --allow-large-snapshots --yes "$P30_DU_DIR/.conjure-workspace.json" \
+    </dev/null >/dev/null 2>&1 || P30_DU_AL_RC=$?
+  if [ "$P30_DU_AL_RC" -ne 2 ]; then
+    pass "workspace adopt --allow-large-snapshots bypasses du gate (WS-06-DU-GATE-bypass)"
+  else
+    fail "workspace adopt --allow-large-snapshots still exits 2 (du gate not bypassed) (WS-06-DU-GATE-bypass)"
+  fi
+else
+  fail "workspace adopt du gate not implemented (WS-06-DU-GATE)"
+  fail "workspace adopt du gate not implemented (WS-06-DU-GATE-bypass)"
+fi
+trap - EXIT
+rm -rf "$P30_DU_DIR" "$P30_DU_BIN"
+
+# ── WS-07 — workspace adopt --rollback ───────────────────────────────────────
+echo
+echo "▸ Phase 30 — workspace adopt --rollback (WS-07)"
+
+# WS-07-NO-STATE: --rollback with no state file → exit 2
+P30_NS_DIR="$(mktemp -d)"
+trap 'rm -rf "$P30_NS_DIR"' EXIT
+cp -r "$P30_WS_TRIO/." "$P30_NS_DIR/"
+if [ "$P30_WS_SH_OK" -eq 1 ] && [ "$P30_WS_TRIO_OK" -eq 1 ]; then
+  P30_NS_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --rollback --yes \
+    "$P30_NS_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || P30_NS_RC=$?
+  if [ "$P30_NS_RC" -eq 2 ]; then
+    pass "workspace adopt --rollback with no state file exits 2 (WS-07-NO-STATE)"
+  else
+    fail "workspace adopt --rollback with no state: expected exit 2, got $P30_NS_RC (WS-07-NO-STATE)"
+  fi
+else
+  fail "workspace adopt --rollback not implemented — Wave 4 must add ws_do_rollback (WS-07-NO-STATE)"
+fi
+trap - EXIT
+rm -rf "$P30_NS_DIR"
+
+# WS-07-ARCHIVED: after rollback, timestamped COPY exists AND original remains
+P30_AR_DIR="$(mktemp -d)"
+trap 'rm -rf "$P30_AR_DIR"' EXIT
+cp -r "$P30_WS_TRIO/." "$P30_AR_DIR/"
+if [ "$P30_WS_SH_OK" -eq 1 ] && [ "$P30_WS_TRIO_OK" -eq 1 ]; then
+  # First do an adopt to create state, then rollback.
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --yes \
+    "$P30_AR_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || true
+  P30_AR_STATE="$P30_AR_DIR/.conjure-workspace-state.json"
+  if [ -f "$P30_AR_STATE" ]; then
+    CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --rollback --yes \
+      "$P30_AR_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || true
+    # Original state file must still exist with all repos rolled_back
+    P30_AR_ORIG_OK=0
+    if [ -f "$P30_AR_STATE" ]; then
+      _rb_count="$(jq '[.repos[] | select(.status == "rolled_back")] | length' "$P30_AR_STATE" 2>/dev/null || echo 0)"
+      _total="$(jq '.repos | length' "$P30_AR_STATE" 2>/dev/null || echo 0)"
+      [ "$_rb_count" = "$_total" ] && P30_AR_ORIG_OK=1
+    fi
+    # Timestamped archive copy must also exist
+    P30_AR_COPY_COUNT=0
+    P30_AR_COPY_COUNT="$(find "$P30_AR_DIR" -maxdepth 1 \
+      -name '.conjure-workspace-state-*.json' -type f 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$P30_AR_ORIG_OK" -eq 1 ] && [ "$P30_AR_COPY_COUNT" -ge 1 ]; then
+      pass "workspace rollback: timestamped copy exists AND original remains (all rolled_back) (WS-07-ARCHIVED)"
+    else
+      fail "workspace rollback archive: orig_ok=$P30_AR_ORIG_OK archive_copies=$P30_AR_COPY_COUNT — Wave 4 must implement (WS-07-ARCHIVED)"
+    fi
+  else
+    fail "workspace rollback archive not testable — adopt produced no state file (WS-07-ARCHIVED)"
+  fi
+else
+  fail "workspace adopt --rollback not implemented — Wave 4 must add ws_do_rollback (WS-07-ARCHIVED)"
+fi
+trap - EXIT
+rm -rf "$P30_AR_DIR"
+
+# WS-07-IDEMPOTENT: second --rollback exits 0 (reads state, sees all rolled_back, no-ops)
+P30_ID_DIR="$(mktemp -d)"
+trap 'rm -rf "$P30_ID_DIR"' EXIT
+cp -r "$P30_WS_TRIO/." "$P30_ID_DIR/"
+if [ "$P30_WS_SH_OK" -eq 1 ] && [ "$P30_WS_TRIO_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --yes \
+    "$P30_ID_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || true
+  # First rollback
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --rollback --yes \
+    "$P30_ID_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || true
+  # Second rollback must exit 0 (idempotent no-op)
+  P30_ID_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --rollback --yes \
+    "$P30_ID_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || P30_ID_RC=$?
+  if [ "$P30_ID_RC" -eq 0 ]; then
+    pass "workspace adopt --rollback is idempotent: second run exits 0 (WS-07-IDEMPOTENT)"
+  else
+    fail "workspace adopt --rollback idempotent: second run exit $P30_ID_RC (expected 0) — Wave 4 must implement (WS-07-IDEMPOTENT)"
+  fi
+else
+  fail "workspace adopt --rollback not implemented — Wave 4 must add ws_do_rollback (WS-07-IDEMPOTENT)"
+fi
+trap - EXIT
+rm -rf "$P30_ID_DIR"
+
+# ── SAGA SIGKILL — zero-diff after kill-9 + rollback (WS-07 / criterion 4) ──
+echo
+echo "▸ Phase 30 — SAGA SIGKILL zero-diff (WS-07 / criterion 4)"
+
+# Mirror Phase 24 SIGKILL block at workspace scale.
+# Poll uses: jq '[.repos[] | select(.status == "applied")] | length > 0'
+# Kill window: ≥1 repo genuinely applied (real mutations exist → rollback is meaningful).
+if [ "$P30_WS_SH_OK" -ne 1 ] || [ "$P30_WS_TRIO_OK" -ne 1 ]; then
+  fail "SAGA SIGKILL not testable — Wave 4 must implement --rollback (WS-07/criterion 4)"
+else
+  P30_SK_WS_ROOT="$(mktemp -d)"
+  P30_SK_PRE="$(mktemp -d)"
+  # Per-repo hash files stored OUTSIDE the workspace tree (one per repo).
+  P30_SK_HASH_ALPHA="$(mktemp)"
+  P30_SK_HASH_BETA="$(mktemp)"
+  P30_SK_HASH_GAMMA="$(mktemp)"
+  trap 'rm -rf "$P30_SK_WS_ROOT" "$P30_SK_PRE"; rm -f "$P30_SK_HASH_ALPHA" "$P30_SK_HASH_BETA" "$P30_SK_HASH_GAMMA"' EXIT
+  cp -r "$P30_WS_TRIO/." "$P30_SK_WS_ROOT/"
+  cp -r "$P30_WS_TRIO/." "$P30_SK_PRE/"
+  # Record per-repo pre-run sha256 hashes (relative file paths within each repo).
+  for _repo_pair in "alpha:$P30_SK_HASH_ALPHA" "beta:$P30_SK_HASH_BETA" "gamma:$P30_SK_HASH_GAMMA"; do
+    _rname="${_repo_pair%%:*}"
+    _hfile="${_repo_pair##*:}"
+    _rabs="$P30_SK_WS_ROOT/repos/$_rname"
+    ( cd "$_rabs" && find . -type f -not -path './.git/*' | sort | while IFS= read -r f; do
+        printf '%s  %s\n' "$(p30_sha "$f")" "$f"
+      done ) > "$_hfile" 2>/dev/null
+  done
+  # Relaunch loop: catch kill strictly AFTER ≥1 repo applied.
+  P30_SK_INWINDOW=0
+  P30_SK_WS_MANIFEST="$P30_SK_WS_ROOT/.conjure-workspace.json"
+  P30_SK_STATE="$P30_SK_WS_ROOT/.conjure-workspace-state.json"
+  for _attempt in 1 2 3; do
+    CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --yes \
+      "$P30_SK_WS_MANIFEST" >/dev/null 2>&1 &
+    P30_SK_PID=$!
+    # Bounded poll (200 × 0.05s = 10s max) on applied-count.
+    P30_SK_APPLIED=0
+    for _i in $(seq 1 200); do
+      _cnt="$(jq '[.repos[] | select(.status == "applied")] | length' \
+        "$P30_SK_STATE" 2>/dev/null || echo 0)"
+      [ "$_cnt" -gt 0 ] && { P30_SK_APPLIED=1; break; }
+      kill -0 "$P30_SK_PID" 2>/dev/null || break
+      sleep 0.05
+    done
+    kill -9 "$P30_SK_PID" 2>/dev/null || true
+    wait "$P30_SK_PID" 2>/dev/null || true
+    if [ "$P30_SK_APPLIED" -eq 1 ]; then
+      P30_SK_INWINDOW=1
+      break
+    else
+      # Out-of-window: reset workspace tree and retry.
+      rm -rf "$P30_SK_WS_ROOT"
+      mkdir -p "$P30_SK_WS_ROOT"
+      cp -r "$P30_WS_TRIO/." "$P30_SK_WS_ROOT/"
+    fi
+  done
+  if [ "$P30_SK_INWINDOW" -eq 1 ]; then
+    pass "workspace SIGKILL: kill landed after ≥1 repo applied (in kill window) (WS-07/criterion 4)"
+  else
+    fail "workspace SIGKILL: kill never landed in the applied-window after 3 attempts (WS-07/criterion 4)"
+  fi
+  # Post-kill rollback: must exit 0.
+  P30_SK_RB_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --rollback --yes \
+    "$P30_SK_WS_MANIFEST" </dev/null >/dev/null 2>&1 || P30_SK_RB_RC=$?
+  if [ "$P30_SK_RB_RC" -eq 0 ]; then
+    pass "workspace SIGKILL: post-kill --rollback exits 0 (WS-07/criterion 4)"
+  else
+    fail "workspace SIGKILL: post-kill --rollback exit $P30_SK_RB_RC (expected 0) (WS-07/criterion 4)"
+  fi
+  # Per-repo sha256 zero-diff assertion.
+  P30_SK_MISMATCH=0
+  for _repo_pair in "alpha:$P30_SK_HASH_ALPHA" "beta:$P30_SK_HASH_BETA" "gamma:$P30_SK_HASH_GAMMA"; do
+    _rname="${_repo_pair%%:*}"
+    _hfile="${_repo_pair##*:}"
+    _rabs="$P30_SK_WS_ROOT/repos/$_rname"
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      _h="${line%%  *}"; _f="${line##*  }"
+      _now="$(p30_sha "$_rabs/$_f" 2>/dev/null || echo MISSING)"
+      [ "$_h" = "$_now" ] || P30_SK_MISMATCH=$((P30_SK_MISMATCH+1))
+    done < "$_hfile"
+  done
+  if [ "$P30_SK_MISMATCH" -eq 0 ]; then
+    pass "workspace SIGKILL: all per-repo sha256 hashes match pre-run (zero-diff) (WS-07/criterion 4)"
+  else
+    fail "workspace SIGKILL: $P30_SK_MISMATCH file(s) differ from pre-run hash after rollback (WS-07/criterion 4)"
+  fi
+  # diff -r zero-diff per repo (excl. conjure own dirs).
+  P30_SK_DIFF_FAIL=0
+  for _rname in alpha beta gamma; do
+    _pre="$P30_SK_PRE/repos/$_rname"
+    _post="$P30_SK_WS_ROOT/repos/$_rname"
+    _d="$(diff -r \
+      -x '.conjure-adopt-backups' -x '.conjure-archive-*' \
+      -x 'RESTRUCTURE-LOG.md' -x 'adopt-manifest.json' -x '.conjure-adopt-state' \
+      "$_pre" "$_post" 2>&1)"
+    [ -n "$_d" ] && P30_SK_DIFF_FAIL=$((P30_SK_DIFF_FAIL+1))
+  done
+  if [ "$P30_SK_DIFF_FAIL" -eq 0 ]; then
+    pass "workspace SIGKILL: diff -r pre vs post-rollback empty for all repos (excl. conjure dirs) (WS-07/criterion 4)"
+  else
+    fail "workspace SIGKILL: $P30_SK_DIFF_FAIL repo(s) have non-empty diff after rollback (WS-07/criterion 4)"
+  fi
+  rm -rf "$P30_SK_WS_ROOT" "$P30_SK_PRE"
+  rm -f "$P30_SK_HASH_ALPHA" "$P30_SK_HASH_BETA" "$P30_SK_HASH_GAMMA"
+  trap - EXIT
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
