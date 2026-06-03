@@ -76,8 +76,13 @@ fi
 # Version resolution: .conjure-version → git SHA → 0.0.0
 RESOLVED_VERSION="$(resolve_version "$TARGET")"
 
-# Plugin.json build
-PLUGIN_JSON="$(plugin_build_plugin_json "$TARGET" "$RESOLVED_VERSION")" || exit 2
+# Plugin.json build.
+# CR-01: thread MKT_NAME (the --name / CONJURE_PLUGIN_MKT_NAME value, possibly empty)
+# as the plugin-name seed. When set, it seeds plugin.json's `name`; when empty, the
+# helper derives a kebab name from the target basename. Either way a first-time
+# greenfield emit produces a schema-valid non-empty `.name`. An existing user-set
+# `.name` is always merge-preserved inside plugin_build_plugin_json (never overwritten).
+PLUGIN_JSON="$(plugin_build_plugin_json "$TARGET" "$RESOLVED_VERSION" "$MKT_NAME")" || exit 2
 
 # Secret scan before write (D-08)
 secret_scan "$PLUGIN_JSON" "plugin.json" || exit 2

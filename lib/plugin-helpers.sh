@@ -209,12 +209,30 @@ resolve_version() {
   return 0
 }
 
-# plugin_build_plugin_json(target, version)
+# plugin_build_plugin_json(target, version, fallback_name)
 # Builds updated plugin.json by reading harness paths and merging with existing manifest.
 # Prints resulting JSON to stdout; caller writes via mutate_write.
+# CR-01: derives a schema-valid `.name` on first-time emit. Without this, the merge base
+# is `{}` and the emitted plugin.json has no `name`, so the WR-02-hardened
+# validate_plugin_json rejects it and a greenfield publish-plugin exits 2.
 plugin_build_plugin_json() {
   local target="$1"
   local version="$2"
+  local fallback_name="${3:-}"
+
+  # Derive a plugin name when the caller did not seed one. Use the SAME kebab
+  # normalization + schema constraint (^[a-z][a-z0-9-]{0,63}$) the marketplace name
+  # uses in emit-plugin.sh: lowercase, _/. → -, strip other non-alphanum, then enforce
+  # a leading letter and ≤64 chars. A non-conforming result is dropped (name stays
+  # empty) and the merge below leaves `.name` to the existing manifest; validation
+  # then surfaces a clear "name required" error rather than emitting a bad name (CR-01).
+  if [ -z "$fallback_name" ]; then
+    fallback_name="$(basename "$target" | tr '[:upper:]' '[:lower:]' | tr '_.' '-' | tr -cd 'a-z0-9-')"
+  fi
+  # shellcheck disable=SC2016
+  if ! printf '%s' "$fallback_name" | grep -qE '^[a-z][a-z0-9-]{0,63}$'; then
+    fallback_name=""
+  fi
 
   # Harness path discovery
   local skills_dir=""
@@ -267,6 +285,7 @@ plugin_build_plugin_json() {
     --argjson hooks "$hooks_obj" \
     --argjson mcp "$mcp_obj" \
     --arg version "$version" \
+    --arg name "$fallback_name" \
     '. as $orig |
      ($orig.description // null) as $desc |
      ($orig.keywords // null) as $kw |
@@ -275,6 +294,7 @@ plugin_build_plugin_json() {
      ($orig.homepage // null) as $hp |
      ($orig.repository // null) as $repo |
      . |
+     (if (.name // "") == "" and $name != "" then .name = $name else . end) |
      .version = $version |
      (if $skills != "" then .skills = $skills else . end) |
      (if ($agents | length) > 0 then .agents = $agents else . end) |

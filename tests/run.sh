@@ -4046,6 +4046,42 @@ fi
 rm -rf "$P25_MERGE_DIR"
 trap - EXIT
 
+# PLUG-01-greenfield (CR-01 regression): first-time emit into a repo with NO
+# pre-existing .claude-plugin/plugin.json must exit 0 and produce a schema-valid
+# non-empty `.name`. The shared fixture ships a plugin.json carrying "name", which
+# masked the greenfield bug where the merge base is {} and `.name` is never set —
+# making the WR-02-hardened validator reject the emitter's own first-run output.
+# We name the repo dir with mixed case + underscore to also exercise the kebab
+# normalization (^[a-z][a-z0-9-]{0,63}$) on the derived name.
+P25_GREEN_PARENT="$(mktemp -d)"
+trap 'rm -rf "$P25_GREEN_PARENT"' EXIT
+P25_GREEN_DIR="$P25_GREEN_PARENT/My_Cool_Repo"
+mkdir -p "$P25_GREEN_DIR"
+git -C "$P25_GREEN_DIR" init -q
+git -C "$P25_GREEN_DIR" config user.email "test@conjure"
+git -C "$P25_GREEN_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin/harness/." "$P25_GREEN_DIR/"
+# Greenfield: remove the fixture's pre-existing manifest so the merge base is {}.
+rm -f "$P25_GREEN_DIR/.claude-plugin/plugin.json"
+git -C "$P25_GREEN_DIR" add -A
+git -C "$P25_GREEN_DIR" commit -q -m "test fixture"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_GREEN_DIR" >/dev/null 2>&1
+  GREEN_RC=$?
+  GREEN_NAME="$(jq -r '.name // ""' "$P25_GREEN_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "")"
+  if [ "$GREEN_RC" -eq 0 ] \
+     && [ -n "$GREEN_NAME" ] \
+     && printf '%s' "$GREEN_NAME" | grep -qE '^[a-z][a-z0-9-]{0,63}$'; then
+    pass "emit-plugin greenfield first-run sets schema-valid name and exits 0 (PLUG-01-greenfield/CR-01)"
+  else
+    fail "emit-plugin greenfield rc=$GREEN_RC name='$GREEN_NAME' — expected rc 0 + kebab name (PLUG-01-greenfield/CR-01)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-01-greenfield/CR-01)"
+fi
+rm -rf "$P25_GREEN_PARENT"
+trap - EXIT
+
 # PLUG-05: version fallback — no .conjure-version → git SHA (40-char hex)
 P25_PLUG05_DIR="$(mktemp -d)"
 trap 'rm -rf "$P25_PLUG05_DIR"' EXIT
@@ -4097,9 +4133,15 @@ trap - EXIT
 
 # PLUG-04: schema validation blocks write on invalid manifest
 # Strategy: harness with empty .claude/ (no skills/agents) and a pre-existing plugin.json
-# missing the required "name" field — bundled schema check must exit 2
-P25_PLUG04_DIR="$(mktemp -d)"
-trap 'rm -rf "$P25_PLUG04_DIR"' EXIT
+# missing the required "name" field — bundled schema check must exit 2.
+# CR-01: plugin_build_plugin_json now derives a kebab name from the target basename,
+# so to keep this test exercising the "no name available" path we put the target in a
+# subdir whose basename ('123') is NOT a valid schema name (^[a-z][a-z0-9-]{0,63}$ —
+# must start with a LETTER). The derived fallback is dropped, the existing stub has no
+# name, and validation must exit 2.
+P25_PLUG04_PARENT="$(mktemp -d)"
+trap 'rm -rf "$P25_PLUG04_PARENT"' EXIT
+P25_PLUG04_DIR="$P25_PLUG04_PARENT/123"
 mkdir -p "$P25_PLUG04_DIR/.claude"
 printf '{}' > "$P25_PLUG04_DIR/.claude/settings.json"
 mkdir -p "$P25_PLUG04_DIR/.claude-plugin"
@@ -4116,7 +4158,7 @@ if [ "$P25_EMIT_OK" -eq 1 ]; then
 else
   fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-04)"
 fi
-rm -rf "$P25_PLUG04_DIR"
+rm -rf "$P25_PLUG04_PARENT"
 trap - EXIT
 
 # PLUG-04-secret: secret-pattern in emitted manifest → exit 2 before write
