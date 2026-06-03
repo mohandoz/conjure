@@ -77,7 +77,24 @@ Plans:
   4. `conjure audit` flags (a) overlay active but sandbox missing or `enabled: false`, (b) a `denyRead` path with no mirrored `Read(...)` deny, (c) `disableBypassPermissionsMode` wrong type (boolean instead of string); `conjure audit --compliance` on an uncustomized sandbox template warns "unreviewed policy template — not deployable"
   5. A deliberately-broken managed-settings artifact (wrong key name or type) is detected by `conjure audit`; emitted artifacts ship with a printed testable verification assertion (e.g., "Verify: `claude config get sandbox.enabled` must return true") so no compliance overlay ships without a live-verification step
 
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+**Wave 0**
+
+- [ ] 26-00-PLAN.md — Wave 0: golden fixtures + tests/run.sh Phase 26 graceful-red block (Nyquist)
+
+**Wave 1**
+
+- [ ] 26-01-PLAN.md — Wave 1: lib/policy-helpers.sh + compliance/*/policy.sh + emit-policy.sh + CLI dispatch (POL-01, POL-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 26-02-PLAN.md — Wave 2: managed-settings.json + macOS plist + Windows ps1 emit (POL-03, POL-04)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 26-03-PLAN.md — Wave 3: audit-setup.sh POL-05 checks (POL-05)
+
 **UI hint**: no
 
 ### Phase 27: Schema-Version-Aware Audit
