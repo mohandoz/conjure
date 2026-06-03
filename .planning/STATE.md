@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
 status: executing
-last_updated: "2026-06-03T23:32:27.556Z"
+last_updated: "2026-06-03T23:45:12.879Z"
 last_activity: 2026-06-03
 progress:
   total_phases: 6
   completed_phases: 5
   total_plans: 24
-  completed_plans: 21
+  completed_plans: 22
   percent: 83
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 30 (workspace-orchestration-mutating-rollback-saga) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-06-03
 
@@ -76,6 +76,7 @@ Last activity: 2026-06-03
 | Phase 29 P01 | 15 | 2 tasks | 3 files |
 | Phase 30 P00 | 25 | 2 tasks | 11 files |
 | Phase 30 P01 | 15min | 1 tasks | 1 files |
+| Phase 30 P02 | 20 | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,7 @@ v0.7.0 design decisions (from research + roadmap):
 - [Phase ?]: awk two-line lookahead for YAML object detection in SCHM-01 (T-27-01 mitigate)
 - [Phase ?]: SCHM-01 reads lib/cc-schema.json at runtime via jq — schema file is single source of truth
 - [Phase ?]: workspace_state_validate accepts snapshotting as valid in-progress status; status-level validation is the caller's responsibility
+- [Phase ?]: ws_do_update non-TTY gate omitted: conjure update without --apply is read-only; gate reserved for ws_do_adopt
 
 ### Pending Todos
 
@@ -135,7 +137,7 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T23:32:17.207Z
+Last session: 2026-06-03T23:45:12.871Z
 Stopped at: Completed Phase 27 Plan 01: SCHM-01 + SCHM-02 implemented in audit-setup.sh
 Resume file: None
 

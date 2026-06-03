@@ -218,7 +218,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 30-02-PLAN.md — Wave 2: ws_do_update in scripts/workspace.sh (serial per-repo conjure update, stop-on-first-error, --continue-on-error, conflict sidecar surfacing, CR-02 traversal re-check) + cmd_workspace update|adopt token extension in cli/conjure (WS-05)
+- [x] 30-02-PLAN.md — Wave 2: ws_do_update in scripts/workspace.sh (serial per-repo conjure update, stop-on-first-error, --continue-on-error, conflict sidecar surfacing, CR-02 traversal re-check) + cmd_workspace update|adopt token extension in cli/conjure (WS-05)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -243,4 +243,4 @@ Plans:
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 3/3 | Complete    | 2026-06-03 |
-| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 2/5 | In Progress|  |
+| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 3/5 | In Progress|  |
