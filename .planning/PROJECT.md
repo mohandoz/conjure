@@ -19,20 +19,23 @@ harness with one trustworthy command — and keep it healthy over time. If
 everything else fails, `conjure init` + `conjure audit` must reliably produce
 and verify a correct, safe harness.
 
-## Current Milestone: v0.6.0 Safe Brownfield Adoption
+## Current Milestone: v0.7.0 Plugin-native + Policy-grade
 
-**Goal:** Let `conjure` safely fold an existing, grown-messy project (oversized
-CLAUDE.md, scattered docs, prior GSD `.planning/`) into a best-practice
-four-layer harness — losing nothing, backing up everything, reporting each change.
+**Goal:** Make Conjure ride Claude Code's native plugin/marketplace rail and emit
+deployable security policy — so a scaffolded harness is installable, governable,
+and eval-gated across many repos, not just loose files in one.
 
 **Target features:**
-- `conjure adopt` (deterministic CLI): full timestamped snapshot backup, inventory + classify every markdown file, scaffold missing harness layers, size-cap audit, safe mutate via `lib/mutate.sh`, per-step `RESTRUCTURE-LOG.md`, `--dry-run`, `--rollback`.
-- `restructure` skill (Claude in-session): reads CLI inventory + oversized CLAUDE.md + doc sprawl → proposes ≤100-line CLAUDE.md core, what extracts to skills/subagents, what stays linked reference, what is stale → archive. Approve each step; applies via CLI safe primitives.
-- Safety primitives: snapshot-backup mutate primitive, git-clean precondition (refuse dirty tree without `--force`), never-delete (archive instead), live per-step messaging + persisted log, rollback.
+- **Plugin + marketplace emission** — `conjure` emits the harness as a versioned plugin + `marketplace.json`; wires `extraKnownMarketplaces`/`strictKnownMarketplaces` into project settings; wraps/extends `claude plugin init` rather than competing with it.
+- **Sandbox + managed-settings/MDM** — compliance overlays generate the `sandbox{}` block (allowWrite/denyRead + network allowlist) plus `managed-settings.json` and MDM artifacts (macOS plist, Windows registry, `/etc/claude-code/managed-settings.d/`) — compliance-as-deployable-policy.
+- **promptfoo eval + budget linter** — `conjure eval`: promptfoo-based prompt-adherence/regression suite + PR gate; per-turn context-budget linter (tokens/turn) added to `conjure audit`. Makes "eval-backed" defensible.
+- **Schema-version-aware audit/check** — `audit`/`check` validate current Claude Code settings keys, new hook events, `disallowed-tools`, and flag drift from supported schema versions.
+- **Cross-repo / workspace orchestration** — run the harness lifecycle (init/adopt/check/update) across many repos / a workspace from one invocation, with cross-repo rollback semantics.
 
-**Approach:** Brownfield-only — cross-repo orchestration deferred to v0.7.0.
-Hybrid determinism: file operations deterministic + auditable; content judgment
-is LLM, human-gated and backup-guarded.
+**Approach:** Ride the native rail (plugins/marketplaces, sandbox, managed-settings)
+rather than build a parallel system; keep Conjure's edge in safe migration, audit,
+compliance, and brownfield adoption. Large milestone (5 capability areas) — expect a
+long roadmap; sequence plugin+policy foundations before cross-repo orchestration.
 
 ## Requirements
 
@@ -149,4 +152,4 @@ _v0.6.0 shipped 2026-05-29. Next milestone requirements TBD — define via `/gsd
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-05-29 — after v0.6.0 "Safe Brownfield Adoption" milestone (shipped; 23/23 requirements, suite 449/0)*
+*Last updated: 2026-06-02 — started v0.7.0 "Plugin-native + Policy-grade" milestone (after v0.6.1 hardening patch; suite 467/0)*
