@@ -9,8 +9,7 @@
 #
 # Exit codes:
 #   0 = success
-#   1 = validation error (bad arg, JSON parse failure, missing file)
-#   2 = hard prerequisite failure (dirty tree, missing dep, missing VERSION)
+#   2 = hard failure (bad arg, JSON parse failure, missing file, dirty tree, missing dep/VERSION)
 
 set -euo pipefail
 
@@ -36,7 +35,7 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       echo "Unknown argument: $1" >&2
-      exit 1
+      exit 2
       ;;
   esac
   shift
@@ -74,12 +73,12 @@ CURRENT_SHA="$(git -C "$CONJURE_HOME" rev-parse HEAD)"
 # Pre-write jq validation
 if ! jq empty "$PLUGIN_DIR/marketplace.json" 2>/dev/null; then
   echo "✗ $PLUGIN_DIR/marketplace.json is not valid JSON — fix before publishing." >&2
-  exit 1
+  exit 2
 fi
 
 if ! jq empty "$PLUGIN_DIR/plugin.json" 2>/dev/null; then
   echo "✗ $PLUGIN_DIR/plugin.json is not valid JSON — fix before publishing." >&2
-  exit 1
+  exit 2
 fi
 
 # Build updated JSON in variables
@@ -89,7 +88,7 @@ NEW_MKT="$(jq --arg sha "$CURRENT_SHA" --arg ver "$CURRENT_VERSION" \
 
 printf '%s' "$NEW_MKT" | jq empty 2>/dev/null || {
   echo "✗ jq produced invalid JSON for marketplace.json" >&2
-  exit 1
+  exit 2
 }
 
 NEW_PLG="$(jq --arg ver "$CURRENT_VERSION" \
@@ -98,7 +97,7 @@ NEW_PLG="$(jq --arg ver "$CURRENT_VERSION" \
 
 printf '%s' "$NEW_PLG" | jq empty 2>/dev/null || {
   echo "✗ jq produced invalid JSON for plugin.json" >&2
-  exit 1
+  exit 2
 }
 
 # Write via mutate_write
@@ -129,7 +128,7 @@ if [ "$CONJURE_SUBMIT" = "1" ]; then
 
   printf '%s' "$SUBMIT_JSON" | jq empty 2>/dev/null || {
     echo "✗ jq produced invalid JSON for submit-entry.json" >&2
-    exit 1
+    exit 2
   }
 
   mutate_write "$PLUGIN_DIR/submit-entry.json" "$SUBMIT_JSON"
