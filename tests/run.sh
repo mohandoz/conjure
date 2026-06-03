@@ -6149,6 +6149,56 @@ fi
 trap - EXIT
 rm -rf "$P29_SLW_ROOT"
 
+# WS-INIT-dryrun-msg: init under DRY_RUN writes NO file and prints a "would write" message
+# (no false "✓ written" success). WR-03.
+P29_DRY_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_DRY_DIR"' EXIT
+mkdir -p "$P29_DRY_DIR/repo-a/.claude" "$P29_DRY_DIR/repo-b/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_DRY_DIR/repo-a/CLAUDE.md"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/beta/CLAUDE.md" "$P29_DRY_DIR/repo-b/CLAUDE.md"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_DRY_RC=0
+  P29_DRY_OUT="$(CONJURE_HOME="$CONJURE_HOME" DRY_RUN=1 bash "$P29_WS_SH" init --yes "$P29_DRY_DIR" </dev/null 2>&1)" || P29_DRY_RC=$?
+  if [ ! -f "$P29_DRY_DIR/.conjure-workspace.json" ] && \
+     printf '%s\n' "$P29_DRY_OUT" | grep -qi "would write" && \
+     ! printf '%s\n' "$P29_DRY_OUT" | grep -q "✓ Workspace manifest written"; then
+    pass "workspace init DRY_RUN prints 'would write' and writes no file (WS-INIT-dryrun-msg)"
+  else
+    fail "workspace init DRY_RUN printed false success or wrote a file (rc=$P29_DRY_RC) (WS-INIT-dryrun-msg)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 1 must create it (WS-INIT-dryrun-msg)"
+fi
+trap - EXIT
+rm -rf "$P29_DRY_DIR"
+
+# WS-INIT-self-validate: a manifest produced by init passes workspace_manifest_validate
+# (init self-checks its own generated output). WR-05.
+P29_SVAL_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_SVAL_DIR"' EXIT
+mkdir -p "$P29_SVAL_DIR/repo-a/.claude" "$P29_SVAL_DIR/repo-b/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_SVAL_DIR/repo-a/CLAUDE.md"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/beta/CLAUDE.md" "$P29_SVAL_DIR/repo-b/CLAUDE.md"
+if [ "$P29_WS_SH_OK" -eq 1 ] && [ "$P29_WS_LIB_OK" -eq 1 ]; then
+  P29_SVAL_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" init --yes "$P29_SVAL_DIR" </dev/null >/dev/null 2>&1 || P29_SVAL_RC=$?
+  P29_SVAL_VRC=0
+  if [ -f "$P29_SVAL_DIR/.conjure-workspace.json" ]; then
+    ( workspace_manifest_validate "$P29_SVAL_DIR/.conjure-workspace.json" ) >/dev/null 2>&1 || P29_SVAL_VRC=$?
+  else
+    P29_SVAL_VRC=99
+  fi
+  if [ "$P29_SVAL_RC" -eq 0 ] && [ "$P29_SVAL_VRC" -eq 0 ]; then
+    pass "workspace init writes a manifest that passes its own validation (WS-INIT-self-validate)"
+  else
+    fail "workspace init manifest failed self-validation (init_rc=$P29_SVAL_RC validate_rc=$P29_SVAL_VRC) (WS-INIT-self-validate)"
+  fi
+else
+  fail "lib/scripts workspace not implemented — Wave 1 must create them (WS-INIT-self-validate)"
+fi
+trap - EXIT
+rm -rf "$P29_SVAL_DIR"
+
 # WS-CLI-subhelp: `conjure workspace check --help` reaches the worker's check-specific
 # usage instead of the wrapper swallowing --help with generic usage. WR-02.
 P29_HELP_OUT="$(bash "$CONJURE_HOME/cli/conjure" workspace check --help 2>&1)"

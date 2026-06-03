@@ -348,10 +348,24 @@ EOF
 
     # Write via mutate_write
     MANIFEST_PATH="$TARGET/.conjure-workspace.json"
-    mutate_write "$MANIFEST_PATH" "$MANIFEST_CONTENT"
-    echo "✓ Workspace manifest written: $MANIFEST_PATH"
     REPO_COUNT="$(printf '%s\n' "$DISCOVERED" | wc -l | tr -d ' ')"
-    echo "  Repos: $REPO_COUNT"
+    mutate_write "$MANIFEST_PATH" "$MANIFEST_CONTENT"
+
+    if [ "${DRY_RUN:-0}" = "1" ]; then
+      # WR-03: under DRY_RUN nothing was written — do not print a false "✓ written" success.
+      echo "  (dry-run) would write $REPO_COUNT repo(s) to $MANIFEST_PATH"
+    else
+      # WR-05: self-check the manifest we just generated against the same traversal guard
+      # that check/audit rely on. If our own output fails validation, remove it and fail
+      # rather than leaving an unsafe manifest on disk.
+      if ! workspace_manifest_validate "$MANIFEST_PATH" >/dev/null 2>&1; then
+        echo "✗ generated manifest failed validation — removing $MANIFEST_PATH" >&2
+        rm -f "$MANIFEST_PATH"
+        exit 2
+      fi
+      echo "✓ Workspace manifest written: $MANIFEST_PATH"
+      echo "  Repos: $REPO_COUNT"
+    fi
     ;;
 
   check)
