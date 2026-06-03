@@ -42,7 +42,10 @@ secret_scan() {
   # Patterns cover common API key prefixes + password= patterns + quoted credential field assignments
   # shellcheck disable=SC2016
   local patterns
-  patterns='sk-ant-[A-Za-z0-9_-]{10,}|sk-[A-Za-z0-9_-]{32,}|ghp_[A-Za-z0-9]{20,}|ghs_[A-Za-z0-9]{20,}|xoxb-[0-9A-Za-z_-]{10,}|-----BEGIN [A-Z ]+-----|password\s*[=:]\s*['"'"'"][^'"'"'"\s]{6,}['"'"'"]|"(api_key|api_secret|auth_token|access_token|secret_key|private_key)"\s*:\s*"[^"]{6,}"'
+  # POSIX ERE: use [[:space:]], not \s. \s is a GNU/PCRE extension and matches a
+  # literal 's' under BSD/macOS `grep -E` — silently defeating the credential gate on
+  # the platform this project targets (WR-06).
+  patterns='sk-ant-[A-Za-z0-9_-]{10,}|sk-[A-Za-z0-9_-]{32,}|ghp_[A-Za-z0-9]{20,}|ghs_[A-Za-z0-9]{20,}|xoxb-[0-9A-Za-z_-]{10,}|-----BEGIN [A-Z ]+-----|password[[:space:]]*[=:][[:space:]]*['"'"'"][^'"'"'"[:space:]]{6,}['"'"'"]|"(api_key|api_secret|auth_token|access_token|secret_key|private_key)"[[:space:]]*:[[:space:]]*"[^"]{6,}"'
   if printf '%s' "$content" | grep -qiE "$patterns" 2>/dev/null; then
     echo "BLOCK: $label appears to contain a credential pattern — remove from env/values before emitting." >&2
     return 1
@@ -104,15 +107,21 @@ validate_marketplace_json() {
   local content="$1"
   local errors=0
 
-  # Required: name (string)
+  # Required: name (string) — must match schema kebab pattern (WR-02)
   if ! printf '%s' "$content" | jq -e '(.name | type) == "string"' >/dev/null 2>&1; then
     echo "✗ marketplace.json: 'name' is required and must be a string" >&2
     errors=$((errors + 1))
+  elif ! printf '%s' "$content" | jq -e '.name | test("^[a-z][a-z0-9-]{0,63}$")' >/dev/null 2>&1; then
+    echo "✗ marketplace.json: 'name' must start with a letter and be ≤64 chars (a-z, 0-9, hyphens)" >&2
+    errors=$((errors + 1))
   fi
 
-  # Required: owner (object)
+  # Required: owner (object) with required string owner.name (schema :14) (WR-02)
   if ! printf '%s' "$content" | jq -e '(.owner | type) == "object"' >/dev/null 2>&1; then
     echo "✗ marketplace.json: 'owner' is required and must be an object" >&2
+    errors=$((errors + 1))
+  elif ! printf '%s' "$content" | jq -e '(.owner.name | type) == "string"' >/dev/null 2>&1; then
+    echo "✗ marketplace.json: 'owner.name' is required and must be a string" >&2
     errors=$((errors + 1))
   fi
 
@@ -122,10 +131,10 @@ validate_marketplace_json() {
     errors=$((errors + 1))
   fi
 
-  # Per-plugin entry: name string and source present
+  # Per-plugin entry: name string and source must be an object (schema :23,:28) (WR-02)
   if printf '%s' "$content" | jq -e '.plugins | length > 0' >/dev/null 2>&1; then
-    if ! printf '%s' "$content" | jq -e '[.plugins[] | select((.name | type) != "string" or (.source == null))] | length == 0' >/dev/null 2>&1; then
-      echo "✗ marketplace.json: each plugin entry requires 'name' (string) and 'source'" >&2
+    if ! printf '%s' "$content" | jq -e '[.plugins[] | select((.name | type) != "string" or (.source | type) != "object")] | length == 0' >/dev/null 2>&1; then
+      echo "✗ marketplace.json: each plugin entry requires 'name' (string) and 'source' (object)" >&2
       errors=$((errors + 1))
     fi
   fi
@@ -165,9 +174,11 @@ detect_github_source() {
 resolve_version() {
   local target="$1"
 
-  # Tier 1: .conjure-version file
+  # Tier 1: .conjure-version file — take the first line and strip surrounding
+  # whitespace so a trailing newline / multi-line / padded file does not corrupt the
+  # version embedded in plugin.json / marketplace.json (WR-05).
   if [ -f "$target/.conjure-version" ]; then
-    cat "$target/.conjure-version"
+    head -1 "$target/.conjure-version" | tr -d '[:space:]'
     return 0
   fi
 
@@ -206,8 +217,14 @@ plugin_build_plugin_json() {
 
   local agents_json="[]"
   if [ -d "$target/.claude/agents" ]; then
-    agents_json=$(find "$target/.claude/agents" -maxdepth 1 -name "*.md" 2>/dev/null \
-      | sed "s|$target/||" | jq -R . | jq -sc .)
+    # Strip the "$target/" prefix with bash parameter expansion (no regex) so paths
+    # containing sed metacharacters or the `|` delimiter are handled correctly (WR-03).
+    agents_json=$(
+      while IFS= read -r f; do
+        printf '%s\n' "${f#"$target/"}"
+      done < <(find "$target/.claude/agents" -maxdepth 1 -name "*.md" 2>/dev/null) \
+        | jq -R . | jq -sc .
+    )
     [ -z "$agents_json" ] && agents_json="[]"
   fi
 
@@ -227,7 +244,13 @@ plugin_build_plugin_json() {
     existing=$(cat "$target/.claude-plugin/plugin.json" 2>/dev/null || echo '{}')
   fi
 
-  # Build updated JSON via jq with merge-preserve of user metadata fields
+  # Build updated JSON via jq. The merge BASE is `.` (the original `$existing`
+  # object), so ALL existing fields pass through verbatim — including schema-known
+  # optional fields not named below (displayName, commands, defaultEnabled). The
+  # `($orig.x // null)` allowlist lines only RE-ASSERT specific user-metadata fields;
+  # they are not the gate that preserves them. WR-04: do NOT switch the base from `.`
+  # to `{}` without explicitly carrying over every schema-known optional field, or
+  # un-allowlisted fields would be silently dropped.
   local updated
   updated=$(printf '%s' "$existing" | jq \
     --arg skills "$skills_dir" \
