@@ -18,17 +18,42 @@ source "${CONJURE_HOME}/lib/policy-helpers.sh"
 TARGET="${1:-$(pwd)}"
 cd "$TARGET" || { echo "✗ Cannot cd to target: $TARGET"; exit 2; }
 
+# SCHM-05: JSON mode — CONJURE_JSON=1 routes all human text to stderr and emits
+# a single JSON object to stdout at the end (Phase 29 aggregation contract).
+JSON_MODE="${CONJURE_JSON:-0}"
+CHECKS_JSONL="$(mktemp)"
+trap 'rm -f "${CHECKS_JSONL:-}"' EXIT
+
 PASS=0
 WARN=0
 FAIL=0
-note() { echo "  $1"; }
+
+# human() — output one line of human-readable text.
+# In normal mode: stdout. In JSON mode: stderr (stdout is reserved for the JSON object).
+human() { [ "$JSON_MODE" = "1" ] && printf '%s\n' "$1" >&2 || printf '%s\n' "$1"; }
+
+note() { human "  $1"; }
 ok()   { note "✓ $1"; PASS=$((PASS+1)); }
 warn() { note "⚠ $1"; WARN=$((WARN+1)); }
 err()  { note "✗ $1"; FAIL=$((FAIL+1)); }
 
-echo
-echo "Auditing .claude/ setup in: $TARGET"
-echo
+# json_check() — append a check record to CHECKS_JSONL when JSON_MODE=1.
+# json_check <id> <severity> <message>
+# No-op when JSON_MODE=0 (zero impact on normal mode).
+json_check() {
+  local _jc_id="$1" _jc_sev="$2" _jc_msg="$3"
+  [ "$JSON_MODE" != "1" ] && return 0
+  jq -cn \
+    --arg id "$_jc_id" \
+    --arg severity "$_jc_sev" \
+    --arg message "$_jc_msg" \
+    '{id: $id, severity: $severity, message: $message}' \
+    >> "$CHECKS_JSONL"
+}
+
+human ""
+human "Auditing .claude/ setup in: $TARGET"
+human ""
 
 # CLAUDE.md exists and within budget
 if [ -f CLAUDE.md ]; then
@@ -93,17 +118,23 @@ else
     _known_fields="$(jq -r '.skill_frontmatter | keys[]' "$SCHEMA_FILE" 2>/dev/null)"
 
     # Check for unknown fields — warn (not fail)
+    # Also collect JSON check records (id|message pairs) for --json mode.
     _schm01_warn_errs="$(mktemp)"
+    _schm01_warn_jchecks="$(mktemp)"
     printf '%s\n' "$_fm_block" | grep -E '^[a-zA-Z]' | while IFS= read -r _fmline; do
       _field="$(printf '%s\n' "$_fmline" | cut -d: -f1)"
       if ! printf '%s\n' "$_known_fields" | grep -qxF "$_field"; then
         printf '%s\n' "Skill '$_skill_name': unknown frontmatter field '$_field' (not in CC schema — SCHM-01)" >> "$_schm01_warn_errs"
+        printf '%s\n' "Skill '$_skill_name': unknown frontmatter field '$_field' (not in CC schema)" >> "$_schm01_warn_jchecks"
       fi
     done
     if [ -s "$_schm01_warn_errs" ]; then
-      while IFS= read -r _msg; do warn "$_msg"; done < "$_schm01_warn_errs"
+      while IFS= read -r _msg; do
+        warn "$_msg"
+        json_check "SCHM-01-skill-unknown" "warn" "$_msg"
+      done < "$_schm01_warn_errs"
     fi
-    rm -f "$_schm01_warn_errs"
+    rm -f "$_schm01_warn_errs" "$_schm01_warn_jchecks"
 
     # Detect object-typed fields using awk two-line lookahead (Pattern 1 from RESEARCH)
     # Inline object: fieldname: {  — Block mapping: empty-value key followed by indented word:
@@ -127,7 +158,10 @@ else
       fi
     done
     if [ -s "$_schm01_err_errs" ]; then
-      while IFS= read -r _msg; do err "$_msg"; done < "$_schm01_err_errs"
+      while IFS= read -r _msg; do
+        err "$_msg"
+        json_check "SCHM-01-skill-field" "fail" "$_msg"
+      done < "$_schm01_err_errs"
     fi
     rm -f "$_schm01_err_errs"
 
@@ -304,7 +338,10 @@ if [ -f ".claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
     fi
   done
   if [ -s "$_schm02_errs" ]; then
-    while IFS= read -r _msg; do err "$_msg"; done < "$_schm02_errs"
+    while IFS= read -r _msg; do
+      err "$_msg"
+      json_check "SCHM-02-disablebypass" "fail" "$_msg"
+    done < "$_schm02_errs"
   fi
   rm -f "$_schm02_errs"
 fi
@@ -353,25 +390,45 @@ if [ -f "conjure-policy/managed-settings.json" ]; then
   fi
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SCHM-STALE — cc-schema.json staleness advisory (>90 days → WARN, never FAIL)
+# ─────────────────────────────────────────────────────────────────────────────
+if [ -f "$SCHEMA_FILE" ] && command -v jq >/dev/null 2>&1; then
+  SCHEMA_GENERATED="$(jq -r '.generated // empty' "$SCHEMA_FILE" 2>/dev/null)"
+  if [ -n "$SCHEMA_GENERATED" ]; then
+    # Cross-platform epoch: BSD date (macOS) || GNU date (Linux) || 0 (skip)
+    GEN_EPOCH=$(date -j -f "%Y-%m-%d" "$SCHEMA_GENERATED" "+%s" 2>/dev/null \
+      || date -d "$SCHEMA_GENERATED" "+%s" 2>/dev/null \
+      || echo 0)
+    if [ "$GEN_EPOCH" != "0" ]; then
+      SCHEMA_AGE_DAYS=$(( ( $(date +%s) - GEN_EPOCH ) / 86400 ))
+      if [ "$SCHEMA_AGE_DAYS" -gt 90 ]; then
+        warn "cc-schema.json is ${SCHEMA_AGE_DAYS} days old (>90) — Conjure update recommended for latest CC schema"
+        json_check "SCHM-STALE" "warn" "cc-schema.json is ${SCHEMA_AGE_DAYS} days old (>90) — Conjure update recommended"
+      fi
+    fi
+  fi
+fi
+
 # Summary
-echo
-echo "─────────────────────────────────────"
-echo "PASS: $PASS    WARN: $WARN    FAIL: $FAIL"
-echo "─────────────────────────────────────"
+human ""
+human "─────────────────────────────────────"
+human "PASS: $PASS    WARN: $WARN    FAIL: $FAIL"
+human "─────────────────────────────────────"
 
 if [ "${CONJURE_COST:-0}" = "1" ]; then
   : "${CONJURE_HOME:="$(cd "$(dirname "$0")/.." && pwd)"}"
   PRICE_FILE="$CONJURE_HOME/lib/prices.json"
 
   if [ ! -f "$PRICE_FILE" ]; then
-    echo "  [--cost] prices.json missing at $PRICE_FILE"
+    human "  [--cost] prices.json missing at $PRICE_FILE"
   elif ! command -v jq >/dev/null 2>&1; then
-    echo "  [--cost] jq not installed — install jq to use cost estimation"
+    human "  [--cost] jq not installed — install jq to use cost estimation"
   else
     MODEL=$(jq -r '.default_model // empty' "$PRICE_FILE")
     PRICE_INPUT=$(jq -r --arg m "$MODEL" '.models[] | select(.model==$m) | .input_per_mtok' "$PRICE_FILE")
     if [ -z "$PRICE_INPUT" ]; then
-      echo "  [--cost] model '$MODEL' not found in prices.json — skipping cost estimate"
+      human "  [--cost] model '$MODEL' not found in prices.json — skipping cost estimate"
     else
       PRICING_DATE=$(jq -r --arg m "$MODEL" '.models[] | select(.model==$m) | .pricing_date' "$PRICE_FILE")
       BAND_PCT=$(jq -r --arg m "$MODEL" '.models[] | select(.model==$m) | .band_pct' "$PRICE_FILE")
@@ -380,13 +437,13 @@ if [ "${CONJURE_COST:-0}" = "1" ]; then
 
       if [ "${CONJURE_EXACT:-0}" = "1" ]; then
         if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-          echo "  [--exact] ANTHROPIC_API_KEY not set — falling back to chars/4 heuristic."
+          human "  [--exact] ANTHROPIC_API_KEY not set — falling back to chars/4 heuristic."
         elif command -v node >/dev/null 2>&1 && [ -f "$CONJURE_HOME/lib/exact-count.mjs" ]; then
           EXACT_TOKENS=$(node "$CONJURE_HOME/lib/exact-count.mjs" "$TARGET" 2>/dev/null)
           if [ $? -eq 0 ] && [ -n "$EXACT_TOKENS" ]; then
             TOKENS_TO_USE="$EXACT_TOKENS"
           else
-            echo "  [--exact] exact count failed — falling back to chars/4 heuristic."
+            human "  [--exact] exact count failed — falling back to chars/4 heuristic."
           fi
         fi
       fi
@@ -413,15 +470,15 @@ if [ "${CONJURE_COST:-0}" = "1" ]; then
         printf '%s %s %s %s\n' "$skill" "$chars" "$tokens" "$cost" >> "$COST_TMP"
       done < <(find .claude/skills -name SKILL.md 2>/dev/null)
 
-      echo
-      echo "── Cost Estimate ──────────────────────────────────────"
-      printf "  %-30s %8s %8s %12s\n" "File" "Chars" "~Tokens" "Est.Cost"
-      printf "  %-30s %8s %8s %12s\n" "----" "-----" "-------" "--------"
-      sort -t' ' -k4 -rn "$COST_TMP" | while IFS=' ' read -r name chars tokens cost; do
+      human ""
+      human "── Cost Estimate ──────────────────────────────────────"
+      [ "$JSON_MODE" != "1" ] && printf "  %-30s %8s %8s %12s\n" "File" "Chars" "~Tokens" "Est.Cost"
+      [ "$JSON_MODE" != "1" ] && printf "  %-30s %8s %8s %12s\n" "----" "-----" "-------" "--------"
+      [ "$JSON_MODE" != "1" ] && sort -t' ' -k4 -rn "$COST_TMP" | while IFS=' ' read -r name chars tokens cost; do
         printf "  %-30s %8s %8s  \$%10.6f\n" "$name" "$chars" "$tokens" "$cost"
       done
-      printf "  %-30s %8s %8s  \$%10.2f\n" "TOTAL" "${TOTAL_CHARS:-0}" "$TOKENS_TO_USE" "$TOTAL_COST"
-      echo "  Estimate: \$$TOTAL_COST ±${BAND_PCT}% (chars/4 heuristic · prices: $PRICING_DATE · model: $MODEL)"
+      [ "$JSON_MODE" != "1" ] && printf "  %-30s %8s %8s  \$%10.2f\n" "TOTAL" "${TOTAL_CHARS:-0}" "$TOKENS_TO_USE" "$TOTAL_COST"
+      human "  Estimate: \$$TOTAL_COST ±${BAND_PCT}% (chars/4 heuristic · prices: $PRICING_DATE · model: $MODEL)"
     fi
   fi
 fi
@@ -431,18 +488,18 @@ if [ "${CONJURE_RETIRE:-0}" = "1" ]; then
   LOG="$TARGET/.claude/telemetry/skill-events.jsonl"
 
   if ! command -v jq >/dev/null 2>&1; then
-    echo "  [--retire-list] jq not installed — install jq to use retire-list"
+    human "  [--retire-list] jq not installed — install jq to use retire-list"
   elif [ ! -f "$LOG" ]; then
-    echo
-    echo "── Skill Retire-List ──────────────────────────────────"
-    echo "  No telemetry data. Enable with CONJURE_TELEMETRY=1 in .claude/settings.json env."
+    human ""
+    human "── Skill Retire-List ──────────────────────────────────"
+    human "  No telemetry data. Enable with CONJURE_TELEMETRY=1 in .claude/settings.json env."
   else
     CUTOFF=$(date -v-30d -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
              || date -u -d '30 days ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
              || echo "0000-00-00T00:00:00Z")
 
-    echo
-    echo "── Skill Retire-List ──────────────────────────────────"
+    human ""
+    human "── Skill Retire-List ──────────────────────────────────"
 
     # Cross-reference installed skills against telemetry counts.
     # Skills with zero fires in the last 30 days are invisible in the JSONL log;
@@ -453,10 +510,10 @@ if [ "${CONJURE_RETIRE:-0}" = "1" ]; then
     done < <(find "$TARGET/.claude/skills" -name SKILL.md 2>/dev/null)
 
     if [ "${#SKILL_PATHS[@]}" -eq 0 ]; then
-      echo "  No installed skills found in $TARGET/.claude/skills/."
+      human "  No installed skills found in $TARGET/.claude/skills/."
     else
-      printf "  %-35s %6s %8s\n" "Skill" "Loads" "Status"
-      printf "  %-35s %6s %8s\n" "-----" "-----" "------"
+      [ "$JSON_MODE" != "1" ] && printf "  %-35s %6s %8s\n" "Skill" "Loads" "Status"
+      [ "$JSON_MODE" != "1" ] && printf "  %-35s %6s %8s\n" "-----" "-----" "------"
       for skill_path in "${SKILL_PATHS[@]}"; do
         name=$(basename "$(dirname "$skill_path")")
         count=$(jq -r --arg c "$CUTOFF" --arg s "$name" \
@@ -466,10 +523,25 @@ if [ "${CONJURE_RETIRE:-0}" = "1" ]; then
         else
           status="[retire?]"
         fi
-        printf "  %-35s %6s %8s\n" "$name" "$count" "$status"
+        [ "$JSON_MODE" != "1" ] && printf "  %-35s %6s %8s\n" "$name" "$count" "$status"
       done
     fi
   fi
+fi
+
+# SCHM-05 — JSON emission: emit single JSON object to stdout when CONJURE_JSON=1.
+# All human-readable output has been routed to stderr via human() above.
+# Exit codes are PRESERVED: same [ "$FAIL" -gt 0 ] && exit 2 gate applies.
+if [ "$JSON_MODE" = "1" ]; then
+  _json_status="pass"
+  [ "$FAIL" -gt 0 ] && _json_status="fail"
+  [ "$WARN" -gt 0 ] && [ "$_json_status" = "pass" ] && _json_status="warn"
+  jq -cn \
+    --arg schema_version "1" \
+    --arg status "$_json_status" \
+    --argjson summary "{\"pass\":$PASS,\"warn\":$WARN,\"fail\":$FAIL}" \
+    --slurpfile checks "$CHECKS_JSONL" \
+    '{schema_version: $schema_version, status: $status, checks: ($checks | flatten), summary: $summary}'
 fi
 
 [ "$FAIL" -gt 0 ] && exit 2
