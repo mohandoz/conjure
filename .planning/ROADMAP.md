@@ -47,7 +47,14 @@ Build order: Plugin → Policy/MDM → Schema-audit → Eval → Workspace (read
   3. `conjure publish-plugin --validate` calls `claude plugin validate .` and a JSON-schema check at emit time — exits 2 and refuses to write any file when the manifest is invalid (no silent no-op)
   4. `conjure publish-plugin` wires `extraKnownMarketplaces` (object form) and `enabledPlugins` into `.claude/settings.json` via idempotent `mutate_write` merge; `conjure audit` flags a `ref`-without-`sha` marketplace entry with a warning
   5. `conjure audit` detects when `.claude-plugin/plugin.json` is out of sync with actual `.claude/` contents (reconciliation check); `conjure publish-plugin` on a fixture with a secret-pattern value in the `env` block exits 2 before writing any file
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 25-00-PLAN.md — Wave 0: golden fixtures + tests/run.sh Phase 25 graceful-red block (Nyquist)
+- [ ] 25-01-PLAN.md — Wave 1: lib/plugin-helpers.sh + JSON schemas + scripts/emit-plugin.sh + CLI dispatch (PLUG-01, PLUG-04, PLUG-05)
+- [ ] 25-02-PLAN.md — Wave 2a: --marketplace + --enable paths in emit-plugin.sh (PLUG-02, PLUG-03)
+- [ ] 25-03-PLAN.md — Wave 2b: audit-setup.sh reconciliation + ref-without-sha warnings (SC-25 criteria 4+5)
+
 **UI hint**: no
 
 ### Phase 26: Sandbox + Managed-Settings / MDM
@@ -122,7 +129,7 @@ Build order: Plugin → Policy/MDM → Schema-audit → Eval → Workspace (read
 | 22. `conjure adopt` CLI Core + Rollback | v0.6.0 | 3/3 | Complete | 2026-05-28 |
 | 23. Restructure Skill + Safety Gates | v0.6.0 | 3/3 | Complete | 2026-05-29 |
 | 24. Integration Tests + Argus Fixture | v0.6.0 | 2/2 | Complete | 2026-05-29 |
-| 25. Plugin + Marketplace Emission | v0.7.0 | 0/? | Not started | - |
+| 25. Plugin + Marketplace Emission | v0.7.0 | 0/4 | In progress | - |
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 0/? | Not started | - |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 0/? | Not started | - |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 0/? | Not started | - |
