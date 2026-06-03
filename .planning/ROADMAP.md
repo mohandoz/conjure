@@ -115,7 +115,7 @@ Plans:
 
 **Wave 0**
 
-- [ ] 27-00-PLAN.md — Wave 0: lib/cc-schema.json (30 events, 16 fields, verbatim from RESEARCH) + fixtures + graceful-red SCHM test block (SCHM-01..05 Nyquist)
+- [x] 27-00-PLAN.md — Wave 0: lib/cc-schema.json (30 events, 16 fields, verbatim from RESEARCH) + fixtures + graceful-red SCHM test block (SCHM-01..05 Nyquist)
 
 **Wave 1** *(blocked on Wave 0 completion)*
 
@@ -188,7 +188,7 @@ Plans:
 | 24. Integration Tests + Argus Fixture | v0.6.0 | 2/2 | Complete | 2026-05-29 |
 | 25. Plugin + Marketplace Emission | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 27. Schema-Version-Aware Audit | v0.7.0 | 0/4 | Not started | - |
+| 27. Schema-Version-Aware Audit | v0.7.0 | 1/4 | In Progress|  |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 0/? | Not started | - |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/? | Not started | - |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |

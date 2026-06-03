@@ -40,11 +40,11 @@ Build order (research consensus): **A plugin → B policy → C eval → D schem
 
 ### Schema-Version-Aware Audit / Check (SCHM)
 
-- [ ] **SCHM-01**: `conjure audit` validates SKILL.md frontmatter against the current documented field set (incl. `disallowed-tools` as array/space-string); Conjure-maintained schema (not the stale VS Code one)
-- [ ] **SCHM-02**: `conjure audit` flags `disableBypassPermissionsMode` set to boolean instead of string `"disable"`
-- [ ] **SCHM-03**: `conjure check` flags unknown/renamed hook event names against a bundled event table (e.g. `SessionStop` → `SessionEnd`)
-- [ ] **SCHM-04**: `conjure check --schema` reports the CC version each settings key was introduced in, vs the pinned `.conjure-version`, using a **bundled** `lib/cc-schema.json` (no runtime fetch — zero-egress)
-- [ ] **SCHM-05**: `conjure audit --json` machine-readable output (consumed by EVAL coverage + WS aggregation)
+- [x] **SCHM-01**: `conjure audit` validates SKILL.md frontmatter against the current documented field set (incl. `disallowed-tools` as array/space-string); Conjure-maintained schema (not the stale VS Code one)
+- [x] **SCHM-02**: `conjure audit` flags `disableBypassPermissionsMode` set to boolean instead of string `"disable"`
+- [x] **SCHM-03**: `conjure check` flags unknown/renamed hook event names against a bundled event table (e.g. `SessionStop` → `SessionEnd`)
+- [x] **SCHM-04**: `conjure check --schema` reports the CC version each settings key was introduced in, vs the pinned `.conjure-version`, using a **bundled** `lib/cc-schema.json` (no runtime fetch — zero-egress)
+- [x] **SCHM-05**: `conjure audit --json` machine-readable output (consumed by EVAL coverage + WS aggregation)
 
 ### Cross-Repo / Workspace Orchestration (WS)
 
@@ -121,11 +121,11 @@ Which phases cover which requirements. Populated during roadmap creation.
 | POL-03 | Phase 26 | Complete |
 | POL-04 | Phase 26 | Complete |
 | POL-05 | Phase 26 | Complete |
-| SCHM-01 | Phase 27 | Pending |
-| SCHM-02 | Phase 27 | Pending |
-| SCHM-03 | Phase 27 | Pending |
-| SCHM-04 | Phase 27 | Pending |
-| SCHM-05 | Phase 27 | Pending |
+| SCHM-01 | Phase 27 | Complete |
+| SCHM-02 | Phase 27 | Complete |
+| SCHM-03 | Phase 27 | Complete |
+| SCHM-04 | Phase 27 | Complete |
+| SCHM-05 | Phase 27 | Complete |
 | EVAL-01 | Phase 28 | Pending |
 | EVAL-02 | Phase 28 | Pending |
 | EVAL-03 | Phase 28 | Pending |
