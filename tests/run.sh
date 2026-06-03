@@ -4358,6 +4358,312 @@ rm -rf "$P25_REFSHA_DIR"
 trap - EXIT
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Phase 26 — Sandbox + Managed-Settings / MDM (POL-01..POL-05)
+# Mirrors Phase 25 block style: `▸ Phase 26 — ...` headers, pass/fail
+# helpers, mktemp sandboxes with EXIT-trap discipline. Every emit invocation
+# guarded behind P26_EMIT_OK so the suite reports graceful RED when
+# scripts/emit-policy.sh is absent (Wave 0 not yet complete).
+# ──────────────────────────────────────────────────────────────────────────────
+
+P26_EMIT_SH="$CONJURE_HOME/scripts/emit-policy.sh"
+P26_AUDIT_SH="$CONJURE_HOME/scripts/audit-setup.sh"
+P26_EMIT_OK=0
+[ -f "$P26_EMIT_SH" ] && P26_EMIT_OK=1
+
+echo
+echo "▸ Phase 26 — Sandbox + Managed-Settings / MDM (POL-01..POL-05)"
+
+# POL-01: emit-policy merges sandbox block into .claude/settings.json
+P26_POL01_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL01_DIR"' EXIT
+git -C "$P26_POL01_DIR" init -q
+git -C "$P26_POL01_DIR" config user.email "test@conjure"
+git -C "$P26_POL01_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-policy/harness/." "$P26_POL01_DIR/"
+git -C "$P26_POL01_DIR" add -A
+git -C "$P26_POL01_DIR" commit -q -m "test fixture"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa --output "$P26_POL01_DIR/conjure-policy" 2>/dev/null
+  if jq -e '.sandbox.enabled == true' "$P26_POL01_DIR/.claude/settings.json" >/dev/null 2>&1; then
+    pass "emit-policy merges sandbox block into settings.json (POL-01)"
+  else
+    fail "emit-policy sandbox.enabled not true in settings.json (POL-01)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-01)"
+fi
+rm -rf "$P26_POL01_DIR"
+trap - EXIT
+
+# POL-01-idem: re-running emit-policy produces identical settings.json
+P26_IDEM_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_IDEM_DIR"' EXIT
+git -C "$P26_IDEM_DIR" init -q
+git -C "$P26_IDEM_DIR" config user.email "test@conjure"
+git -C "$P26_IDEM_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-policy/harness/." "$P26_IDEM_DIR/"
+git -C "$P26_IDEM_DIR" add -A
+git -C "$P26_IDEM_DIR" commit -q -m "test fixture"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa --output "$P26_IDEM_DIR/conjure-policy" 2>/dev/null
+  P26_IDEM_FIRST="$(cat "$P26_IDEM_DIR/.claude/settings.json")"
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa --output "$P26_IDEM_DIR/conjure-policy" 2>/dev/null
+  P26_IDEM_SECOND="$(cat "$P26_IDEM_DIR/.claude/settings.json")"
+  if [ "$P26_IDEM_FIRST" = "$P26_IDEM_SECOND" ]; then
+    pass "emit-policy is idempotent: re-run produces identical settings.json (POL-01-idem)"
+  else
+    fail "emit-policy re-run changed settings.json — idempotency violated (POL-01-idem)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-01-idem)"
+fi
+rm -rf "$P26_IDEM_DIR"
+trap - EXIT
+
+# POL-02: emit-policy mirrors denyRead paths into permissions.deny
+P26_POL02_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL02_DIR"' EXIT
+git -C "$P26_POL02_DIR" init -q
+git -C "$P26_POL02_DIR" config user.email "test@conjure"
+git -C "$P26_POL02_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-policy/harness/." "$P26_POL02_DIR/"
+git -C "$P26_POL02_DIR" add -A
+git -C "$P26_POL02_DIR" commit -q -m "test fixture"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa --output "$P26_POL02_DIR/conjure-policy" 2>/dev/null
+  P26_POL02_DENY_LEN="$(jq '.permissions.deny // [] | length' "$P26_POL02_DIR/.claude/settings.json" 2>/dev/null || echo 0)"
+  P26_POL02_READ_LEN="$(jq '.sandbox.filesystem.denyRead // [] | length' "$P26_POL02_DIR/.claude/settings.json" 2>/dev/null || echo 0)"
+  if [ "$P26_POL02_DENY_LEN" -gt 0 ] && [ "$P26_POL02_READ_LEN" -gt 0 ]; then
+    pass "emit-policy mirrors denyRead paths into permissions.deny (POL-02)"
+  else
+    fail "emit-policy permissions.deny or denyRead empty — denyLen=$P26_POL02_DENY_LEN readLen=$P26_POL02_READ_LEN (POL-02)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-02)"
+fi
+rm -rf "$P26_POL02_DIR"
+trap - EXIT
+
+# POL-03: emit-policy produces managed-settings.json with correct keys and types
+P26_POL03_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL03_DIR"' EXIT
+git -C "$P26_POL03_DIR" init -q
+git -C "$P26_POL03_DIR" config user.email "test@conjure"
+git -C "$P26_POL03_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-policy/harness/." "$P26_POL03_DIR/"
+git -C "$P26_POL03_DIR" add -A
+git -C "$P26_POL03_DIR" commit -q -m "test fixture"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa --output "$P26_POL03_DIR/conjure-policy" 2>/dev/null
+  if [ -f "$P26_POL03_DIR/conjure-policy/managed-settings.json" ] && \
+     jq -e '(.permissions.disableBypassPermissionsMode | type) == "string" and
+             .permissions.disableBypassPermissionsMode == "disable" and
+             .allowManagedPermissionRulesOnly == true and
+             .forceLoginOrgUUID == "REPLACE_WITH_ORG_UUID"' \
+     "$P26_POL03_DIR/conjure-policy/managed-settings.json" >/dev/null 2>&1; then
+    pass "emit-policy produces managed-settings.json with correct keys and types (POL-03)"
+  else
+    fail "emit-policy managed-settings.json missing or has wrong key types (POL-03)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-03)"
+fi
+rm -rf "$P26_POL03_DIR"
+trap - EXIT
+
+# POL-03-type: disableBypassPermissionsMode is STRING "disable" not boolean
+P26_POL03T_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL03T_DIR"' EXIT
+git -C "$P26_POL03T_DIR" init -q
+git -C "$P26_POL03T_DIR" config user.email "test@conjure"
+git -C "$P26_POL03T_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-policy/harness/." "$P26_POL03T_DIR/"
+git -C "$P26_POL03T_DIR" add -A
+git -C "$P26_POL03T_DIR" commit -q -m "test fixture"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa --output "$P26_POL03T_DIR/conjure-policy" 2>/dev/null
+  if [ -f "$P26_POL03T_DIR/conjure-policy/managed-settings.json" ]; then
+    P26_DBPM_TYPE="$(jq -r '.permissions.disableBypassPermissionsMode | type' \
+      "$P26_POL03T_DIR/conjure-policy/managed-settings.json" 2>/dev/null)"
+    if [ "$P26_DBPM_TYPE" = "string" ]; then
+      pass "disableBypassPermissionsMode is STRING 'disable' not boolean (POL-03-type)"
+    else
+      fail "disableBypassPermissionsMode has wrong type '$P26_DBPM_TYPE' — expected string (POL-03-type)"
+    fi
+  else
+    fail "emit-policy managed-settings.json not produced (POL-03-type)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-03-type)"
+fi
+rm -rf "$P26_POL03T_DIR"
+trap - EXIT
+
+# POL-04-macos: emit-policy produces macOS plist with correct XML
+P26_POL04M_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL04M_DIR"' EXIT
+git -C "$P26_POL04M_DIR" init -q
+git -C "$P26_POL04M_DIR" config user.email "test@conjure"
+git -C "$P26_POL04M_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-policy/harness/." "$P26_POL04M_DIR/"
+git -C "$P26_POL04M_DIR" add -A
+git -C "$P26_POL04M_DIR" commit -q -m "test fixture"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa --output "$P26_POL04M_DIR/conjure-policy" 2>/dev/null
+  P26_PLIST="$P26_POL04M_DIR/conjure-policy/com.anthropic.claudecode.plist"
+  if [ -f "$P26_PLIST" ] && \
+     grep -q "<string>disable</string>" "$P26_PLIST" && \
+     ! grep -q "<true/>.*disableBypass\|disableBypass.*<true/>" "$P26_PLIST"; then
+    pass "emit-policy produces macOS plist with correct XML (POL-04-macos)"
+  else
+    fail "emit-policy plist missing or has wrong disableBypassPermissionsMode XML (POL-04-macos)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-04-macos)"
+fi
+rm -rf "$P26_POL04M_DIR"
+trap - EXIT
+
+# POL-04-win: emit-policy produces Windows ps1 with correct path (no deprecated ProgramData)
+P26_POL04W_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL04W_DIR"' EXIT
+git -C "$P26_POL04W_DIR" init -q
+git -C "$P26_POL04W_DIR" config user.email "test@conjure"
+git -C "$P26_POL04W_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-policy/harness/." "$P26_POL04W_DIR/"
+git -C "$P26_POL04W_DIR" add -A
+git -C "$P26_POL04W_DIR" commit -q -m "test fixture"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa --output "$P26_POL04W_DIR/conjure-policy" 2>/dev/null
+  P26_PS1="$P26_POL04W_DIR/conjure-policy/Set-ClaudeCodePolicy.ps1"
+  if [ -f "$P26_PS1" ] && \
+     grep -q "ProgramFiles" "$P26_PS1" && \
+     ! grep -q "ProgramData" "$P26_PS1"; then
+    pass "emit-policy produces Windows ps1 with correct path (no deprecated ProgramData) (POL-04-win)"
+  else
+    fail "emit-policy ps1 missing or contains deprecated ProgramData path (POL-04-win)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-04-win)"
+fi
+rm -rf "$P26_POL04W_DIR"
+trap - EXIT
+
+# POL-05a: audit-setup fails when overlay active but sandbox.enabled missing
+P26_POL05A_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL05A_DIR"' EXIT
+mkdir -p "$P26_POL05A_DIR/.claude"
+printf '{"hooks":{}}' > "$P26_POL05A_DIR/.claude/settings.json"
+printf '## Project\n\nTest harness.\n\n<!-- compliance:hipaa -->\n' > "$P26_POL05A_DIR/CLAUDE.md"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  P26_POL05A_RC=0
+  P26_POL05A_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P26_AUDIT_SH" "$P26_POL05A_DIR" 2>&1)" || P26_POL05A_RC=$?
+  if [ "$P26_POL05A_RC" -eq 2 ] && printf '%s\n' "$P26_POL05A_OUT" | grep -q "sandbox.enabled"; then
+    pass "audit-setup fails when overlay active but sandbox.enabled missing (POL-05a)"
+  else
+    fail "audit-setup rc=$P26_POL05A_RC did not fail on missing sandbox.enabled (POL-05a)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-05a)"
+fi
+rm -rf "$P26_POL05A_DIR"
+trap - EXIT
+
+# POL-05b: audit-setup fails when denyRead path has no mirrored permissions.deny Read() entry
+P26_POL05B_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL05B_DIR"' EXIT
+mkdir -p "$P26_POL05B_DIR/.claude"
+printf '{"sandbox":{"enabled":true,"filesystem":{"denyRead":["~/.aws"],"denyWrite":[]},"network":{"allowedDomains":[]}},"permissions":{"deny":[]}}' \
+  > "$P26_POL05B_DIR/.claude/settings.json"
+printf '## Project\n\nTest harness.\n\n<!-- compliance:hipaa -->\n' > "$P26_POL05B_DIR/CLAUDE.md"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  P26_POL05B_RC=0
+  P26_POL05B_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P26_AUDIT_SH" "$P26_POL05B_DIR" 2>&1)" || P26_POL05B_RC=$?
+  if [ "$P26_POL05B_RC" -eq 2 ] && \
+     { printf '%s\n' "$P26_POL05B_OUT" | grep -q "denyRead" || \
+       printf '%s\n' "$P26_POL05B_OUT" | grep -q "permissions.deny"; }; then
+    pass "audit-setup fails when denyRead path has no mirrored permissions.deny Read() entry (POL-05b)"
+  else
+    fail "audit-setup rc=$P26_POL05B_RC did not fail on unmirrored denyRead path (POL-05b)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-05b)"
+fi
+rm -rf "$P26_POL05B_DIR"
+trap - EXIT
+
+# POL-05c: audit-setup fails when disableBypassPermissionsMode is boolean
+P26_POL05C_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL05C_DIR"' EXIT
+mkdir -p "$P26_POL05C_DIR/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_emit-policy-broken/harness/.claude/settings.json" \
+   "$P26_POL05C_DIR/.claude/settings.json"
+printf '## Project\n\nTest harness.\n\n<!-- compliance:hipaa -->\n' > "$P26_POL05C_DIR/CLAUDE.md"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  P26_POL05C_RC=0
+  P26_POL05C_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P26_AUDIT_SH" "$P26_POL05C_DIR" 2>&1)" || P26_POL05C_RC=$?
+  if [ "$P26_POL05C_RC" -eq 2 ] && printf '%s\n' "$P26_POL05C_OUT" | grep -q "disableBypassPermissionsMode"; then
+    pass "audit-setup fails when disableBypassPermissionsMode is boolean (POL-05c)"
+  else
+    fail "audit-setup rc=$P26_POL05C_RC did not fail on boolean disableBypassPermissionsMode (POL-05c)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-05c)"
+fi
+rm -rf "$P26_POL05C_DIR"
+trap - EXIT
+
+# POL-05-advisory: audit-setup issues advisory note (exit != 2) for unreviewed template
+# Uses go-gin as a complete audit-clean base; overlays conjure-policy/managed-settings.json
+# with REPLACE_WITH_ORG_UUID still present. Mirrors PLUG-REC pattern exactly.
+P26_ADV_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_ADV_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/go-gin/." "$P26_ADV_DIR/"
+mkdir -p "$P26_ADV_DIR/conjure-policy"
+cp "$CONJURE_HOME/tests/fixtures/_emit-policy-unreviewed/conjure-policy/managed-settings.json" \
+   "$P26_ADV_DIR/conjure-policy/"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  P26_ADV_RC=0
+  P26_ADV_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P26_AUDIT_SH" "$P26_ADV_DIR" 2>&1)" || P26_ADV_RC=$?
+  if [ "$P26_ADV_RC" -ne 2 ] && printf '%s\n' "$P26_ADV_OUT" | grep -q "REPLACE_WITH_ORG_UUID"; then
+    pass "audit-setup issues advisory note (exit != 2) for unreviewed template with REPLACE_WITH_ORG_UUID (POL-05-advisory)"
+  else
+    fail "audit-setup rc=$P26_ADV_RC — expected non-2 exit and REPLACE_WITH_ORG_UUID advisory text (POL-05-advisory)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-05-advisory)"
+fi
+rm -rf "$P26_ADV_DIR"
+trap - EXIT
+
+# POL-dryrun: emit-policy --dry-run prints mutations but writes no files
+P26_DRYR_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_DRYR_DIR"' EXIT
+git -C "$P26_DRYR_DIR" init -q
+git -C "$P26_DRYR_DIR" config user.email "test@conjure"
+git -C "$P26_DRYR_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-policy/harness/." "$P26_DRYR_DIR/"
+git -C "$P26_DRYR_DIR" add -A
+git -C "$P26_DRYR_DIR" commit -q -m "test fixture"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  P26_DRYR_RC=0
+  CONJURE_HOME="$CONJURE_HOME" DRY_RUN=1 bash "$P26_EMIT_SH" \
+    --regime hipaa --output "$P26_DRYR_DIR/conjure-policy" 2>/dev/null || P26_DRYR_RC=$?
+  P26_DRYR_SANDBOX="$(jq -r '.sandbox.enabled // "null"' "$P26_DRYR_DIR/.claude/settings.json" 2>/dev/null || echo "null")"
+  if [ "$P26_DRYR_RC" -eq 0 ] && \
+     [ "$P26_DRYR_SANDBOX" = "null" ] && \
+     [ ! -d "$P26_DRYR_DIR/conjure-policy" ]; then
+    pass "emit-policy --dry-run prints mutations but writes no files (POL-dryrun)"
+  else
+    fail "emit-policy --dry-run rc=$P26_DRYR_RC sandbox=$P26_DRYR_SANDBOX conjure-policy-exists=$(test -d "$P26_DRYR_DIR/conjure-policy" && echo yes || echo no) (POL-dryrun)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-dryrun)"
+fi
+rm -rf "$P26_DRYR_DIR"
+trap - EXIT
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
