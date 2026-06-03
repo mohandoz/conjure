@@ -47,6 +47,7 @@ Usage:
   conjure publish-plugin [--path <dir>] [--marketplace] [--enable] [--validate] [--dry-run]
   conjure emit-policy --regime hipaa|soc2|gdpr|pci [--output DIR] [--managed-only|--mdm-only] [--dry-run]
   conjure eval init|run|--emit-workflow [target]
+  conjure workspace init [--yes] [parent_dir]
   conjure version
   conjure help [<subcommand>]
 
@@ -567,6 +568,21 @@ cmd_eval() {
     bash "$CONJURE_HOME/scripts/eval.sh" "$target"
 }
 
+cmd_workspace() {
+  local subcmd="" dryrun=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      init|check|audit) subcmd="$1"; shift ;;
+      --dry-run)        dryrun=1; shift ;;
+      --help|-h)        echo "Usage: conjure workspace init|check|audit [args]"; return 0 ;;
+      *)                break ;;
+    esac
+  done
+  [ -z "$subcmd" ] && { echo "Usage: conjure workspace init|check|audit" >&2; return 2; }
+  CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" \
+    bash "$CONJURE_HOME/scripts/workspace.sh" "$subcmd" "$@"
+}
+
 cmd_help() {
   if [ -n "${1:-}" ]; then
     local fn_name
@@ -595,6 +611,7 @@ case "${1:-help}" in
   publish-plugin)  shift; cmd_publish_plugin "$@"  ;;
   emit-policy)     shift; cmd_emit_policy "$@"     ;;
   eval)            shift; cmd_eval "$@"            ;;
+  workspace)       shift; cmd_workspace "$@"       ;;
   version|-v|--version) cmd_version                ;;
   help|-h|--help)  shift; cmd_help "$@"            ;;
   *)               echo "Unknown command: $1"; usage; exit 2 ;;
