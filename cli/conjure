@@ -48,6 +48,8 @@ Usage:
   conjure emit-policy --regime hipaa|soc2|gdpr|pci [--output DIR] [--managed-only|--mdm-only] [--dry-run]
   conjure eval init|run|--emit-workflow [target]
   conjure workspace init [--yes] [parent_dir]
+  conjure workspace check <manifest_path>
+  conjure workspace audit [--fail-fast] <manifest_path>
   conjure version
   conjure help [<subcommand>]
 
