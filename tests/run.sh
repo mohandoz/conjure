@@ -5401,6 +5401,65 @@ fi
 rm -rf "$P28_NONODE_DIR"
 trap - EXIT
 
+# WR-02-node-envelope: the node gate is `^20.20.0 || >=22.22.0`, NOT a single
+# floor >=20.20.0. 20.19→reject, 20.20→accept, 21.5→reject, 22.21→reject,
+# 22.22→accept. Simulated via a stubbed `node` shim placed first on PATH that
+# prints a fixed version. The config-existence / npx checks come AFTER the node
+# gate, so a rejected version exits 2 from the gate; an accepted version
+# advances past the gate and then fails on the missing config (also exit 2 but
+# with a different, non-node message) — so we assert on the MESSAGE, not just rc.
+P28_NODEENV_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_NODEENV_DIR"' EXIT
+printf '## Project\n\nNode-envelope harness.\n' > "$P28_NODEENV_DIR/CLAUDE.md"
+_p28_node_check() {
+  # $1 = stub version (no leading v), $2 = expected verdict (accept|reject)
+  _ver="$1"; _verdict="$2"
+  _stubdir="$(mktemp -d)"
+  printf '#!/usr/bin/env bash\n[ "$1" = "--version" ] && { echo "v%s"; exit 0; }\nexit 0\n' "$_ver" > "$_stubdir/node"
+  chmod +x "$_stubdir/node"
+  # Also stub npx so an ACCEPTED version does not get rejected by the npx check;
+  # it should instead fall through to the missing-config error.
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$_stubdir/npx"
+  chmod +x "$_stubdir/npx"
+  _rc=0
+  _out="$(PATH="$_stubdir:$PATH" CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" run "$P28_NODEENV_DIR" 2>&1)" || _rc=$?
+  rm -rf "$_stubdir"
+  if [ "$_verdict" = "reject" ]; then
+    # Rejected: exit 2 AND a node-version gate message.
+    if [ "$_rc" -eq 2 ] && printf '%s\n' "$_out" | grep -qi "requires Node.js"; then
+      return 0
+    fi
+    printf 'reject-fail v%s rc=%s\n' "$_ver" "$_rc" >&2
+    return 1
+  else
+    # Accepted: must NOT trip the node gate. The missing-config error (also exit
+    # 2) must mention "eval config", proving the gate was passed.
+    if printf '%s\n' "$_out" | grep -qi "requires Node.js"; then
+      printf 'accept-fail v%s tripped node gate rc=%s\n' "$_ver" "$_rc" >&2
+      return 1
+    fi
+    return 0
+  fi
+}
+if [ "$P28_EVAL_OK" -eq 1 ]; then
+  P28_NODEENV_OK=1
+  _p28_node_check "20.19.0" reject || P28_NODEENV_OK=0
+  _p28_node_check "20.20.0" accept || P28_NODEENV_OK=0
+  _p28_node_check "21.5.0"  reject || P28_NODEENV_OK=0
+  _p28_node_check "22.21.0" reject || P28_NODEENV_OK=0
+  _p28_node_check "22.22.0" accept || P28_NODEENV_OK=0
+  if [ "$P28_NODEENV_OK" -eq 1 ]; then
+    pass "eval run node gate enforces ^20.20.0 || >=22.22.0 (20.19/21.5/22.21 reject; 20.20/22.22 accept) (WR-02-node-envelope)"
+  else
+    fail "eval run node gate does not match ^20.20.0 || >=22.22.0 envelope (WR-02-node-envelope)"
+  fi
+else
+  fail "scripts/eval.sh not implemented — Wave 1 must create it (WR-02-node-envelope)"
+fi
+unset -f _p28_node_check
+rm -rf "$P28_NODEENV_DIR"
+trap - EXIT
+
 # EVAL-02-audit-decoupled: audit with promptfoo absent exits 0 (not exit 2) — decoupled
 P28_ADECPL_DIR="$(mktemp -d)"
 trap 'rm -rf "$P28_ADECPL_DIR"' EXIT

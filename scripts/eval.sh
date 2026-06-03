@@ -14,8 +14,14 @@ set -uo pipefail
 CONJURE_HOME="${CONJURE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 PROMPTFOO_VERSION="0.121.14"
-PROMPTFOO_NODE_MIN_MAJOR=20
-PROMPTFOO_NODE_MIN_MINOR=20
+# Supported Node envelope: ^20.20.0 || >=22.22.0
+#   - the 20.x line from 20.20.0 up (20.20, 20.21, …)
+#   - 22.22.0 and newer (22.22, 22.23, 23.x, 24.x, …)
+# REJECTED: 20.0–20.19, all of 21.x, and 22.0–22.21 (promptfoo's documented
+# Node support matrix has gaps; see WR-02).
+PROMPTFOO_NODE_20_MIN_MINOR=20   # 20.x accepted from this minor up
+PROMPTFOO_NODE_HI_MAJOR=22       # second supported range opens at this major
+PROMPTFOO_NODE_HI_MIN_MINOR=22   # …from this minor up (22.22.0+)
 FAIL_ON_THRESHOLD=80  # integer 80 = 0.8 fractional (action input is 0-100)
 
 # Source lib/mutate.sh for mutate_mkdir, mutate_write_file
@@ -27,8 +33,9 @@ DRY_RUN="${DRY_RUN:-0}"
 # _eval_check_node — POSIX bash 3.2+ node version preflight (Pattern 6)
 # ──────────────────────────────────────────────────────────────────────────────
 _eval_check_node() {
+  _node_envelope="^20.20.0 || >=22.22.0"
   if ! command -v node >/dev/null 2>&1; then
-    echo "✗ conjure eval requires Node.js >=20.20.0 (not found)" >&2
+    echo "✗ conjure eval requires Node.js ${_node_envelope} (not found)" >&2
     echo "  Install: https://nodejs.org" >&2
     exit 2
   fi
@@ -36,10 +43,26 @@ _eval_check_node() {
   _node_major="${_node_ver%%.*}"
   _node_rest="${_node_ver#*.}"
   _node_minor="${_node_rest%%.*}"
-  if [ "${_node_major:-0}" -lt "$PROMPTFOO_NODE_MIN_MAJOR" ] || \
-     { [ "${_node_major:-0}" -eq "$PROMPTFOO_NODE_MIN_MAJOR" ] && \
-       [ "${_node_minor:-0}" -lt "$PROMPTFOO_NODE_MIN_MINOR" ]; }; then
-    echo "✗ conjure eval requires Node.js >=${PROMPTFOO_NODE_MIN_MAJOR}.${PROMPTFOO_NODE_MIN_MINOR}.0 (found: v${_node_ver})" >&2
+  _node_major="${_node_major:-0}"
+  _node_minor="${_node_minor:-0}"
+
+  # Two-range check (POSIX bash arithmetic on major/minor only):
+  #   ok if (major==20 && minor>=20)  -- the 20.20.0+ line
+  #   ok if (major==22 && minor>=22)  -- 22.22.0+
+  #   ok if (major>=23)               -- 23.x and beyond
+  # Everything else (20.0–20.19, 21.x, 22.0–22.21) is REJECTED.
+  _node_ok=0
+  if [ "$_node_major" -eq 20 ] && [ "$_node_minor" -ge "$PROMPTFOO_NODE_20_MIN_MINOR" ]; then
+    _node_ok=1
+  elif [ "$_node_major" -eq "$PROMPTFOO_NODE_HI_MAJOR" ] && [ "$_node_minor" -ge "$PROMPTFOO_NODE_HI_MIN_MINOR" ]; then
+    _node_ok=1
+  elif [ "$_node_major" -gt "$PROMPTFOO_NODE_HI_MAJOR" ]; then
+    _node_ok=1
+  fi
+
+  if [ "$_node_ok" -ne 1 ]; then
+    echo "✗ conjure eval requires Node.js ${_node_envelope} (found: v${_node_ver})" >&2
+    echo "  21.x and 22.0–22.21 are NOT supported — use 20.20+ or 22.22+." >&2
     echo "  Upgrade Node.js: https://nodejs.org" >&2
     exit 2
   fi
