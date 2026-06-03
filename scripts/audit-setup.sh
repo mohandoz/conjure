@@ -8,6 +8,12 @@ set -uo pipefail
 : "${CONJURE_HOME:="$(cd "$(dirname "$0")/.." && pwd)"}"
 # shellcheck source=lib/caps.sh
 source "${CONJURE_HOME}/lib/caps.sh"
+# build_deny_read_entries is the single source of truth for the denyRead→Read()
+# path-prefix convention (WR-02). Sourcing policy-helpers.sh only defines
+# functions (no top-level side effects); build_deny_read_entries depends solely
+# on jq, so this is safe in the audit context without mutate/snapshot sourced.
+# shellcheck source=lib/policy-helpers.sh
+source "${CONJURE_HOME}/lib/policy-helpers.sh"
 
 TARGET="${1:-$(pwd)}"
 cd "$TARGET" || { echo "✗ Cannot cd to target: $TARGET"; exit 2; }
@@ -254,8 +260,14 @@ if [ -n "$_pol_regime" ] && [ -f ".claude/settings.json" ] && command -v jq >/de
   _pol_b_errs="$(mktemp)"
   printf '%s\n' "$_deny_paths" | while IFS= read -r _dpath; do
     [ -z "$_dpath" ] && continue
-    if ! printf '%s\n' "$_perm_deny" | grep -qF "Read($_dpath)"; then
-      printf '%s\n' "[policy:$_pol_regime] denyRead path '$_dpath' has no matching Read($_dpath) in permissions.deny (POL-02 enforcement gap)" >> "$_pol_b_errs"
+    # Derive the expected Read() entry via build_deny_read_entries — the SAME
+    # path-prefix convention emit uses (WR-02). Grepping the raw path produced a
+    # double-slash mismatch (emit writes Read(//abs); raw grep sought Read(/abs)),
+    # falsely failing audit on the first absolute denyRead path. Reuse the helper
+    # as single source of truth instead of re-implementing the prefix rules.
+    _expect="$(build_deny_read_entries "$(jq -nc --arg p "$_dpath" '[$p]')")"
+    if ! printf '%s\n' "$_perm_deny" | grep -qF "$_expect"; then
+      printf '%s\n' "[policy:$_pol_regime] denyRead path '$_dpath' has no matching $_expect in permissions.deny (POL-02 enforcement gap)" >> "$_pol_b_errs"
     fi
   done
   if [ -s "$_pol_b_errs" ]; then

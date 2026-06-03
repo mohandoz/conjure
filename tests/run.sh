@@ -4592,6 +4592,31 @@ fi
 rm -rf "$P26_POL05B_DIR"
 trap - EXIT
 
+# POL-05b-abs: audit-setup PASSES an absolute denyRead path that is correctly
+# mirrored as Read(//abs) (double-slash per build_deny_read_entries) — proves the
+# WR-02 emit/audit single-source-of-truth fix. The raw-grep bug greps Read(/abs)
+# (single slash) which never matches Read(//abs), falsely failing audit.
+P26_POL05BABS_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_POL05BABS_DIR"' EXIT
+mkdir -p "$P26_POL05BABS_DIR/.claude"
+printf '{"sandbox":{"enabled":true,"filesystem":{"denyRead":["/var/secrets"],"denyWrite":[]},"network":{"allowedDomains":[]}},"permissions":{"deny":["Read(//var/secrets)"]}}' \
+  > "$P26_POL05BABS_DIR/.claude/settings.json"
+printf '## Project\n\nTest harness.\n\n<!-- compliance:hipaa -->\n' > "$P26_POL05BABS_DIR/CLAUDE.md"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  P26_POL05BABS_RC=0
+  P26_POL05BABS_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P26_AUDIT_SH" "$P26_POL05BABS_DIR" 2>&1)" || P26_POL05BABS_RC=$?
+  if [ "$P26_POL05BABS_RC" -ne 2 ] && \
+     ! printf '%s\n' "$P26_POL05BABS_OUT" | grep -q "POL-02 enforcement gap"; then
+    pass "audit-setup passes absolute denyRead path mirrored as Read(//abs) (POL-05b-abs)"
+  else
+    fail "audit-setup rc=$P26_POL05BABS_RC falsely failed absolute denyRead Read(//abs) mirror (POL-05b-abs)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-05b-abs)"
+fi
+rm -rf "$P26_POL05BABS_DIR"
+trap - EXIT
+
 # POL-05c: audit-setup fails when disableBypassPermissionsMode is boolean
 P26_POL05C_DIR="$(mktemp -d)"
 trap 'rm -rf "$P26_POL05C_DIR"' EXIT
