@@ -3975,6 +3975,308 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Phase 25 — Plugin + Marketplace Emission (PLUG-01..PLUG-05)
+# Mirrors Phase 22/24 block style: `▸ Phase 25 — ...` headers, pass/fail
+# helpers, mktemp sandboxes with EXIT-trap discipline. Every emit invocation
+# guarded behind P25_EMIT_OK so the suite reports graceful RED when
+# scripts/emit-plugin.sh is absent (Wave 1 not yet complete).
+# ──────────────────────────────────────────────────────────────────────────────
+
+P25_EMIT_SH="$CONJURE_HOME/scripts/emit-plugin.sh"
+P25_AUDIT_SH="$CONJURE_HOME/scripts/audit-setup.sh"
+P25_EMIT_OK=0
+[ -f "$P25_EMIT_SH" ] && P25_EMIT_OK=1
+
+echo
+echo "▸ Phase 25 — Plugin + Marketplace Emission (PLUG-01..PLUG-05)"
+
+# PLUG-01: emit-plugin.sh produces plugin.json with correct fields
+P25_PLUG01_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_PLUG01_DIR"' EXIT
+git -C "$P25_PLUG01_DIR" init -q
+git -C "$P25_PLUG01_DIR" config user.email "test@conjure"
+git -C "$P25_PLUG01_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin/harness/." "$P25_PLUG01_DIR/"
+git -C "$P25_PLUG01_DIR" add -A
+git -C "$P25_PLUG01_DIR" commit -q -m "test fixture"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_PLUG01_DIR" >/dev/null 2>&1
+  if jq -e '.name and .skills and .agents and .hooks and .mcpServers' \
+      "$P25_PLUG01_DIR/.claude-plugin/plugin.json" >/dev/null 2>&1; then
+    pass "emit-plugin produces plugin.json with correct fields (PLUG-01)"
+  else
+    fail "emit-plugin plugin.json missing required fields (PLUG-01)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-01)"
+fi
+rm -rf "$P25_PLUG01_DIR"
+trap - EXIT
+
+# PLUG-01-merge: re-run preserves user-edited description field
+P25_MERGE_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_MERGE_DIR"' EXIT
+git -C "$P25_MERGE_DIR" init -q
+git -C "$P25_MERGE_DIR" config user.email "test@conjure"
+git -C "$P25_MERGE_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin/harness/." "$P25_MERGE_DIR/"
+git -C "$P25_MERGE_DIR" add -A
+git -C "$P25_MERGE_DIR" commit -q -m "test fixture"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_MERGE_DIR" >/dev/null 2>&1
+  EXISTING_PLG="$(cat "$P25_MERGE_DIR/.claude-plugin/plugin.json")"
+  UPDATED_PLG="$(printf '%s' "$EXISTING_PLG" | jq '.description = "keep-me"')"
+  printf '%s\n' "$UPDATED_PLG" > "$P25_MERGE_DIR/.claude-plugin/plugin.json"
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_MERGE_DIR" >/dev/null 2>&1
+  MERGE_DESC="$(jq -r '.description' "$P25_MERGE_DIR/.claude-plugin/plugin.json")"
+  if [ "$MERGE_DESC" = "keep-me" ]; then
+    pass "emit-plugin re-run preserves user-edited description (PLUG-01-merge)"
+  else
+    fail "emit-plugin re-run overwrote description — got: $MERGE_DESC (PLUG-01-merge)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-01-merge)"
+fi
+rm -rf "$P25_MERGE_DIR"
+trap - EXIT
+
+# PLUG-05: version fallback — no .conjure-version → git SHA (40-char hex)
+P25_PLUG05_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_PLUG05_DIR"' EXIT
+git -C "$P25_PLUG05_DIR" init -q
+git -C "$P25_PLUG05_DIR" config user.email "test@conjure"
+git -C "$P25_PLUG05_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin/harness/." "$P25_PLUG05_DIR/"
+rm -f "$P25_PLUG05_DIR/.conjure-version"
+git -C "$P25_PLUG05_DIR" add -A
+git -C "$P25_PLUG05_DIR" commit -q -m "test fixture"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_PLUG05_DIR" >/dev/null 2>&1
+  VER="$(jq -r '.version' "$P25_PLUG05_DIR/.claude-plugin/plugin.json")"
+  if printf '%s' "$VER" | grep -qE '^[0-9a-f]{40}$'; then
+    pass "emit-plugin uses git SHA as version when .conjure-version absent (PLUG-05)"
+  else
+    fail "emit-plugin version not a 40-char hex SHA — got: $VER (PLUG-05)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-05)"
+fi
+rm -rf "$P25_PLUG05_DIR"
+trap - EXIT
+
+# PLUG-04: schema validation blocks write on invalid manifest
+# Strategy: harness with empty .claude/ (no skills/agents) and a pre-existing plugin.json
+# missing the required "name" field — bundled schema check must exit 2
+P25_PLUG04_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_PLUG04_DIR"' EXIT
+mkdir -p "$P25_PLUG04_DIR/.claude"
+printf '{}' > "$P25_PLUG04_DIR/.claude/settings.json"
+mkdir -p "$P25_PLUG04_DIR/.claude-plugin"
+printf '{"version": "1.0.0"}' > "$P25_PLUG04_DIR/.claude-plugin/plugin.json"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  PLUG04_RC=0
+  # emit should exit 2 because no name can be inferred and the existing stub has no name
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_PLUG04_DIR" >/dev/null 2>&1 || PLUG04_RC=$?
+  if [ "$PLUG04_RC" -eq 2 ]; then
+    pass "emit-plugin exits 2 on invalid manifest missing name field (PLUG-04)"
+  else
+    fail "emit-plugin exited $PLUG04_RC on invalid manifest — expected 2 (PLUG-04)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-04)"
+fi
+rm -rf "$P25_PLUG04_DIR"
+trap - EXIT
+
+# PLUG-04-secret: secret-pattern in emitted manifest → exit 2 before write
+P25_SECRET_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_SECRET_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin-secret/harness/." "$P25_SECRET_DIR/"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  P25_SECRET_PLUGIN_BEFORE="$P25_SECRET_DIR/.claude-plugin/plugin.json"
+  P25_SECRET_BEFORE_TS="$(date -r "$P25_SECRET_PLUGIN_BEFORE" +%s 2>/dev/null || stat -f %m "$P25_SECRET_PLUGIN_BEFORE" 2>/dev/null || echo "0")"
+  SECRET_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_SECRET_DIR" >/dev/null 2>&1 || SECRET_RC=$?
+  if [ "$SECRET_RC" -eq 2 ]; then
+    pass "emit-plugin exits 2 when secret pattern detected in manifest (PLUG-04-secret)"
+  else
+    fail "emit-plugin exited $SECRET_RC on secret manifest — expected 2 (PLUG-04-secret)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-04-secret)"
+fi
+rm -rf "$P25_SECRET_DIR"
+trap - EXIT
+
+# PLUG-04-absent: --validate with hidden claude binary → exit 2
+P25_ABSENT_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_ABSENT_DIR"' EXIT
+git -C "$P25_ABSENT_DIR" init -q
+git -C "$P25_ABSENT_DIR" config user.email "test@conjure"
+git -C "$P25_ABSENT_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin/harness/." "$P25_ABSENT_DIR/"
+git -C "$P25_ABSENT_DIR" add -A
+git -C "$P25_ABSENT_DIR" commit -q -m "test fixture"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  ABSENT_RC=0
+  # shellcheck disable=SC2155
+  P25_CLEAN_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v 'claude' | tr '\n' ':' | sed 's/:$//')"
+  PATH="$P25_CLEAN_PATH" CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" \
+    --path "$P25_ABSENT_DIR" --validate >/dev/null 2>&1 || ABSENT_RC=$?
+  if [ "$ABSENT_RC" -eq 2 ]; then
+    pass "emit-plugin --validate exits 2 when claude binary absent (PLUG-04-absent)"
+  else
+    fail "emit-plugin --validate exited $ABSENT_RC without claude — expected 2 (PLUG-04-absent)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-04-absent)"
+fi
+rm -rf "$P25_ABSENT_DIR"
+trap - EXIT
+
+# PLUG-02: --marketplace emits marketplace.json with correct fields
+P25_PLUG02_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_PLUG02_DIR"' EXIT
+git -C "$P25_PLUG02_DIR" init -q
+git -C "$P25_PLUG02_DIR" config user.email "test@conjure"
+git -C "$P25_PLUG02_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin/harness/." "$P25_PLUG02_DIR/"
+git -C "$P25_PLUG02_DIR" add -A
+git -C "$P25_PLUG02_DIR" commit -q -m "test fixture"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_PLUG02_DIR" --marketplace >/dev/null 2>&1
+  if jq -e '(.name | type) == "string" and (.owner | type) == "object" and (.plugins | type) == "array"' \
+      "$P25_PLUG02_DIR/.claude-plugin/marketplace.json" >/dev/null 2>&1; then
+    pass "emit-plugin --marketplace produces marketplace.json with correct shape (PLUG-02)"
+  else
+    fail "emit-plugin marketplace.json missing required fields (PLUG-02)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-02)"
+fi
+rm -rf "$P25_PLUG02_DIR"
+trap - EXIT
+
+# PLUG-02-reserved: reserved marketplace name → exit 2
+P25_RESERVED_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_RESERVED_DIR"' EXIT
+git -C "$P25_RESERVED_DIR" init -q
+git -C "$P25_RESERVED_DIR" config user.email "test@conjure"
+git -C "$P25_RESERVED_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin/harness/." "$P25_RESERVED_DIR/"
+git -C "$P25_RESERVED_DIR" add -A
+git -C "$P25_RESERVED_DIR" commit -q -m "test fixture"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  RESERVED_RC=0
+  CONJURE_PLUGIN_MKT_NAME="claude-code-marketplace" CONJURE_HOME="$CONJURE_HOME" \
+    bash "$P25_EMIT_SH" --path "$P25_RESERVED_DIR" --marketplace >/dev/null 2>&1 || RESERVED_RC=$?
+  if [ "$RESERVED_RC" -eq 2 ]; then
+    pass "emit-plugin exits 2 on reserved marketplace name (PLUG-02-reserved)"
+  else
+    fail "emit-plugin exited $RESERVED_RC on reserved name — expected 2 (PLUG-02-reserved)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-02-reserved)"
+fi
+rm -rf "$P25_RESERVED_DIR"
+trap - EXIT
+
+# PLUG-02-badpath: non-existent --path → exit 2
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  BADPATH_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" \
+    --path "/tmp/__conjure_nonexistent_$$" >/dev/null 2>&1 || BADPATH_RC=$?
+  if [ "$BADPATH_RC" -eq 2 ]; then
+    pass "emit-plugin exits 2 on non-existent --path (PLUG-02-badpath)"
+  else
+    fail "emit-plugin exited $BADPATH_RC on non-existent path — expected 2 (PLUG-02-badpath)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-02-badpath)"
+fi
+
+# PLUG-03: --marketplace wires extraKnownMarketplaces into settings.json
+P25_PLUG03_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_PLUG03_DIR"' EXIT
+git -C "$P25_PLUG03_DIR" init -q
+git -C "$P25_PLUG03_DIR" config user.email "test@conjure"
+git -C "$P25_PLUG03_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin/harness/." "$P25_PLUG03_DIR/"
+git -C "$P25_PLUG03_DIR" add -A
+git -C "$P25_PLUG03_DIR" commit -q -m "test fixture"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_PLUG03_DIR" --marketplace >/dev/null 2>&1
+  if jq -e '.extraKnownMarketplaces | type == "object"' \
+      "$P25_PLUG03_DIR/.claude/settings.json" >/dev/null 2>&1; then
+    pass "emit-plugin --marketplace wires extraKnownMarketplaces as object (PLUG-03)"
+  else
+    fail "emit-plugin settings.json extraKnownMarketplaces is not an object (PLUG-03)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-03)"
+fi
+rm -rf "$P25_PLUG03_DIR"
+trap - EXIT
+
+# PLUG-03-idem: re-running --marketplace produces identical settings.json
+P25_IDEM_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_IDEM_DIR"' EXIT
+git -C "$P25_IDEM_DIR" init -q
+git -C "$P25_IDEM_DIR" config user.email "test@conjure"
+git -C "$P25_IDEM_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin/harness/." "$P25_IDEM_DIR/"
+git -C "$P25_IDEM_DIR" add -A
+git -C "$P25_IDEM_DIR" commit -q -m "test fixture"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_IDEM_DIR" --marketplace >/dev/null 2>&1
+  AFTER_FIRST="$(cat "$P25_IDEM_DIR/.claude/settings.json")"
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_IDEM_DIR" --marketplace >/dev/null 2>&1
+  AFTER_SECOND="$(cat "$P25_IDEM_DIR/.claude/settings.json")"
+  if [ "$AFTER_FIRST" = "$AFTER_SECOND" ]; then
+    pass "emit-plugin --marketplace idempotent: re-run produces identical settings.json (PLUG-03-idem)"
+  else
+    fail "emit-plugin --marketplace not idempotent: settings.json differs on second run (PLUG-03-idem)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-03-idem)"
+fi
+rm -rf "$P25_IDEM_DIR"
+trap - EXIT
+
+# PLUG-REC: audit-setup.sh warns when plugin.json lists skills path but no SKILL.md found
+P25_REC_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_REC_DIR"' EXIT
+mkdir -p "$P25_REC_DIR/.claude-plugin"
+# plugin.json listing skills path but the .claude/skills dir is absent
+printf '{"name":"test-rec","skills":".claude/skills"}' > "$P25_REC_DIR/.claude-plugin/plugin.json"
+# No .claude/skills directory — on-disk count = 0
+P25_REC_OUT=0
+PLUG_REC_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P25_AUDIT_SH" "$P25_REC_DIR" 2>&1)" || P25_REC_OUT=$?
+if [ "$P25_REC_OUT" -eq 0 ] && printf '%s\n' "$PLUG_REC_OUT" | grep -q "publish-plugin"; then
+  pass "audit-setup warns about plugin.json skills path with no SKILL.md (PLUG-REC)"
+else
+  fail "audit-setup did not warn about skills path drift — rc=$P25_REC_OUT (PLUG-REC)"
+fi
+rm -rf "$P25_REC_DIR"
+trap - EXIT
+
+# PLUG-REFSHA: audit-setup.sh warns when extraKnownMarketplaces entry has ref but no sha
+P25_REFSHA_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_REFSHA_DIR"' EXIT
+mkdir -p "$P25_REFSHA_DIR/.claude"
+printf '{"extraKnownMarketplaces":{"my-mkt":{"source":{"source":"github","repo":"org/repo","ref":"main"}}}}' \
+  > "$P25_REFSHA_DIR/.claude/settings.json"
+P25_REFSHA_RC=0
+PLUG_REFSHA_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P25_AUDIT_SH" "$P25_REFSHA_DIR" 2>&1)" || P25_REFSHA_RC=$?
+if [ "$P25_REFSHA_RC" -eq 0 ] && printf '%s\n' "$PLUG_REFSHA_OUT" | grep -q "ref"; then
+  pass "audit-setup warns about extraKnownMarketplaces entry with ref but no sha (PLUG-REFSHA)"
+else
+  fail "audit-setup did not warn about ref-without-sha — rc=$P25_REFSHA_RC (PLUG-REFSHA)"
+fi
+rm -rf "$P25_REFSHA_DIR"
+trap - EXIT
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
