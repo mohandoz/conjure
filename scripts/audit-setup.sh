@@ -22,7 +22,12 @@ cd "$TARGET" || { echo "✗ Cannot cd to target: $TARGET"; exit 2; }
 # a single JSON object to stdout at the end (Phase 29 aggregation contract).
 JSON_MODE="${CONJURE_JSON:-0}"
 CHECKS_JSONL="$(mktemp)"
-trap 'rm -f "${CHECKS_JSONL:-}"' EXIT
+# Single EXIT trap for ALL tempfiles. bash has one EXIT trap slot — the later
+# `--cost` block used to re-register its own trap and silently clobber this one,
+# leaking CHECKS_JSONL (WR-03). _audit_cleanup rm -f's every tempfile the script
+# may create; COST_TMP is unset unless --cost ran, and :- expands it to empty.
+_audit_cleanup() { rm -f "${CHECKS_JSONL:-}" "${COST_TMP:-}"; }
+trap _audit_cleanup EXIT
 
 PASS=0
 WARN=0
@@ -119,13 +124,15 @@ else
 
     # Check for unknown fields — warn (not fail)
     # Also collect JSON check records (id|message pairs) for --json mode.
+    # IN-01: a parallel `_schm01_warn_jchecks` tempfile used to be written but
+    # never read (the JSON record below sources `$_msg` from _schm01_warn_errs).
+    # Removed the dead file. The emitted JSON message therefore carries the same
+    # text as the human warning (suffix-inclusive) — unchanged behavior, no leak.
     _schm01_warn_errs="$(mktemp)"
-    _schm01_warn_jchecks="$(mktemp)"
     printf '%s\n' "$_fm_block" | grep -E '^[a-zA-Z]' | while IFS= read -r _fmline; do
       _field="$(printf '%s\n' "$_fmline" | cut -d: -f1)"
       if ! printf '%s\n' "$_known_fields" | grep -qxF "$_field"; then
         printf '%s\n' "Skill '$_skill_name': unknown frontmatter field '$_field' (not in CC schema — SCHM-01)" >> "$_schm01_warn_errs"
-        printf '%s\n' "Skill '$_skill_name': unknown frontmatter field '$_field' (not in CC schema)" >> "$_schm01_warn_jchecks"
       fi
     done
     if [ -s "$_schm01_warn_errs" ]; then
@@ -134,7 +141,7 @@ else
         json_check "SCHM-01-skill-unknown" "warn" "$_msg"
       done < "$_schm01_warn_errs"
     fi
-    rm -f "$_schm01_warn_errs" "$_schm01_warn_jchecks"
+    rm -f "$_schm01_warn_errs"
 
     # Detect object-typed fields using awk two-line lookahead (Pattern 1 from RESEARCH)
     # Inline object: fieldname: {  — Block mapping: empty-value key followed by indented word:
@@ -331,8 +338,12 @@ if [ -f ".claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
   printf '%s\n' '.permissions.disableBypassPermissionsMode' '.disableBypassPermissionsMode' | while IFS= read -r _dbpm_path; do
     # shellcheck disable=SC2155
     _dbpm_type="$(jq -r "${_dbpm_path} | type" .claude/settings.json 2>/dev/null || echo null)"
+    # WR-01: use `tostring` (not `// empty`). jq treats boolean `false` as falsy,
+    # so `// empty` collapsed `false` to "" and the failure message printed a
+    # blank value. `tostring` yields "true"/"false" verbatim; this branch only
+    # runs when type=="boolean", so the key is always present (no null guard).
     # shellcheck disable=SC2155
-    _dbpm_val="$(jq -r "${_dbpm_path} // empty" .claude/settings.json 2>/dev/null || echo '')"
+    _dbpm_val="$(jq -r "${_dbpm_path} | tostring" .claude/settings.json 2>/dev/null || echo '')"
     if [ "$_dbpm_type" = "boolean" ]; then
       printf '%s\n' "[schema] disableBypassPermissionsMode is boolean (got: $_dbpm_val at ${_dbpm_path}) — must be string \"disable\" (SCHM-02)" >> "$_schm02_errs"
     fi
@@ -451,8 +462,9 @@ if [ "${CONJURE_COST:-0}" = "1" ]; then
       TOTAL_COST=$(awk "BEGIN {printf \"%.2f\", $TOKENS_TO_USE * $PRICE_INPUT / 1000000}")
 
       COST_TMP=$(mktemp)
-      _audit_cleanup() { rm -f "${COST_TMP:-}"; }
-      trap '_audit_cleanup' EXIT
+      # No per-block EXIT trap here — _audit_cleanup (registered near line 25)
+      # already rm -f's COST_TMP. Re-registering would clobber the CHECKS_JSONL
+      # cleanup and leak it (WR-03).
 
       for ctx_file in CLAUDE.md .claude/settings.json; do
         if [ -f "$ctx_file" ]; then
