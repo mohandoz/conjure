@@ -46,6 +46,7 @@ Usage:
   conjure publish-skill <name> [--to <org/repo>] [--dry-run]
   conjure publish-plugin [--path <dir>] [--marketplace] [--enable] [--validate] [--dry-run]
   conjure emit-policy --regime hipaa|soc2|gdpr|pci [--output DIR] [--managed-only|--mdm-only] [--dry-run]
+  conjure eval init|run|--emit-workflow [target]
   conjure version
   conjure help [<subcommand>]
 
@@ -544,6 +545,21 @@ cmd_emit_policy() {
     bash "$CONJURE_HOME/scripts/emit-policy.sh"
 }
 
+cmd_eval() {
+  local subcmd="" target="$(pwd)"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      init|run|--emit-workflow) subcmd="$1" ;;
+      --help|-h) echo "Usage: conjure eval init|run|--emit-workflow [target]"; return 0 ;;
+      *) target="$1" ;;
+    esac
+    shift
+  done
+  [ -z "$subcmd" ] && { echo "Usage: conjure eval init|run|--emit-workflow [target]" >&2; return 2; }
+  CONJURE_HOME="$CONJURE_HOME" CONJURE_EVAL_CMD="$subcmd" \
+    bash "$CONJURE_HOME/scripts/eval.sh" "$target"
+}
+
 cmd_help() {
   if [ -n "${1:-}" ]; then
     local fn_name
@@ -571,6 +587,7 @@ case "${1:-help}" in
   publish-skill)   shift; cmd_publish_skill "$@"   ;;
   publish-plugin)  shift; cmd_publish_plugin "$@"  ;;
   emit-policy)     shift; cmd_emit_policy "$@"     ;;
+  eval)            shift; cmd_eval "$@"            ;;
   version|-v|--version) cmd_version                ;;
   help|-h|--help)  shift; cmd_help "$@"            ;;
   *)               echo "Unknown command: $1"; usage; exit 2 ;;
