@@ -140,11 +140,13 @@ if [ "${MDM_ONLY:-0}" != "1" ]; then
   # Ensure .claude/ directory exists
   mutate_mkdir "$TARGET/.claude"
 
-  # Merge sandbox block (idempotent array_merge)
-  merge_sandbox_block "$TARGET/.claude/settings.json" "$SANDBOX_JSON"
+  # Merge sandbox block (idempotent array_merge). `|| exit 2` translates the
+  # helper's secret-abort return 1 into the script's standard hard-failure exit 2
+  # (CLAUDE.md: scripts exit 2, never exit 1), matching lines 127/130/159/162.
+  merge_sandbox_block "$TARGET/.claude/settings.json" "$SANDBOX_JSON" || exit 2
 
   # Mirror denyRead paths into permissions.deny (POL-02 enforcement gap closure)
-  merge_deny_read_permissions "$TARGET/.claude/settings.json" "$COMBINED_DENY_READ"
+  merge_deny_read_permissions "$TARGET/.claude/settings.json" "$COMBINED_DENY_READ" || exit 2
 fi
 
 # Build Read() deny entries JSON array from combined denyRead paths (for managed-settings + plist)

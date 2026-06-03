@@ -4465,16 +4465,28 @@ mkdir -p "$P26_SECMRG_DIR/.claude"
 # is assembled at runtime so no literal credential lives in this test source.
 P26_SECMRG_KEY="AKIA$(printf 'IOSFODNN7EXAMPLE')"
 printf '{"hooks":{},"_note":"%s"}' "$P26_SECMRG_KEY" > "$P26_SECMRG_DIR/.claude/settings.json"
+# Snapshot the planted content so we can assert the abort wrote nothing (WR-04).
+P26_SECMRG_BEFORE="$(cat "$P26_SECMRG_DIR/.claude/settings.json")"
 git -C "$P26_SECMRG_DIR" add -A
 git -C "$P26_SECMRG_DIR" commit -q -m "test fixture"
 if [ "$P26_EMIT_OK" -eq 1 ]; then
   P26_SECMRG_RC=0
   CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa \
     --output "$P26_SECMRG_DIR/conjure-policy" >/dev/null 2>&1 || P26_SECMRG_RC=$?
-  if [ "$P26_SECMRG_RC" -ne 0 ]; then
-    pass "emit aborts when operator's existing settings.json contains a credential (POL-secret-merged)"
+  # WR-04 (iter 2): the merge secret-abort MUST exit exactly 2 (hard failure),
+  # never 1 — CLAUDE.md hard convention + emit-policy's "2 = hard failure"
+  # contract. A bare `-ne 0` check (the prior assertion) let an exit-1 regression
+  # slip through, so assert the exact code here.
+  P26_SECMRG_AFTER="$(cat "$P26_SECMRG_DIR/.claude/settings.json")"
+  if [ "$P26_SECMRG_RC" -eq 2 ]; then
+    pass "emit exits exactly 2 when operator's existing settings.json contains a credential (POL-secret-merged)"
   else
-    fail "emit did NOT abort on credential in operator's existing settings.json (POL-secret-merged)"
+    fail "emit exited $P26_SECMRG_RC on credential in operator's existing settings.json — expected 2 (POL-secret-merged)"
+  fi
+  if [ "$P26_SECMRG_AFTER" = "$P26_SECMRG_BEFORE" ]; then
+    pass "emit secret-abort leaves operator's settings.json unchanged — no write (POL-secret-merged-nowrite)"
+  else
+    fail "emit secret-abort mutated operator's settings.json — write should have been aborted (POL-secret-merged-nowrite)"
   fi
 else
   fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-secret-merged)"
