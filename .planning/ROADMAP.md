@@ -207,6 +207,6 @@ Plans:
 | 25. Plugin + Marketplace Emission | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete   | 2026-06-03 |
+| 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/? | Not started | - |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |
