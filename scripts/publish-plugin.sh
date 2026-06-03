@@ -16,6 +16,7 @@ set -euo pipefail
 
 CONJURE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
 source "$CONJURE_HOME/lib/mutate.sh"
+source "$CONJURE_HOME/lib/plugin-helpers.sh"   # shared jq transforms + guards
 
 # Env defaults — both env var and flag paths work
 DRY_RUN="${DRY_RUN:-0}"

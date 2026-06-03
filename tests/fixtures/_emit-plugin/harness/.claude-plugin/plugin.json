@@ -1,0 +1,4 @@
+{
+  "name": "test-plugin",
+  "description": "Test plugin fixture for conjure emit-plugin tests."
+}

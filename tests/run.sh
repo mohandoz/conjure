@@ -863,6 +863,7 @@ cp "$CONJURE_HOME/.claude-plugin/plugin.json"      "$MKTPL_DIR/.claude-plugin/"
 cp "$CONJURE_HOME/VERSION"                          "$MKTPL_DIR/VERSION"
 cp "$CONJURE_HOME/scripts/publish-plugin.sh"        "$MKTPL_DIR/scripts/"
 cp "$CONJURE_HOME/lib/mutate.sh"                    "$MKTPL_DIR/lib/"
+cp "$CONJURE_HOME/lib/plugin-helpers.sh"            "$MKTPL_DIR/lib/"
 git -C "$MKTPL_DIR" add -A
 git -C "$MKTPL_DIR" commit -q -m "test fixture"
 
@@ -949,6 +950,7 @@ cp "$CONJURE_HOME/.claude-plugin/plugin.json"      "$SUBMIT_DIR/.claude-plugin/"
 cp "$CONJURE_HOME/VERSION"                          "$SUBMIT_DIR/VERSION"
 cp "$CONJURE_HOME/scripts/publish-plugin.sh"        "$SUBMIT_DIR/scripts/"
 cp "$CONJURE_HOME/lib/mutate.sh"                    "$SUBMIT_DIR/lib/"
+cp "$CONJURE_HOME/lib/plugin-helpers.sh"            "$SUBMIT_DIR/lib/"
 git -C "$SUBMIT_DIR" add -A
 git -C "$SUBMIT_DIR" commit -q -m "submit fixture"
 

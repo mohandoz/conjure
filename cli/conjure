@@ -44,6 +44,7 @@ Usage:
   conjure preflight
   conjure publish [--submit] [--dry-run]
   conjure publish-skill <name> [--to <org/repo>] [--dry-run]
+  conjure publish-plugin [--path <dir>] [--marketplace] [--enable] [--validate] [--dry-run]
   conjure version
   conjure help [<subcommand>]
 
@@ -476,6 +477,33 @@ cmd_publish_skill() {
     bash "$CONJURE_HOME/scripts/publish-skill.sh" "$skill_name"
 }
 
+cmd_publish_plugin() {
+  local target dryrun do_marketplace do_enable do_validate mkt_name
+  target="$(pwd)"; dryrun=0; do_marketplace=0; do_enable=0; do_validate=0; mkt_name=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --path)        shift; target="${1:-}" ;;
+      --path=*)      target="${1#--path=}" ;;
+      --marketplace) do_marketplace=1 ;;
+      --enable)      do_enable=1 ;;
+      --validate)    do_validate=1 ;;
+      --dry-run)     dryrun=1 ;;
+      --help|-h)
+        echo "Usage: conjure publish-plugin [--path <dir>] [--marketplace] [--enable] [--validate] [--dry-run]"
+        return 0 ;;
+      *) echo "Unknown option: $1"; return 2 ;;
+    esac
+    shift
+  done
+  CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" \
+    CONJURE_PLUGIN_PATH="$target" \
+    CONJURE_PLUGIN_MARKETPLACE="$do_marketplace" \
+    CONJURE_PLUGIN_ENABLE="$do_enable" \
+    CONJURE_PLUGIN_VALIDATE="$do_validate" \
+    CONJURE_PLUGIN_MKT_NAME="$mkt_name" \
+    bash "$CONJURE_HOME/scripts/emit-plugin.sh"
+}
+
 cmd_help() {
   if [ -n "${1:-}" ]; then
     local fn_name
@@ -501,6 +529,7 @@ case "${1:-help}" in
   preflight)       shift; cmd_preflight "$@"       ;;
   publish)         shift; cmd_publish "$@"         ;;
   publish-skill)   shift; cmd_publish_skill "$@"   ;;
+  publish-plugin)  shift; cmd_publish_plugin "$@"  ;;
   version|-v|--version) cmd_version                ;;
   help|-h|--help)  shift; cmd_help "$@"            ;;
   *)               echo "Unknown command: $1"; usage; exit 2 ;;
