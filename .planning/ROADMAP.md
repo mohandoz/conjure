@@ -55,7 +55,7 @@ Plans:
 **Wave 1**
 
 - [x] 25-00-PLAN.md — Wave 0: golden fixtures + tests/run.sh Phase 25 graceful-red block (Nyquist)
-- [ ] 25-01-PLAN.md — Wave 1: lib/plugin-helpers.sh + JSON schemas + scripts/emit-plugin.sh + CLI dispatch (PLUG-01, PLUG-04, PLUG-05)
+- [x] 25-01-PLAN.md — Wave 1: lib/plugin-helpers.sh + JSON schemas + scripts/emit-plugin.sh + CLI dispatch (PLUG-01, PLUG-04, PLUG-05)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -151,7 +151,7 @@ Plans:
 | 22. `conjure adopt` CLI Core + Rollback | v0.6.0 | 3/3 | Complete | 2026-05-28 |
 | 23. Restructure Skill + Safety Gates | v0.6.0 | 3/3 | Complete | 2026-05-29 |
 | 24. Integration Tests + Argus Fixture | v0.6.0 | 2/2 | Complete | 2026-05-29 |
-| 25. Plugin + Marketplace Emission | v0.7.0 | 1/4 | In Progress|  |
+| 25. Plugin + Marketplace Emission | v0.7.0 | 2/4 | In Progress|  |
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 0/? | Not started | - |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 0/? | Not started | - |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 0/? | Not started | - |
