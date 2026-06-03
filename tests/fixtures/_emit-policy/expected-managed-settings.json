@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": [
+      "Read(~/.aws/credentials)",
+      "Read(~/.ssh/**)"
+    ]
+  },
+  "allowManagedPermissionRulesOnly": true,
+  "forceLoginOrgUUID": "REPLACE_WITH_ORG_UUID",
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": ["~/.aws", "~/.aws/credentials", "~/.ssh"],
+      "denyWrite": []
+    },
+    "network": {
+      "allowedDomains": []
+    }
+  }
+}

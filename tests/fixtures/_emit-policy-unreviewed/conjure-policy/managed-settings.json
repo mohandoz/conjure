@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": []
+  },
+  "allowManagedPermissionRulesOnly": true,
+  "forceLoginOrgUUID": "REPLACE_WITH_ORG_UUID",
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": [],
+      "denyWrite": []
+    },
+    "network": {
+      "allowedDomains": []
+    }
+  }
+}

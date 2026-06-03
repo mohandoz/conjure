@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>permissions</key>
+    <dict>
+        <key>disableBypassPermissionsMode</key>
+        <string>disable</string>
+        <key>deny</key>
+        <array>
+            <string>Read(~/.aws/credentials)</string>
+            <string>Read(~/.ssh/**)</string>
+        </array>
+    </dict>
+    <key>allowManagedPermissionRulesOnly</key>
+    <true/>
+    <key>forceLoginOrgUUID</key>
+    <string>REPLACE_WITH_ORG_UUID</string>
+    <key>sandbox</key>
+    <dict>
+        <key>enabled</key>
+        <true/>
+        <key>failIfUnavailable</key>
+        <true/>
+        <key>allowUnsandboxedCommands</key>
+        <false/>
+        <key>filesystem</key>
+        <dict>
+            <key>denyRead</key>
+            <array>
+                <string>~/.aws</string>
+                <string>~/.aws/credentials</string>
+                <string>~/.ssh</string>
+            </array>
+            <key>denyWrite</key>
+            <array/>
+        </dict>
+        <key>network</key>
+        <dict>
+            <key>allowedDomains</key>
+            <array/>
+        </dict>
+    </dict>
+</dict>
+</plist>

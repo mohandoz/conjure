@@ -1,0 +1,42 @@
+{
+  "enabled": true,
+  "failIfUnavailable": true,
+  "allowUnsandboxedCommands": false,
+  "filesystem": {
+    "denyRead": [
+      "~/.aws",
+      "~/.aws/credentials",
+      "~/.ssh",
+      "~/.gnupg",
+      "~/.config/gcloud",
+      ".env",
+      "**/.env",
+      "**/.env.*",
+      "**/secrets",
+      "**/credentials",
+      "**/*.pem",
+      "**/*.key",
+      "**/*.p12",
+      "**/*.pfx",
+      "**/phi",
+      "**/phi/**",
+      "**/patient*",
+      "**/medical*",
+      "**/health-records/**",
+      "**/ehr/**",
+      "**/mrn*",
+      "**/ssn*",
+      "**/dob*"
+    ],
+    "denyWrite": [
+      "~/.ssh",
+      "~/.gnupg",
+      "~/.aws",
+      "**/phi/**",
+      "**/patient*"
+    ]
+  },
+  "network": {
+    "allowedDomains": []
+  }
+}
