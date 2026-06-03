@@ -174,3 +174,292 @@ merge_deny_read_permissions() {
 
   mutate_write "$settings_file" "$UPDATED"
 }
+
+# validate_managed_settings_json(content)
+# Returns 0 if content is a valid managed-settings block, 1 if invalid.
+# CRITICAL gate: disableBypassPermissionsMode MUST be STRING "disable", NOT boolean.
+# Caller must: validate_managed_settings_json "$MANAGED_JSON" || exit 2
+validate_managed_settings_json() {
+  local content="$1"
+  local errors=0
+
+  # CRITICAL: disableBypassPermissionsMode must be STRING "disable", NOT boolean (T-26-07)
+  # Use jq -r '... | type' to get the type as a string; separate variable for SC2155 compliance.
+  local dbpm_type dbpm_val
+  dbpm_type="$(printf '%s' "$content" | jq -r '.permissions.disableBypassPermissionsMode | type' 2>/dev/null)"
+  dbpm_val="$(printf '%s' "$content" | jq -r '.permissions.disableBypassPermissionsMode // empty' 2>/dev/null)"
+  if [ "$dbpm_type" = "boolean" ]; then
+    echo "✗ managed-settings: disableBypassPermissionsMode is boolean (got: $dbpm_val) — must be string \"disable\"" >&2
+    errors=$((errors + 1))
+  elif [ "$dbpm_type" = "string" ] && [ "$dbpm_val" != "disable" ]; then
+    echo "✗ managed-settings: disableBypassPermissionsMode is \"$dbpm_val\" — must be \"disable\"" >&2
+    errors=$((errors + 1))
+  fi
+
+  # allowManagedPermissionRulesOnly must be boolean if present
+  if ! printf '%s' "$content" | jq -e 'if .allowManagedPermissionRulesOnly != null then (.allowManagedPermissionRulesOnly | type) == "boolean" else true end' >/dev/null 2>&1; then
+    echo "✗ managed-settings: 'allowManagedPermissionRulesOnly' must be a boolean" >&2
+    errors=$((errors + 1))
+  fi
+
+  # forceLoginOrgUUID must be a string if present
+  if ! printf '%s' "$content" | jq -e 'if .forceLoginOrgUUID != null then (.forceLoginOrgUUID | type) == "string" else true end' >/dev/null 2>&1; then
+    echo "✗ managed-settings: 'forceLoginOrgUUID' must be a string" >&2
+    errors=$((errors + 1))
+  fi
+
+  [ "$errors" -gt 0 ] && return 1
+  return 0
+}
+
+# build_managed_settings(regime, deny_entries_json, sandbox_json)
+# Arguments: regime string (hipaa|soc2|gdpr|pci), JSON array of Read() deny entries, sandbox JSON block.
+# Prints managed-settings JSON to stdout. Caller captures.
+# Note: does NOT include _conjure_regime or _conjure_unreviewed top-level keys (RESEARCH.md Q1 RESOLVED).
+# The sole "unreviewed" sentinel is forceLoginOrgUUID: "REPLACE_WITH_ORG_UUID".
+build_managed_settings() {
+  local deny_entries_json="$2"
+  local sandbox_json="$3"
+
+  local result
+  result="$(jq -n \
+    --argjson deny_entries "$deny_entries_json" \
+    --argjson sandbox "$sandbox_json" \
+    '{
+      "permissions": {
+        "disableBypassPermissionsMode": "disable",
+        "deny": $deny_entries
+      },
+      "allowManagedPermissionRulesOnly": true,
+      "forceLoginOrgUUID": "REPLACE_WITH_ORG_UUID",
+      "sandbox": $sandbox
+    }')"
+
+  printf '%s' "$result" | jq empty 2>/dev/null || {
+    echo "✗ build_managed_settings: jq produced invalid JSON" >&2
+    return 1
+  }
+
+  printf '%s' "$result"
+}
+
+# build_plist_xml(deny_read_json, deny_entries_json, sandbox_json)
+# Arguments: denyRead JSON array (sandbox paths), deny_entries JSON array (Read() entries),
+#            sandbox JSON block.
+# Prints macOS plist XML to stdout. Caller captures.
+# CRITICAL: disableBypassPermissionsMode is hardcoded as <string>disable</string> — never <true/>.
+# Validates paths for XML metacharacters before embedding (T-26-10).
+# Runs plutil -lint on macOS if available; skips on Linux.
+build_plist_xml() {
+  local deny_read_json="$1"
+  local deny_entries_json="$2"
+  local sandbox_json="$3"
+
+  # Validate all denyRead paths for XML metacharacters before embedding (T-26-10)
+  local path_check
+  path_check="$(printf '%s' "$deny_read_json" | jq -r '.[]' 2>/dev/null)"
+  while IFS= read -r chk_path; do
+    case "$chk_path" in
+      *'&'*|*'<'*|*'>'*)
+        echo "✗ build_plist_xml: denyRead path contains XML metacharacter (&, <, >): $chk_path" >&2
+        return 2
+        ;;
+    esac
+  done <<EOF
+$path_check
+EOF
+
+  # Extract sandbox sub-fields for plist rendering
+  local sandbox_deny_read sandbox_deny_write sandbox_allowed_domains
+  sandbox_deny_read="$(printf '%s' "$sandbox_json" | jq -r '.filesystem.denyRead // [] | .[]' 2>/dev/null)"
+  sandbox_deny_write="$(printf '%s' "$sandbox_json" | jq -r '.filesystem.denyWrite // [] | .[]' 2>/dev/null)"
+  sandbox_allowed_domains="$(printf '%s' "$sandbox_json" | jq -r '.network.allowedDomains // [] | .[]' 2>/dev/null)"
+
+  # Build deny (Read()) entries array strings for plist
+  local deny_entries_plist=""
+  while IFS= read -r entry; do
+    [ -z "$entry" ] && continue
+    deny_entries_plist="${deny_entries_plist}            <string>${entry}</string>
+"
+  done <<EOF
+$(printf '%s' "$deny_entries_json" | jq -r '.[]' 2>/dev/null)
+EOF
+
+  # Build sandbox denyRead array strings
+  local sb_deny_read_plist=""
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    sb_deny_read_plist="${sb_deny_read_plist}                <string>${p}</string>
+"
+  done <<EOF
+$sandbox_deny_read
+EOF
+
+  # Build sandbox denyWrite array strings
+  local sb_deny_write_plist=""
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    sb_deny_write_plist="${sb_deny_write_plist}                <string>${p}</string>
+"
+  done <<EOF
+$sandbox_deny_write
+EOF
+
+  # Build sandbox allowedDomains array strings
+  local sb_allowed_domains_plist=""
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    sb_allowed_domains_plist="${sb_allowed_domains_plist}                <string>${p}</string>
+"
+  done <<EOF
+$sandbox_allowed_domains
+EOF
+
+  # Render plist XML — disableBypassPermissionsMode is ALWAYS <string>disable</string>
+  local plist_xml
+  plist_xml="$(printf '%s\n' \
+    '<?xml version="1.0" encoding="UTF-8"?>' \
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+    '<plist version="1.0">' \
+    '<dict>' \
+    '    <key>permissions</key>' \
+    '    <dict>' \
+    '        <key>disableBypassPermissionsMode</key>' \
+    '        <string>disable</string>' \
+    '        <key>deny</key>' \
+    '        <array>')"
+
+  if [ -n "$deny_entries_plist" ]; then
+    plist_xml="${plist_xml}
+${deny_entries_plist}        </array>"
+  else
+    plist_xml="${plist_xml}
+        </array>"
+  fi
+
+  plist_xml="${plist_xml}
+    </dict>
+    <key>allowManagedPermissionRulesOnly</key>
+    <true/>
+    <key>forceLoginOrgUUID</key>
+    <string>REPLACE_WITH_ORG_UUID</string>
+    <key>sandbox</key>
+    <dict>
+        <key>enabled</key>
+        <true/>
+        <key>failIfUnavailable</key>
+        <true/>
+        <key>allowUnsandboxedCommands</key>
+        <false/>
+        <key>filesystem</key>
+        <dict>
+            <key>denyRead</key>
+            <array>"
+
+  if [ -n "$sb_deny_read_plist" ]; then
+    plist_xml="${plist_xml}
+${sb_deny_read_plist}            </array>"
+  else
+    plist_xml="${plist_xml}
+            </array>"
+  fi
+
+  plist_xml="${plist_xml}
+            <key>denyWrite</key>
+            <array>"
+
+  if [ -n "$sb_deny_write_plist" ]; then
+    plist_xml="${plist_xml}
+${sb_deny_write_plist}            </array>"
+  else
+    plist_xml="${plist_xml}
+            </array>"
+  fi
+
+  plist_xml="${plist_xml}
+        </dict>
+        <key>network</key>
+        <dict>
+            <key>allowedDomains</key>
+            <array>"
+
+  if [ -n "$sb_allowed_domains_plist" ]; then
+    plist_xml="${plist_xml}
+${sb_allowed_domains_plist}            </array>"
+  else
+    plist_xml="${plist_xml}
+            </array>"
+  fi
+
+  plist_xml="${plist_xml}
+        </dict>
+    </dict>
+</dict>
+</plist>"
+
+  # Validate with plutil if available (macOS); skip on Linux (RESEARCH.md Q2 RESOLVED)
+  if command -v plutil >/dev/null 2>&1; then
+    local tmpfile
+    tmpfile="$(mktemp /tmp/conjure-plist-XXXXXX.plist)"
+    printf '%s\n' "$plist_xml" > "$tmpfile"
+    if ! plutil -lint "$tmpfile" >/dev/null 2>&1; then
+      echo "✗ build_plist_xml: plutil -lint failed — malformed plist XML" >&2
+      rm -f "$tmpfile"
+      return 2
+    fi
+    rm -f "$tmpfile"
+  fi
+
+  printf '%s\n' "$plist_xml"
+}
+
+# build_ps1_script(regime, managed_settings_json)
+# Arguments: regime string, managed-settings JSON content.
+# Prints PowerShell script content to stdout. Caller captures and writes via mutate_write.
+# CRITICAL: uses $env:ProgramFiles (NOT ProgramData) — verified from official Anthropic MDM example.
+# CRITICAL: uses [System.IO.File]::WriteAllText with UTF8Encoding($false) for BOM-free UTF-8.
+# The JSON is embedded in a PowerShell @'...'@ heredoc (no single quotes inside).
+build_ps1_script() {
+  local regime="$1"
+  local managed_settings_json="$2"
+
+  # Format the JSON for embedding (compact but readable — use jq for consistent output)
+  local json_body
+  json_body="$(printf '%s' "$managed_settings_json" | jq '.')"
+
+  printf '%s\n' \
+    '<#' \
+    'Deploys Claude Code managed settings as a JSON file.' \
+    '' \
+    'Intune: Devices > Scripts and remediations > Platform scripts > Add (Windows 10 and later).' \
+    '  Run this script using the logged on credentials: No' \
+    '  Run script in 64 bit PowerShell Host: Yes' \
+    '' \
+    "Claude Code reads C:\\Program Files\\ClaudeCode\\managed-settings.json at startup" \
+    'and treats it as a managed policy source. Edit the JSON below to change the' \
+    'deployed settings; see https://code.claude.com/docs/en/settings for available keys.' \
+    '' \
+    "NOTE: This script is generated by conjure emit-policy --regime ${regime}." \
+    'The forceLoginOrgUUID value MUST be replaced with your organization'"'"'s UUID' \
+    'before deploying. See https://code.claude.com/docs/en/settings for details.' \
+    'Compliance disclaimer: this configuration reduces non-compliant output risks' \
+    'but does not make your project compliant. Engage your compliance officer.' \
+    '#>' \
+    '' \
+    "\$ErrorActionPreference = 'Stop'" \
+    '' \
+    "\$dir = Join-Path \$env:ProgramFiles 'ClaudeCode'" \
+    "New-Item -ItemType Directory -Path \$dir -Force | Out-Null" \
+    '' \
+    "\$json = @'"
+
+  printf '%s\n' "$json_body"
+
+  printf '%s\n' \
+    "'@" \
+    '' \
+    "\$path = Join-Path \$dir 'managed-settings.json'" \
+    "[System.IO.File]::WriteAllText(\$path, \$json, (New-Object System.Text.UTF8Encoding(\$false)))" \
+    "Write-Output \"Wrote \$path\"" \
+    "Write-Output \"Verify: open Claude Code and run /status -- confirm managed policy source is active\""
+}
