@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
 status: executing
-last_updated: "2026-06-03T01:29:28.474Z"
-last_activity: 2026-06-03 -- Phase 25 planning complete
+last_updated: "2026-06-03T01:46:38.265Z"
+last_activity: 2026-06-03 -- Phase 25 execution started
 progress:
   total_phases: 6
   completed_phases: 0
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** A developer can turn any repo into a production-grade, eval-backed Claude Code harness with one trustworthy command — and keep it healthy over time.
-**Current focus:** v0.7.0 Plugin-native + Policy-grade — roadmap defined; ready to plan Phase 25
+**Current focus:** Phase 25 — plugin-marketplace-emission
 
 ## Current Position
 
-Phase: 25 — Plugin + Marketplace Emission (Not started)
-Plan: —
-Status: Ready to execute
-Last activity: 2026-06-03 -- Phase 25 planning complete
+Phase: 25 (plugin-marketplace-emission) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 25
+Last activity: 2026-06-03 -- Phase 25 execution started
 
 ## Performance Metrics
 
