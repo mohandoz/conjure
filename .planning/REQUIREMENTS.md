@@ -111,13 +111,39 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (filled by roadmap) | — | Pending |
+| PLUG-01 | Phase 25 | Pending |
+| PLUG-02 | Phase 25 | Pending |
+| PLUG-03 | Phase 25 | Pending |
+| PLUG-04 | Phase 25 | Pending |
+| PLUG-05 | Phase 25 | Pending |
+| POL-01 | Phase 26 | Pending |
+| POL-02 | Phase 26 | Pending |
+| POL-03 | Phase 26 | Pending |
+| POL-04 | Phase 26 | Pending |
+| POL-05 | Phase 26 | Pending |
+| SCHM-01 | Phase 27 | Pending |
+| SCHM-02 | Phase 27 | Pending |
+| SCHM-03 | Phase 27 | Pending |
+| SCHM-04 | Phase 27 | Pending |
+| SCHM-05 | Phase 27 | Pending |
+| EVAL-01 | Phase 28 | Pending |
+| EVAL-02 | Phase 28 | Pending |
+| EVAL-03 | Phase 28 | Pending |
+| EVAL-04 | Phase 28 | Pending |
+| EVAL-05 | Phase 28 | Pending |
+| WS-01 | Phase 29 | Pending |
+| WS-02 | Phase 29 | Pending |
+| WS-03 | Phase 29 | Pending |
+| WS-04 | Phase 29 | Pending |
+| WS-05 | Phase 30 | Pending |
+| WS-06 | Phase 30 | Pending |
+| WS-07 | Phase 30 | Pending |
 
 **Coverage:**
 - v1 requirements: 27 total (PLUG 5, POL 5, EVAL 5, SCHM 5, WS 7)
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 27 ⚠️
+- Mapped to phases: 27 (100%)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-03*
-*Last updated: 2026-06-03 after initial definition*
+*Last updated: 2026-06-03 — traceability table filled during roadmap creation (Phases 25–30)*

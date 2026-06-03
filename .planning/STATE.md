@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
-status: planning
-last_updated: "2026-06-03T00:06:56.886Z"
+status: roadmap_ready
+last_updated: "2026-06-03"
 last_activity: 2026-06-03
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,23 +17,23 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-28)
+See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** A developer can turn any repo into a production-grade, eval-backed Claude Code harness with one trustworthy command — and keep it healthy over time.
-**Current focus:** Milestone complete
+**Current focus:** v0.7.0 Plugin-native + Policy-grade — roadmap defined; ready to plan Phase 25
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 25 — Plugin + Marketplace Emission (Not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-03 — Milestone v0.7.0 started
+Status: Roadmap created; awaiting `/gsd-plan-phase 25`
+Last activity: 2026-06-03 — v0.7.0 roadmap created (Phases 25–30, 27 requirements mapped)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 67 (v0.3.0: 22, v0.4.0: 23, v0.5.0: 10)
+- Total plans completed: 79 (v0.3.0: 22, v0.4.0: 23, v0.5.0: 10, v0.6.0: 12, v0.6.1 quick: 1 [qk-260603-302])
 - Average duration: — min
 - Total execution time: —
 
@@ -67,31 +67,24 @@ Last activity: 2026-06-03 — Milestone v0.7.0 started
 
 ### Decisions
 
-Full decision log in PROJECT.md Key Decisions table. Key v0.6.0 design decisions:
+Full decision log in PROJECT.md Key Decisions table. Key v0.6.0 design decisions carried forward:
 
 - Split responsibility: CLI owns all filesystem mutations; restructure skill owns all LLM judgment
 - Skill restricted to `[Read, Bash]` — cannot call `Write`/`Edit` on project files directly
 - `snapshot_create` uses raw `cp -R`, NOT `mutate_cp` — snapshot is the safety primitive, not a mutation
 - Build order is hard: log.sh → snapshot.sh → inventory.sh → adopt.sh → skill → tests
-- [Phase ?]: Phase 22 Wave 0: graceful-red test block in tests/run.sh gates every later verification before scripts/adopt.sh exists
-- [Phase ?]: _-prefixed fixture dirs are excluded from the generic tests/fixtures/[^_]*/ audit + golden-EXPECT loops
-- [Phase ?]: SIGKILL recovery test asserts the non-TTY exit-2 + last-completed form; interactive prompt deferred to manual verification
-- [Phase ?]: Phase 22 Wave 1: cmd_adopt thin dispatcher + scripts/adopt.sh 5-step forward pipeline
-- [Phase ?]: Pitfall 3 self-copy fixed by snapshotting into a temp root outside the target then relocating into .conjure-adopt-backups (no lib change)
-- [Phase ?]: .conjure-adopt-state directory-form (state.json + staging/); state written atomically (jq>tmp+mv) BEFORE each mutating step for SIGKILL durability (SAFE-04)
-- [Phase ?]: Phase 22 Wave 2: rollback_path D-01 3-step — capture created[]/mutated[] before snapshot_rollback (snapshot has stale state.json), restore, strip leaked .snapshot-meta.json, mutate_rm created[], prune snapshot-absent empty dirs, sha256-verify mutated[]; yields Phase 24 zero-diff
-- [Phase ?]: apply-step write src is target-relative per D-07; op-allowlist {write,archive,extract} + required-fields {id,op,status} + resolve_under containment guard, exit 2 with no partial mutation (T-22-09/10/11)
-- [Phase ?]: Phase 22 --resume reuses the existing snapshot via CONJURE_ADOPT_REUSE_SNAPSHOT so no second backup is created CR-2 and preserves durable log plus state rather than re-initializing per D-12
-- [Phase ?]: Phase 23 Wave 0: graceful-red Phase 23 test block in tests/run.sh gates every Wave 1/2 deliverable (4 gate helpers, SKILL.md scaffold, approval driver) before any of them exist
-- [Phase ?]: Phase 23 fixtures live under tests/fixtures/_restructure-gates/ (leading underscore) to dodge the generic tests/fixtures/[^_]*/ audit + golden-EXPECT loops at run.sh:326/368/390
-- [Phase ?]: Phase 23 INVARIANTS.txt holds 5 canonical tokens (exit 2, @import, ≤100, mutate.sh, do not delete), proven against case/whitespace-mangled reflowed-invariant.md for the D-07 normalized-substring contract
-- [Phase ?]: Phase 23 Wave 1: 4 deterministic gate helpers shipped (verify-invariants/audit-staged/extract-invariants/decision-scan); all exit 2 never exit 1, shellcheck-clean; audit-staged BLOCK keys on named conditions not audit rc; fixed check.sh to skip SKILL.md-less skill dirs
-- [Phase 23]: Wave 2: thin restructure SKILL.md ([Read, Bash] chokepoint, <=200 lines, orchestration prose only) + per-class /dev/tty approve/skip/edit driver (non-TTY exit-2, one RESTRUCTURE summary line per bucket, no external editor on edit/O-3); scaffolded via init-project.sh whole-dir copy
-- [Phase 23]: check.sh drift manifest now registers every kit file under an installable skill dir (SKILL.md + attached gates/*.sh), not just SKILL.md - whole-dir-copied helpers are no longer spurious added-drift and ARE integrity-checked
-- [Phase ?]: [Phase 24] Plan 01: _brownfield-argus is a generator-script fixture (509 .md + real ln -s symlink + 127-line oversized CLAUDE.md + @import seed materialized at test time), exit 2 not exit 1, shellcheck-clean; only the generator is committed
-- [Phase ?]: [Phase 24] Plan 01: O-1 report() deviation is a single ADDITIVE conditional echo — emits literal 'nothing to scaffold' when created_count==0 while preserving the 'Scaffolded: 0 layer files' count line; full suite stays PASS 429/0
-- [Phase 24]: Plan 02: the ▸ Phase 24 E2E block proves all 5 v0.6.0 ROADMAP criteria against the 500-file _brownfield-argus fixture — reuses P22_ADOPT_SH + p22_sha, guards on P24_ARGUS_OK; suite 429 -> 447 PASS, FAIL 0, shellcheck-clean
-- [Phase 24]: Plan 02: C4 SIGKILL section polls state.json .current_step (break on snapshot|inventory) inside a 3-attempt anti-flake relaunch loop keyed on the last-observed step; out-of-window kills clear state+backups and relaunch from a cp -aR pristine copy; interactive [r]/[c]/[s] prompt left manual-only (PTY, UAT'd 22/23)
+
+v0.7.0 design decisions (from research + roadmap):
+
+- **Emit-and-verify-at-emit-time**: every emitted artifact (plugin manifest, sandbox block, managed-settings, MDM) must ship with a testable verification command; an emitted config that silently does nothing is the milestone's primary failure class (v0.6.1 lesson)
+- **SCHM ships before EVAL**: `conjure audit --json` (SCHM-05) unblocks workspace audit aggregation; schema validation of `disallowed-tools` + frontmatter enriches the eval coverage check (EVAL-05)
+- **Workspace is last**: `scripts/workspace.sh` calls every other conjure subcommand as subprocess; Phases 25–28 must be stable before Phase 29/30 starts
+- **Workspace split into two phases**: Phase 29 (read-only: manifest+init+check+audit) before Phase 30 (mutating: update+adopt+rollback saga); saga is HIGH risk and must not start until the manifest infrastructure is proven
+- **All-snapshot-before-any-apply**: workspace saga invariant — snapshot ALL repos before applying to ANY; `.conjure-workspace-state.json` written before each op for SIGKILL durability
+- **Fail-tolerant default for workspace**: one repo failure → exit 1 (partial), not exit 2; `--fail-fast` is opt-in; `--continue-on-error` explicitly for workspace update
+- **bundled cc-schema.json, NOT runtime-fetched**: zero-egress-in-CI constraint wins; staleness handled by >90-day advisory warn; live-fetch is the anti-pattern for this codebase
+- **promptfoo as opt-in subcommand**: never invoked from `conjure audit`/`check`; `conjure eval` with promptfoo absent exits 2 human-readable; `conjure audit` with promptfoo absent exits 0
+- **Zero new runtime deps**: promptfoo via `npx --yes promptfoo@<pinned>`; plist via `python3 plistlib` or `plutil` (macOS system); everything else jq + bash already in envelope
 
 ### Pending Todos
 
@@ -99,9 +92,10 @@ None.
 
 ### Blockers/Concerns
 
-- Phase 22 open question: step-id format (slug vs UUID) — decide during planning before coding `adopt.sh`
-- Phase 22 open question: `--apply-step` / `--update-manifest` callback contract JSON schema validation depth
-- Phase 23 open question: skill body must fit in ≤200 lines while covering manifest load, invariant check, plan proposal, approval loop, patch write, final audit — may need a planning spike
+- Phase 29/30: workspace adopt multi-repo brownfield is HIGH complexity + HIGH risk — SUMMARY.md noted as "defer to v0.7.x or v0.8.0" in FEATURES.md but WS-06/WS-07 are v1 requirements; Phase 30 must be locked until Phase 29 manifest infrastructure is proven
+- Phase 28: promptfoo `claude-code-agent` provider behavior against Conjure's harness structure is novel; SUMMARY.md recommends a `--research-phase 3` pass before planning Phase 28
+- Phase 30: workspace manifest schema + aggregate rollback state machine design is new territory; SUMMARY.md recommends a `--research-phase 5` pass before planning Phase 30
+- Windows `managed-settings.d/` drop-in directory behavior: MEDIUM confidence; verify during Phase 26 planning before generating Windows drop-in configs
 
 ### Quick Tasks Completed
 
@@ -119,14 +113,16 @@ None.
 | verification_gap | Phase 13 VERIFICATION.md — human_needed (live brew install) | human_needed | v0.4.0 close |
 | verification_gap | Phase 14 VERIFICATION.md — human_needed (Docker + Windows CI) | human_needed | v0.4.0 close |
 | verification_gap | Phase 15 VERIFICATION.md — human_needed (live tag push) | human_needed | v0.4.0 close |
-| hardening | adopt `--rollback` fails-closed if SIGKILL lands in the snapshot_path-flush window (no snapshot recorded). Safe (refuse, no corruption); proper fix needs a snapshot-completion marker (touches Phase 21 snapshot contract). Manual UAT 2026-05-29 confirmed all 3 recovery branches otherwise work. | known_limitation | Phase 22 close → Phase 24 |
+| hardening | adopt `--rollback` fails-closed if SIGKILL lands in snapshot_path-flush window | known_limitation | Phase 22 → Phase 24 |
 
 ## Session Continuity
 
-Last session: 2026-05-29T03:37:58.462Z
-Stopped at: Completed 24-01-PLAN.md (Phase 24 Wave 1)
+Last session: 2026-06-03
+Stopped at: v0.7.0 roadmap created (Phases 25–30, 27/27 requirements mapped)
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Begin Phase 25: `/gsd-plan-phase 25`
+- Before planning Phase 28 (eval): run `--research-phase 3` (promptfoo + Conjure harness integration)
+- Before planning Phase 30 (workspace saga): run `--research-phase 5` (aggregate rollback state machine)
