@@ -577,13 +577,13 @@ cmd_workspace() {
       # WR-02: once the subcommand is captured, stop interpreting flags in the wrapper and
       # forward the remainder verbatim, so `workspace <sub> --help` reaches the worker's
       # per-subcommand usage instead of being swallowed by the wrapper's own --help arm.
-      init|check|audit) subcmd="$1"; shift; break ;;
+      init|check|audit|update|adopt) subcmd="$1"; shift; break ;;
       --dry-run)        dryrun=1; shift ;;
-      --help|-h)        echo "Usage: conjure workspace init|check|audit [args]"; return 0 ;;
+      --help|-h)        echo "Usage: conjure workspace init|check|audit|update|adopt [args]"; return 0 ;;
       *)                break ;;
     esac
   done
-  [ -z "$subcmd" ] && { echo "Usage: conjure workspace init|check|audit" >&2; return 2; }
+  [ -z "$subcmd" ] && { echo "Usage: conjure workspace init|check|audit|update|adopt" >&2; return 2; }
   CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" \
     bash "$CONJURE_HOME/scripts/workspace.sh" "$subcmd" "$@"
 }

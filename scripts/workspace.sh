@@ -4,8 +4,9 @@
 # Subcommands: init [--yes] [parent_dir]
 #              check <manifest_path>
 #              audit [--fail-fast] <manifest_path>
-# Exit codes: 0 = success, 1 = partial-success (check/audit aggregate), 2 = hard error.
-# NOTE: exit 1 is the SC-MANDATED aggregate partial-success for workspace check/audit —
+#              update [--continue-on-error] [--yes] <manifest_path>
+# Exit codes: 0 = success, 1 = partial-success (check/audit/update aggregate), 2 = hard error.
+# NOTE: exit 1 is the SC-MANDATED aggregate partial-success for workspace check/audit/update —
 # documented exception to the project's exit-2-never-exit-1 rule (mirrors audit WARN→exit-1).
 set -uo pipefail
 
@@ -20,17 +21,18 @@ source "$CONJURE_HOME/lib/mutate.sh"    || { echo "✗ cannot source lib/mutate.
 # DRY_RUN propagated from cmd_workspace (default 0)
 DRY_RUN="${DRY_RUN:-0}"
 
-# Script-level tempfile for ws_do_audit (Phase 27 single-EXIT-trap lesson: one combined
-# cleanup function per script, registered once at startup; ws_do_audit does NOT add its own trap).
+# Script-level tempfiles (Phase 27/30 single-EXIT-trap lesson: one combined cleanup function per
+# script, registered once at startup; individual functions do NOT add their own traps).
 TMPJSON=""
+TMPERR=""
 
 _ws_cleanup() {
-  rm -f "${TMPJSON:-}"
+  rm -f "${TMPJSON:-}" "${TMPERR:-}"
 }
 trap _ws_cleanup EXIT
 
 SUBCMD="${1:-}"
-[ -z "$SUBCMD" ] && { echo "Usage: conjure workspace init|check|audit" >&2; exit 2; }
+[ -z "$SUBCMD" ] && { echo "Usage: conjure workspace init|check|audit|update [args]" >&2; exit 2; }
 shift
 
 # ---------------------------------------------------------------------------
@@ -262,6 +264,143 @@ ws_do_audit() {
   return "$overall_rc"
 }
 
+# ---------------------------------------------------------------------------
+# ws_do_update <manifest_path> <manifest_dir> <continue_on_error> <yes>
+# Runs `conjure update` per repo serially. Captures per-repo stdout+stderr
+# to TMPERR; scans for conflict sidecar paths; emits aggregate report.
+# Exit codes:
+#   0 = all repos clean
+#   1 = some repos have conflicts but no hard error (documented exception)
+#       SC-MANDATED partial-success — mirrors check/audit aggregate exception
+#   2 = hard error (stop-on-first-error hit, or other failure) or stop-on-fail
+# CONTINUE_ON_ERROR=0 (default): stop after first per-repo non-zero exit.
+# CONTINUE_ON_ERROR=1 (--continue-on-error): process all repos, aggregate results.
+# Traversal re-check (CR-02) runs per repo before invoking conjure update.
+# ---------------------------------------------------------------------------
+ws_do_update() {
+  local manifest_path="$1"
+  local manifest_dir="$2"
+  local continue_on_error="$3"
+  local yes="$4"
+  local overall_rc=0
+  local clean_count=0 conflict_count=0 error_count=0 skip_count=0
+  local repo_json repo_name repo_relpath repo_abs repo_rc repo_status
+  local manifest_root repo_real sidecar_line
+
+  # Allocate script-level tempfile for per-repo output (cleaned by _ws_cleanup on EXIT)
+  TMPERR="$(mktemp)"
+
+  # Resolve the workspace root once (pwd -P) for the per-repo boundary re-check. (CR-02)
+  manifest_root="$(cd "$manifest_dir" 2>/dev/null && pwd -P)" || {
+    echo "✗ cannot resolve workspace root: $manifest_dir" >&2
+    return 2
+  }
+
+  printf '\n%-30s %-15s %s\n' "REPO" "STATUS" "EXIT"
+  printf '%-30s %-15s %s\n' "----" "------" "----"
+
+  while IFS= read -r repo_json; do
+    repo_name="$(printf '%s' "$repo_json" | jq -r '.name')"
+    repo_relpath="$(printf '%s' "$repo_json" | jq -r '.path')"
+    repo_abs="$manifest_dir/$repo_relpath"
+
+    # Bad-path guard: skip with warning, set partial-success
+    if [ ! -d "$repo_abs" ]; then
+      printf '%-30s %-15s %s\n' "$repo_name" "SKIP" "bad-path"
+      printf '  ⚠ skipping %s: path not found (%s)\n' "$repo_name" "$repo_abs" >&2
+      skip_count=$((skip_count + 1))
+      overall_rc=1
+      # stop-on-first-error: skip counts as non-zero
+      [ "$continue_on_error" -eq 0 ] && return 2
+      continue
+    fi
+
+    # Defense-in-depth traversal re-check (CR-02): re-confirm each repo stays under the
+    # resolved workspace root before invoking conjure update. Out-of-bounds → skip with
+    # SECURITY warning, NEVER execute.
+    repo_real="$(cd "$repo_abs" 2>/dev/null && pwd -P)" || {
+      printf '%-30s %-15s %s\n' "$repo_name" "SKIP" "bad-path"
+      printf '  ⚠ skipping %s: cannot resolve path (%s)\n' "$repo_name" "$repo_abs" >&2
+      skip_count=$((skip_count + 1))
+      overall_rc=1
+      [ "$continue_on_error" -eq 0 ] && return 2
+      continue
+    }
+    case "$repo_real" in
+      "$manifest_root"|"$manifest_root/"*) ;;
+      *)
+        printf '%-30s %-15s %s\n' "$repo_name" "SKIP" "out-of-bounds"
+        printf '  ⚠ SECURITY: skipping %s: escapes workspace root (%s)\n' "$repo_name" "$repo_real" >&2
+        skip_count=$((skip_count + 1))
+        overall_rc=1
+        [ "$continue_on_error" -eq 0 ] && return 2
+        continue
+        ;;
+    esac
+
+    # Per-repo update invocation. Capture stdout+stderr to TMPERR for sidecar scanning.
+    # Flags like --continue-on-error affect the outer loop, not the subprocess.
+    repo_rc=0
+    bash "$CONJURE_HOME/cli/conjure" update "$repo_abs" >"$TMPERR" 2>&1 || repo_rc=$?
+
+    # Map exit code to status label and counters
+    case "$repo_rc" in
+      0)
+        repo_status="clean"
+        clean_count=$((clean_count + 1))
+        ;;
+      1)
+        # exit 1 = conflict (documented exception from cmd_update D-06)
+        repo_status="conflict"
+        conflict_count=$((conflict_count + 1))
+        if [ "$overall_rc" -lt 1 ]; then
+          overall_rc=1
+        fi
+        ;;
+      *)
+        repo_status="error($repo_rc)"
+        error_count=$((error_count + 1))
+        overall_rc=2
+        ;;
+    esac
+
+    printf '%-30s %-15s %s\n' "$repo_name" "$repo_status" "$repo_rc"
+
+    # Surface conflict sidecars: scan TMPERR for paths matching .conjure-conflict- pattern
+    if [ "$repo_rc" -eq 1 ]; then
+      while IFS= read -r sidecar_line; do
+        case "$sidecar_line" in
+          */.conjure-conflict-*) printf '  conflict sidecar: %s\n' "$sidecar_line" ;;
+        esac
+      done < "$TMPERR"
+    fi
+
+    # stop-on-first-error default (CONTINUE_ON_ERROR=0)
+    if [ "$continue_on_error" -eq 0 ] && [ "$repo_rc" -ne 0 ]; then
+      printf '\n✗ stopping after first failure (%s); use --continue-on-error to process all repos\n' \
+        "$repo_name" >&2
+      return 2
+    fi
+
+  done < <(jq -c '.repos[]' "$manifest_path")
+
+  # Aggregate summary
+  printf '\n── Workspace Update Summary ──\n'
+  printf '  Clean:    %d\n' "$clean_count"
+  printf '  Conflict: %d\n' "$conflict_count"
+  printf '  Error:    %d\n' "$error_count"
+  printf '  Skip:     %d\n' "$skip_count"
+  if [ "$overall_rc" -eq 0 ]; then
+    echo "✓ All repos up to date."
+  elif [ "$overall_rc" -eq 1 ]; then
+    echo "⚠ One or more repos have conflicts (exit 1 — partial success)."
+  else
+    echo "✗ One or more repos encountered errors (exit 2)."
+  fi
+
+  return "$overall_rc"
+}
+
 case "$SUBCMD" in
 
   init)
@@ -398,6 +537,23 @@ EOF
     MANIFEST_PATH="$(workspace_manifest_load "$MANIFEST_PATH")" || exit 2
     MANIFEST_DIR="$(dirname "$MANIFEST_PATH")"
     ws_do_audit "$MANIFEST_PATH" "$MANIFEST_DIR" "$FAIL_FAST"
+    ;;
+
+  update)
+    MANIFEST_PATH="" CONTINUE_ON_ERROR=0 YES=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --continue-on-error) CONTINUE_ON_ERROR=1 ;;
+        --yes|-y)            YES=1 ;;
+        --help|-h) echo "Usage: conjure workspace update [--continue-on-error] [--yes] <manifest_path>"; exit 0 ;;
+        *) MANIFEST_PATH="$1" ;;
+      esac
+      shift
+    done
+    [ -z "$MANIFEST_PATH" ] && MANIFEST_PATH="$(pwd)"
+    MANIFEST_PATH="$(workspace_manifest_load "$MANIFEST_PATH")" || exit 2
+    MANIFEST_DIR="$(dirname "$MANIFEST_PATH")"
+    ws_do_update "$MANIFEST_PATH" "$MANIFEST_DIR" "$CONTINUE_ON_ERROR" "$YES"
     ;;
 
   *)
