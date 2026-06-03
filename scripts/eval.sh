@@ -80,10 +80,13 @@ _list_installed_skills() {
 # ──────────────────────────────────────────────────────────────────────────────
 # _yaml_escape_single <string>
 # Escapes a string for use in a single-quoted YAML scalar.
-# Replaces every ' with '\''.
+# YAML single-quoted scalars do NOT use backslash escaping — the ONLY escape
+# is a DOUBLED single quote (''). Using the shell-style '\'' idiom here would
+# produce valid shell but INVALID YAML, corrupting promptfooconfig.yaml whenever
+# a CLAUDE.md rule line or skill name contains an apostrophe (CR-01).
 # ──────────────────────────────────────────────────────────────────────────────
 _yaml_escape_single() {
-  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf '%s' "$1" | sed "s/'/''/g"
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

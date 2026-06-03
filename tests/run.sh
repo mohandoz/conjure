@@ -5291,6 +5291,58 @@ fi
 rm -rf "$P28_RUB_DIR"
 trap - EXIT
 
+# CR-01-yaml-apostrophe: a CLAUDE.md rule line with an apostrophe must produce a
+# config that parses as valid YAML (single-quoted scalars escape ' by DOUBLING,
+# not the shell-style '\'' idiom) and the rubric value must round-trip.
+P28_APOS_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_APOS_DIR"' EXIT
+printf '## Project\n\nApostrophe harness.\n\n- Don'"'"'t log PHI in plaintext.\n- Rule with '"'"'single quotes'"'"' inside.\n' > "$P28_APOS_DIR/CLAUDE.md"
+git -C "$P28_APOS_DIR" init -q
+git -C "$P28_APOS_DIR" config user.email "test@conjure"
+git -C "$P28_APOS_DIR" config user.name "conjure-test"
+git -C "$P28_APOS_DIR" add -A 2>/dev/null || true
+git -C "$P28_APOS_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_EVAL_OK" -eq 1 ]; then
+  P28_APOS_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" init "$P28_APOS_DIR" >/dev/null 2>&1 || P28_APOS_RC=$?
+  P28_APOS_CFG="$P28_APOS_DIR/.conjure/eval/promptfooconfig.yaml"
+  P28_APOS_PARSE=1
+  P28_APOS_ROUNDTRIP=1
+  if [ "$P28_APOS_RC" -eq 0 ] && [ -f "$P28_APOS_CFG" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+      # Authoritative check: python yaml.safe_load must parse, and the rubric
+      # value containing the apostrophe must round-trip verbatim.
+      python3 - "$P28_APOS_CFG" >/dev/null 2>&1 <<'PYEOF' || P28_APOS_PARSE=0
+import sys, yaml
+with open(sys.argv[1]) as f:
+    doc = yaml.safe_load(f)
+found = False
+for t in doc.get("tests", []):
+    for a in t.get("assert", []):
+        if a.get("type") == "llm-rubric" and "Don't log PHI in plaintext." in str(a.get("value", "")):
+            found = True
+sys.exit(0 if found else 3)
+PYEOF
+    else
+      # Structural fallback when python3/yaml is unavailable: the doubled-quote
+      # form 'Don''t log PHI' must appear; the shell-style 'Don'\''t must NOT.
+      grep -q "Don''t log PHI in plaintext." "$P28_APOS_CFG" || P28_APOS_PARSE=0
+      grep -q "'\\\\''" "$P28_APOS_CFG" && P28_APOS_PARSE=0
+    fi
+  else
+    P28_APOS_PARSE=0
+  fi
+  if [ "$P28_APOS_PARSE" -eq 1 ] && [ "$P28_APOS_ROUNDTRIP" -eq 1 ]; then
+    pass "eval init: apostrophe rule line yields parseable YAML with doubled-quote escaping (CR-01-yaml-apostrophe)"
+  else
+    fail "eval init: apostrophe rule line produced invalid YAML or did not round-trip (CR-01-yaml-apostrophe)"
+  fi
+else
+  fail "scripts/eval.sh not implemented — Wave 1 must create it (CR-01-yaml-apostrophe)"
+fi
+rm -rf "$P28_APOS_DIR"
+trap - EXIT
+
 # EVAL-01-noskills: eval init on harness with no skills produces config with 0 skill-used assertions
 P28_NOSK_DIR="$(mktemp -d)"
 trap 'rm -rf "$P28_NOSK_DIR"' EXIT
