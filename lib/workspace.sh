@@ -157,3 +157,84 @@ workspace_discover_siblings() {
     fi
   done | sort -u
 }
+
+# ── workspace saga state helpers (Phase 30) ───────────────────────────────────
+
+# workspace_state_write <state_path> <jq_filter> [jq_args...]
+# Atomically writes or updates the workspace saga state file.
+# If state_path does not exist: builds the JSON from scratch with jq -n.
+# If state_path exists: applies jq_filter to the existing file.
+# Writes via a same-directory tmp file (state_path.tmp.$$) then mv — SIGKILL safe.
+# On jq failure: removes tmp and returns 2 with error on stderr.
+workspace_state_write() {
+  local state_path="$1"; shift
+  local filter="$1"; shift
+  local tmp="${state_path}.tmp.$$"
+  if [ -f "$state_path" ]; then
+    if jq "$@" "$filter" "$state_path" > "$tmp" 2>/dev/null; then
+      mv "$tmp" "$state_path"
+    else
+      rm -f "$tmp"
+      echo "workspace_state_write: failed to update state at $state_path" >&2
+      return 2
+    fi
+  else
+    if jq -n "$@" "$filter" > "$tmp" 2>/dev/null; then
+      mv "$tmp" "$state_path"
+    else
+      rm -f "$tmp"
+      echo "workspace_state_write: failed to create state at $state_path" >&2
+      return 2
+    fi
+  fi
+}
+
+# workspace_state_read <state_path> <jq_expr>
+# Reads a jq expression from the state file, printing the result to stdout.
+# Returns empty string if the file is missing or the expression yields null/missing.
+# Never exits non-zero — callers use this for safe, optional field extraction.
+workspace_state_read() {
+  local state_path="$1"
+  local jq_expr="$2"
+  jq -r "${jq_expr} // empty" "$state_path" 2>/dev/null || true
+}
+
+# workspace_state_validate <state_path>
+# Validates that a workspace state file is present, is valid JSON, and contains
+# the required top-level fields: run_id, phase, repos (array).
+# Valid repo status values include "snapshotting" (in-progress sentinel written
+# before snapshot_create is called; upgraded to "snapshotted" after it returns 0).
+# workspace_state_validate does NOT reject "snapshotting" — status-level validation
+# is the caller's responsibility (ws_do_rollback treats "snapshotting" with empty
+# snapshot_ref as never-mutated and skips with a note).
+# Exits 0 on all checks passed; returns 2 with message to stderr otherwise.
+workspace_state_validate() {
+  local state_path="$1"
+
+  if [ ! -f "$state_path" ]; then
+    echo "workspace_state_validate: no workspace state file: $state_path" >&2
+    return 2
+  fi
+
+  if ! jq empty "$state_path" >/dev/null 2>&1; then
+    echo "workspace_state_validate: invalid JSON: $state_path" >&2
+    return 2
+  fi
+
+  if ! jq -e '.run_id' "$state_path" >/dev/null 2>&1; then
+    echo "workspace_state_validate: missing run_id: $state_path" >&2
+    return 2
+  fi
+
+  if ! jq -e '.phase' "$state_path" >/dev/null 2>&1; then
+    echo "workspace_state_validate: missing phase: $state_path" >&2
+    return 2
+  fi
+
+  if ! jq -e '.repos | type == "array"' "$state_path" >/dev/null 2>&1; then
+    echo "workspace_state_validate: missing repos array: $state_path" >&2
+    return 2
+  fi
+
+  return 0
+}
