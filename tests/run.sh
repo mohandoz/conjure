@@ -5197,6 +5197,340 @@ rm -rf "$P27_JSONFAIL_DIR"
 trap - EXIT
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Phase 28 — promptfoo Eval + Context-Budget Linter (EVAL-01..05)
+# Mirrors Phase 27 block style: mktemp sandboxes with EXIT-trap discipline.
+# All eval.sh invocations guarded behind P28_EVAL_OK so the suite reports
+# graceful RED when scripts/eval.sh is absent (Wave 1 not yet complete).
+# EVAL-04/05 audit invocations guarded behind P28_AUDIT_OK.
+# ──────────────────────────────────────────────────────────────────────────────
+
+P28_EVAL_SH="$CONJURE_HOME/scripts/eval.sh"
+P28_AUDIT_SH="$CONJURE_HOME/scripts/audit-setup.sh"
+P28_EVAL_OK=0
+P28_AUDIT_OK=0
+[ -f "$P28_EVAL_SH" ] && P28_EVAL_OK=1
+[ -f "$P28_AUDIT_SH" ] && P28_AUDIT_OK=1
+
+echo
+echo "▸ Phase 28 — promptfoo Eval + Context-Budget Linter (EVAL-01..05)"
+
+# EVAL-01-init: conjure eval init on the _eval/harness fixture produces a valid promptfooconfig.yaml
+P28_INIT_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_INIT_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_eval/harness/." "$P28_INIT_DIR/"
+git -C "$P28_INIT_DIR" init -q
+git -C "$P28_INIT_DIR" config user.email "test@conjure"
+git -C "$P28_INIT_DIR" config user.name "conjure-test"
+git -C "$P28_INIT_DIR" add -A 2>/dev/null || true
+git -C "$P28_INIT_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_EVAL_OK" -eq 1 ]; then
+  P28_INIT_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" init "$P28_INIT_DIR" >/dev/null 2>&1 || P28_INIT_RC=$?
+  if [ "$P28_INIT_RC" -eq 0 ] && \
+     [ -f "$P28_INIT_DIR/.conjure/eval/promptfooconfig.yaml" ] && \
+     grep -q "anthropic:claude-agent-sdk" "$P28_INIT_DIR/.conjure/eval/promptfooconfig.yaml" && \
+     grep -q "evaluateOptions" "$P28_INIT_DIR/.conjure/eval/promptfooconfig.yaml" && \
+     grep -qv "minPassCount" "$P28_INIT_DIR/.conjure/eval/promptfooconfig.yaml"; then
+    pass "eval init creates promptfooconfig.yaml with correct provider and assertions (EVAL-01-init)"
+  else
+    fail "eval init rc=$P28_INIT_RC — expected promptfooconfig.yaml with anthropic:claude-agent-sdk and evaluateOptions (EVAL-01-init)"
+  fi
+else
+  fail "scripts/eval.sh not implemented — Wave 1 must create it (EVAL-01-init)"
+fi
+rm -rf "$P28_INIT_DIR"
+trap - EXIT
+
+# EVAL-01-skills: generated config has one skill-used assertion per installed skill
+P28_SKI_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_SKI_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_eval/harness/." "$P28_SKI_DIR/"
+git -C "$P28_SKI_DIR" init -q
+git -C "$P28_SKI_DIR" config user.email "test@conjure"
+git -C "$P28_SKI_DIR" config user.name "conjure-test"
+git -C "$P28_SKI_DIR" add -A 2>/dev/null || true
+git -C "$P28_SKI_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_EVAL_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" init "$P28_SKI_DIR" >/dev/null 2>&1 || true
+  P28_SKI_COUNT=0
+  [ -f "$P28_SKI_DIR/.conjure/eval/promptfooconfig.yaml" ] && \
+    P28_SKI_COUNT="$(grep -c "type: skill-used" "$P28_SKI_DIR/.conjure/eval/promptfooconfig.yaml" 2>/dev/null || printf '0')"
+  if [ "$P28_SKI_COUNT" -eq 2 ]; then
+    pass "eval init: one skill-used assertion per installed skill (EVAL-01-skills)"
+  else
+    fail "eval init: expected 2 skill-used assertions, got $P28_SKI_COUNT (EVAL-01-skills)"
+  fi
+else
+  fail "scripts/eval.sh not implemented — Wave 1 must create it (EVAL-01-skills)"
+fi
+rm -rf "$P28_SKI_DIR"
+trap - EXIT
+
+# EVAL-01-rubrics: generated config has at least one llm-rubric assertion
+P28_RUB_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_RUB_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_eval/harness/." "$P28_RUB_DIR/"
+git -C "$P28_RUB_DIR" init -q
+git -C "$P28_RUB_DIR" config user.email "test@conjure"
+git -C "$P28_RUB_DIR" config user.name "conjure-test"
+git -C "$P28_RUB_DIR" add -A 2>/dev/null || true
+git -C "$P28_RUB_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_EVAL_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" init "$P28_RUB_DIR" >/dev/null 2>&1 || true
+  P28_RUB_COUNT=0
+  [ -f "$P28_RUB_DIR/.conjure/eval/promptfooconfig.yaml" ] && \
+    P28_RUB_COUNT="$(grep -c "type: llm-rubric" "$P28_RUB_DIR/.conjure/eval/promptfooconfig.yaml" 2>/dev/null || printf '0')"
+  if [ "$P28_RUB_COUNT" -ge 1 ]; then
+    pass "eval init: llm-rubric assertions present for CLAUDE.md rule lines (EVAL-01-rubrics)"
+  else
+    fail "eval init: expected >=1 llm-rubric assertions, got $P28_RUB_COUNT (EVAL-01-rubrics)"
+  fi
+else
+  fail "scripts/eval.sh not implemented — Wave 1 must create it (EVAL-01-rubrics)"
+fi
+rm -rf "$P28_RUB_DIR"
+trap - EXIT
+
+# EVAL-01-noskills: eval init on harness with no skills produces config with 0 skill-used assertions
+P28_NOSK_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_NOSK_DIR"' EXIT
+printf '## Project\n\nNo-skills harness.\n\n- Always run shellcheck before committing.\n' > "$P28_NOSK_DIR/CLAUDE.md"
+git -C "$P28_NOSK_DIR" init -q
+git -C "$P28_NOSK_DIR" config user.email "test@conjure"
+git -C "$P28_NOSK_DIR" config user.name "conjure-test"
+git -C "$P28_NOSK_DIR" add -A 2>/dev/null || true
+git -C "$P28_NOSK_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_EVAL_OK" -eq 1 ]; then
+  P28_NOSK_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" init "$P28_NOSK_DIR" >/dev/null 2>&1 || P28_NOSK_RC=$?
+  P28_NOSK_COUNT=0
+  [ -f "$P28_NOSK_DIR/.conjure/eval/promptfooconfig.yaml" ] && \
+    P28_NOSK_COUNT="$(grep -c "type: skill-used" "$P28_NOSK_DIR/.conjure/eval/promptfooconfig.yaml" 2>/dev/null || printf '0')"
+  if [ "$P28_NOSK_RC" -eq 0 ] && \
+     [ -f "$P28_NOSK_DIR/.conjure/eval/promptfooconfig.yaml" ] && \
+     [ "$P28_NOSK_COUNT" -eq 0 ]; then
+    pass "eval init: no skill-used assertions when no skills installed (EVAL-01-noskills)"
+  else
+    fail "eval init rc=$P28_NOSK_RC skill-used count=$P28_NOSK_COUNT — expected exit 0 + 0 skill-used (EVAL-01-noskills)"
+  fi
+else
+  fail "scripts/eval.sh not implemented — Wave 1 must create it (EVAL-01-noskills)"
+fi
+rm -rf "$P28_NOSK_DIR"
+trap - EXIT
+
+# EVAL-02-node-absent: eval run exits 2 with human-readable message when node absent from PATH
+P28_NONODE_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_NONODE_DIR"' EXIT
+printf '## Project\n\nNode-absent test harness.\n' > "$P28_NONODE_DIR/CLAUDE.md"
+# Build a PATH that has no node binary by stripping node dirs from PATH
+P28_PATH_NO_NODE=""
+_p28_IFS_saved="$IFS"
+IFS=":"
+for _p28_dir in $PATH; do
+  [ -z "$_p28_dir" ] && continue
+  [ -x "$_p28_dir/node" ] && continue
+  P28_PATH_NO_NODE="${P28_PATH_NO_NODE:+$P28_PATH_NO_NODE:}$_p28_dir"
+done
+IFS="$_p28_IFS_saved"
+if [ "$P28_EVAL_OK" -eq 1 ]; then
+  P28_NONODE_RC=0
+  P28_NONODE_OUT="$(PATH="$P28_PATH_NO_NODE" CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" run "$P28_NONODE_DIR" 2>&1)" || P28_NONODE_RC=$?
+  if [ "$P28_NONODE_RC" -eq 2 ] && \
+     { printf '%s\n' "$P28_NONODE_OUT" | grep -qi "node" || \
+       printf '%s\n' "$P28_NONODE_OUT" | grep -qi "20\.20"; }; then
+    pass "eval run: exits 2 with human-readable message when node is absent or too old (EVAL-02-node-absent)"
+  else
+    fail "eval run rc=$P28_NONODE_RC — expected exit 2 and node/version message (EVAL-02-node-absent)"
+  fi
+else
+  fail "scripts/eval.sh not implemented — Wave 1 must create it (EVAL-02-node-absent)"
+fi
+rm -rf "$P28_NONODE_DIR"
+trap - EXIT
+
+# EVAL-02-audit-decoupled: audit with promptfoo absent exits 0 (not exit 2) — decoupled
+P28_ADECPL_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_ADECPL_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_eval/harness/." "$P28_ADECPL_DIR/"
+git -C "$P28_ADECPL_DIR" init -q
+git -C "$P28_ADECPL_DIR" config user.email "test@conjure"
+git -C "$P28_ADECPL_DIR" config user.name "conjure-test"
+git -C "$P28_ADECPL_DIR" add -A 2>/dev/null || true
+git -C "$P28_ADECPL_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_AUDIT_OK" -eq 1 ]; then
+  P28_ADECPL_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P28_AUDIT_SH" "$P28_ADECPL_DIR" >/dev/null 2>&1 || P28_ADECPL_RC=$?
+  if [ "$P28_ADECPL_RC" -ne 2 ]; then
+    pass "audit with promptfoo absent exits 0 (not exit 2) — promptfoo fully decoupled from audit (EVAL-02-audit-decoupled)"
+  else
+    fail "audit rc=$P28_ADECPL_RC — expected non-2 exit (audit must not require promptfoo) (EVAL-02-audit-decoupled)"
+  fi
+else
+  fail "audit-setup.sh EVAL section not implemented — Wave 3 must add it (EVAL-02-audit-decoupled)"
+fi
+rm -rf "$P28_ADECPL_DIR"
+trap - EXIT
+
+# EVAL-03-emit: eval --emit-workflow creates .github/workflows/conjure-eval.yml with correct shape
+P28_WF_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_WF_DIR"' EXIT
+git -C "$P28_WF_DIR" init -q
+git -C "$P28_WF_DIR" config user.email "test@conjure"
+git -C "$P28_WF_DIR" config user.name "conjure-test"
+printf '## Project\n\nWorkflow emit test.\n' > "$P28_WF_DIR/CLAUDE.md"
+git -C "$P28_WF_DIR" add -A 2>/dev/null || true
+git -C "$P28_WF_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_EVAL_OK" -eq 1 ]; then
+  P28_WF_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" --emit-workflow "$P28_WF_DIR" >/dev/null 2>&1 || P28_WF_RC=$?
+  if [ "$P28_WF_RC" -eq 0 ] && \
+     [ -f "$P28_WF_DIR/.github/workflows/conjure-eval.yml" ] && \
+     grep -q "pull_request" "$P28_WF_DIR/.github/workflows/conjure-eval.yml" && \
+     grep -q "promptfoo/promptfoo-action" "$P28_WF_DIR/.github/workflows/conjure-eval.yml" && \
+     grep -q "fail-on-threshold: 80" "$P28_WF_DIR/.github/workflows/conjure-eval.yml" && \
+     grep -q "repeat: 3" "$P28_WF_DIR/.github/workflows/conjure-eval.yml" && \
+     grep -q "repeat-min-pass: 2" "$P28_WF_DIR/.github/workflows/conjure-eval.yml" && \
+     grep -q "0.121.14" "$P28_WF_DIR/.github/workflows/conjure-eval.yml" && \
+     grep -q "\.claude/\*\*" "$P28_WF_DIR/.github/workflows/conjure-eval.yml"; then
+    pass "eval --emit-workflow creates conjure-eval.yml with correct shape (EVAL-03-emit)"
+  else
+    fail "eval --emit-workflow rc=$P28_WF_RC — missing or malformed conjure-eval.yml (EVAL-03-emit)"
+  fi
+else
+  fail "scripts/eval.sh not implemented — Wave 1 must create it (EVAL-03-emit)"
+fi
+rm -rf "$P28_WF_DIR"
+trap - EXIT
+
+# EVAL-04-budget-ok: audit --budget on normal harness exits 0 or 1 (under threshold) and prints tokens
+P28_BUDOK_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_BUDOK_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_eval/harness/." "$P28_BUDOK_DIR/"
+git -C "$P28_BUDOK_DIR" init -q
+git -C "$P28_BUDOK_DIR" config user.email "test@conjure"
+git -C "$P28_BUDOK_DIR" config user.name "conjure-test"
+git -C "$P28_BUDOK_DIR" add -A 2>/dev/null || true
+git -C "$P28_BUDOK_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_AUDIT_OK" -eq 1 ]; then
+  P28_BUDOK_RC=0
+  P28_BUDOK_OUT="$(CONJURE_HOME="$CONJURE_HOME" CONJURE_BUDGET=1 bash "$P28_AUDIT_SH" "$P28_BUDOK_DIR" 2>&1)" || P28_BUDOK_RC=$?
+  if [ "$P28_BUDOK_RC" -ne 2 ] && \
+     printf '%s\n' "$P28_BUDOK_OUT" | grep -qi "token"; then
+    pass "audit --budget on normal harness exits 0 or 1 (under threshold) (EVAL-04-budget-ok)"
+  else
+    fail "audit --budget rc=$P28_BUDOK_RC — expected non-2 exit and token output (EVAL-04-budget-ok)"
+  fi
+else
+  fail "audit-setup.sh EVAL section not implemented — Wave 3 must add it (EVAL-04-budget-ok)"
+fi
+rm -rf "$P28_BUDOK_DIR"
+trap - EXIT
+
+# EVAL-04-budget-err: audit --budget on _eval-overbudget fixture exits 2 (>=25k tokens)
+P28_BUDERR_DIR="$(mktemp -d)"
+trap 'rm -rf "$P28_BUDERR_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_eval-overbudget/harness/." "$P28_BUDERR_DIR/"
+git -C "$P28_BUDERR_DIR" init -q
+git -C "$P28_BUDERR_DIR" config user.email "test@conjure"
+git -C "$P28_BUDERR_DIR" config user.name "conjure-test"
+git -C "$P28_BUDERR_DIR" add -A 2>/dev/null || true
+git -C "$P28_BUDERR_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_AUDIT_OK" -eq 1 ]; then
+  P28_BUDERR_RC=0
+  CONJURE_HOME="$CONJURE_HOME" CONJURE_BUDGET=1 bash "$P28_AUDIT_SH" "$P28_BUDERR_DIR" >/dev/null 2>&1 || P28_BUDERR_RC=$?
+  if [ "$P28_BUDERR_RC" -eq 2 ]; then
+    pass "audit --budget exits 2 when estimated tokens >=25000 (EVAL-04-budget-err)"
+  else
+    fail "audit --budget rc=$P28_BUDERR_RC — expected exit 2 for over-budget harness (EVAL-04-budget-err)"
+  fi
+else
+  fail "audit-setup.sh EVAL section not implemented — Wave 3 must add it (EVAL-04-budget-err)"
+fi
+rm -rf "$P28_BUDERR_DIR"
+trap - EXIT
+
+# EVAL-04-porcelain: audit --budget --porcelain emits JSON with correct shape
+P28_PORCDIR="$(mktemp -d)"
+trap 'rm -rf "$P28_PORCDIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_eval/harness/." "$P28_PORCDIR/"
+git -C "$P28_PORCDIR" init -q
+git -C "$P28_PORCDIR" config user.email "test@conjure"
+git -C "$P28_PORCDIR" config user.name "conjure-test"
+git -C "$P28_PORCDIR" add -A 2>/dev/null || true
+git -C "$P28_PORCDIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_AUDIT_OK" -eq 1 ]; then
+  P28_PORC_STDOUT_FILE="$(mktemp)"
+  P28_PORC_RC=0
+  CONJURE_HOME="$CONJURE_HOME" CONJURE_BUDGET=1 CONJURE_PORCELAIN=1 bash "$P28_AUDIT_SH" "$P28_PORCDIR" \
+    >"$P28_PORC_STDOUT_FILE" 2>/dev/null || P28_PORC_RC=$?
+  P28_PORC_OUT="$(cat "$P28_PORC_STDOUT_FILE")"
+  rm -f "$P28_PORC_STDOUT_FILE"
+  if printf '%s\n' "$P28_PORC_OUT" | jq -e '.total_tokens' >/dev/null 2>&1 && \
+     printf '%s\n' "$P28_PORC_OUT" | jq -e '(.contributors | type) == "array"' >/dev/null 2>&1 && \
+     printf '%s\n' "$P28_PORC_OUT" | jq -e 'has("over")' >/dev/null 2>&1; then
+    pass "audit --budget --porcelain emits valid JSON with total_tokens, threshold, over, contributors[] (EVAL-04-porcelain)"
+  else
+    fail "audit --budget --porcelain rc=$P28_PORC_RC — JSON missing total_tokens/contributors/over (EVAL-04-porcelain)"
+  fi
+else
+  fail "audit-setup.sh EVAL section not implemented — Wave 3 must add it (EVAL-04-porcelain)"
+fi
+rm -rf "$P28_PORCDIR"
+trap - EXIT
+
+# EVAL-05-gap: audit on _eval-coverage-gap fixture reports uncovered skill
+P28_GAPDIR="$(mktemp -d)"
+trap 'rm -rf "$P28_GAPDIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_eval-coverage-gap/harness/." "$P28_GAPDIR/"
+git -C "$P28_GAPDIR" init -q
+git -C "$P28_GAPDIR" config user.email "test@conjure"
+git -C "$P28_GAPDIR" config user.name "conjure-test"
+git -C "$P28_GAPDIR" add -A 2>/dev/null || true
+git -C "$P28_GAPDIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_AUDIT_OK" -eq 1 ]; then
+  P28_GAP_RC=0
+  P28_GAP_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P28_AUDIT_SH" "$P28_GAPDIR" 2>&1)" || P28_GAP_RC=$?
+  if [ "$P28_GAP_RC" -ne 2 ] && \
+     printf '%s\n' "$P28_GAP_OUT" | grep -q "code-review"; then
+    pass "audit reports skill with no skill-used assertion as coverage gap (EVAL-05-gap)"
+  else
+    fail "audit rc=$P28_GAP_RC — expected non-2 exit and code-review in gap report (EVAL-05-gap)"
+  fi
+else
+  fail "audit-setup.sh EVAL section not implemented — Wave 3 must add it (EVAL-05-gap)"
+fi
+rm -rf "$P28_GAPDIR"
+trap - EXIT
+
+# EVAL-05-noconfig: audit on harness with no eval config emits advisory but exits 0
+P28_NOCFGDIR="$(mktemp -d)"
+trap 'rm -rf "$P28_NOCFGDIR"' EXIT
+printf '## Project\n\nNo-eval-config harness.\n\n- Always run shellcheck.\n' > "$P28_NOCFGDIR/CLAUDE.md"
+mkdir -p "$P28_NOCFGDIR/.claude/skills/sample-skill"
+printf -- '---\nname: sample-skill\ndescription: Sample skill\nallowed-tools:\n  - Read\n---\nSample skill body.\n' > "$P28_NOCFGDIR/.claude/skills/sample-skill/SKILL.md"
+git -C "$P28_NOCFGDIR" init -q
+git -C "$P28_NOCFGDIR" config user.email "test@conjure"
+git -C "$P28_NOCFGDIR" config user.name "conjure-test"
+git -C "$P28_NOCFGDIR" add -A 2>/dev/null || true
+git -C "$P28_NOCFGDIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_AUDIT_OK" -eq 1 ]; then
+  P28_NOCFG_RC=0
+  P28_NOCFG_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P28_AUDIT_SH" "$P28_NOCFGDIR" 2>&1)" || P28_NOCFG_RC=$?
+  if [ "$P28_NOCFG_RC" -ne 2 ] && \
+     { printf '%s\n' "$P28_NOCFG_OUT" | grep -qi "eval config" || \
+       printf '%s\n' "$P28_NOCFG_OUT" | grep -qi "conjure eval init"; }; then
+    pass "audit with no eval config emits note() advisory and exits 0 (EVAL-05-noconfig)"
+  else
+    fail "audit rc=$P28_NOCFG_RC — expected non-2 exit and eval config/conjure eval init advisory (EVAL-05-noconfig)"
+  fi
+else
+  fail "audit-setup.sh EVAL section not implemented — Wave 3 must add it (EVAL-05-noconfig)"
+fi
+rm -rf "$P28_NOCFGDIR"
+trap - EXIT
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
