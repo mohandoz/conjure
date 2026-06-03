@@ -206,7 +206,28 @@ Plans:
   4. Saga proof (CI fixture): SIGKILL a `conjure workspace adopt` mid-batch against a `_workspace-trio` fixture (3 small repos) → `conjure workspace adopt --rollback` → per-repo `sha256` zero-diff confirms all applied repos are restored to their pre-run state (mirroring the Phase 24 pattern at workspace scale)
   5. `conjure workspace adopt --dry-run` performs all preflight and snapshot-size checks but writes zero files; exit 2 is never emitted from a dry run unless a preflight check itself fails
 
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+**Wave 0**
+
+- [ ] 30-00-PLAN.md — Wave 0: _workspace-trio fixture (3 adoptable repos alpha/beta/gamma + manifest with tags) + Phase 30 graceful-red block in tests/run.sh (WS-05/06/07 + SIGKILL saga test, Nyquist)
+
+**Wave 1** *(blocked on Wave 0 completion)*
+
+- [ ] 30-01-PLAN.md — Wave 1: lib/workspace.sh state helpers — workspace_state_write (atomic jq>tmp+mv), workspace_state_read, workspace_state_validate; schema {run_id, started, phase, repos[{name, snapshot_ref, sha256_pre_ref, status}]} (WS-06, WS-07)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 30-02-PLAN.md — Wave 2: ws_do_update in scripts/workspace.sh (serial per-repo conjure update, stop-on-first-error, --continue-on-error, conflict sidecar surfacing, CR-02 traversal re-check) + cmd_workspace update|adopt token extension in cli/conjure (WS-05)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 30-03-PLAN.md — Wave 3: ws_do_adopt saga orchestrator in scripts/workspace.sh — preflight du gate (2097152 KiB), --tag filter, PHASE A snapshot-all loop (workspace_state_write before+after each op, sha256_pre_ref hash file), PHASE B apply-serial loop, --dry-run zero-write, stop-on-fail; ws_sha_of in lib/workspace.sh (WS-06)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 30-04-PLAN.md — Wave 4: ws_do_rollback in scripts/workspace.sh — per-repo independent restore from snapshot_ref, sha256 zero-diff verify loop, idempotent skip (rolled_back), rollback-time CR-02 re-check, state archived timestamped; adopt --rollback dispatch wired; SIGKILL saga test turns green (WS-07)
+
 **UI hint**: no
 
 ## Progress
@@ -222,4 +243,4 @@ Plans:
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 3/3 | Complete    | 2026-06-03 |
-| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |
+| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/5 | Not started | - |
