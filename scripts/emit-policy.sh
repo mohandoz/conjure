@@ -147,43 +147,75 @@ if [ "${MDM_ONLY:-0}" != "1" ]; then
   merge_deny_read_permissions "$TARGET/.claude/settings.json" "$COMBINED_DENY_READ"
 fi
 
-# Create output directory
-mutate_mkdir "$OUTPUT_DIR"
+# Build Read() deny entries JSON array from combined denyRead paths (for managed-settings + plist)
+DENY_ENTRIES_JSON="$(build_deny_read_entries "$COMBINED_DENY_READ" | jq -R . | jq -sc '.')"
 
-# Emit VERIFY.txt with testable verification assertions
+# Build managed-settings JSON — always needed (used for managed-settings.json file and ps1 heredoc)
+MANAGED_JSON="$(build_managed_settings "$REGIME" "$DENY_ENTRIES_JSON" "$SANDBOX_JSON")"
+
+# Secret scan on managed-settings content before any write (T-26-11)
+secret_scan "$MANAGED_JSON" "managed-settings.json" || exit 2
+
+# Type-safety gate: validate disableBypassPermissionsMode is STRING "disable" (T-26-07)
+validate_managed_settings_json "$MANAGED_JSON" || exit 2
+
+# Emit managed-settings.json (skip when MDM_ONLY)
+if [ "${MDM_ONLY:-0}" != "1" ]; then
+  mutate_mkdir "$OUTPUT_DIR"
+  mutate_write "$OUTPUT_DIR/managed-settings.json" "$MANAGED_JSON"
+fi
+
+# Emit macOS plist (skip when MANAGED_ONLY)
+if [ "${MANAGED_ONLY:-0}" != "1" ]; then
+  PLIST_XML="$(build_plist_xml "$COMBINED_DENY_READ" "$DENY_ENTRIES_JSON" "$SANDBOX_JSON")"
+  [ -z "$PLIST_XML" ] && { echo "✗ build_plist_xml produced empty output" >&2; exit 2; }
+  mutate_mkdir "$OUTPUT_DIR"
+  mutate_write "$OUTPUT_DIR/com.anthropic.claudecode.plist" "$PLIST_XML"
+
+  # Emit Windows ps1 (skip when MANAGED_ONLY)
+  PS1_CONTENT="$(build_ps1_script "$REGIME" "$MANAGED_JSON")"
+  [ -z "$PS1_CONTENT" ] && { echo "✗ build_ps1_script produced empty output" >&2; exit 2; }
+  mutate_mkdir "$OUTPUT_DIR"
+  mutate_write "$OUTPUT_DIR/Set-ClaudeCodePolicy.ps1" "$PS1_CONTENT"
+fi
+
+# Emit VERIFY.txt with testable verification assertions (per RESEARCH.md Code Examples)
 VERIFY_CONTENT="$(printf '%s\n' \
   "=== conjure emit-policy ($REGIME) — Verification ===" \
   "" \
   "1. Sandbox enabled in project settings:" \
   "   jq '.sandbox.enabled' .claude/settings.json   # must return: true" \
   "" \
-  "2. denyRead paths present:" \
-  "   jq '.sandbox.filesystem.denyRead | length' .claude/settings.json   # must be > 0" \
+  "2. disableBypassPermissionsMode type and value:" \
+  "   jq '.permissions.disableBypassPermissionsMode | [type, .]' .claude/settings.json" \
+  "   # must return: [\"string\",\"disable\"]" \
   "" \
-  "3. permissions.deny Read() entries present:" \
-  "   jq '.permissions.deny | length' .claude/settings.json   # must be > 0" \
+  "3. Managed settings active (after deploying conjure-policy/managed-settings.json):" \
+  "   claude /status   # look for 'Enterprise managed settings (file)' in Setting sources" \
   "" \
   "4. denyRead paths mirrored in permissions.deny:" \
   "   jq '[.sandbox.filesystem.denyRead // [], .permissions.deny // []]' .claude/settings.json" \
   "" \
-  "5. Managed settings active (after deploying conjure-policy/managed-settings.json):" \
-  "   claude /status   # look for 'Enterprise managed settings (file)' in Setting sources" \
+  "5. Unreviewed template check (must be false before deploying):" \
+  "   grep -c REPLACE_WITH_ORG_UUID conjure-policy/managed-settings.json   # must return 0" \
   "" \
   "Compliance disclaimer: this configuration reduces non-compliant output risks" \
   "but does NOT make your project compliant. Engage your compliance officer.")"
 
+mutate_mkdir "$OUTPUT_DIR"
 printf '%s\n' "$VERIFY_CONTENT"
 mutate_write "$OUTPUT_DIR/VERIFY.txt" "$VERIFY_CONTENT"
 
-# Wave 2 stubs (managed-settings.json + MDM artifacts — implemented in Phase 26 Plan 02)
-if [ "${MANAGED_ONLY:-0}" = "1" ] || [ "${MDM_ONLY:-0}" != "1" ]; then
-  # managed-settings.json — implemented in Wave 2
-  echo "  (managed-settings.json: implemented in Wave 2)" >&2
-fi
-
 # Success report
 echo "▸ conjure emit-policy ($REGIME): files written"
-echo "  ✓ .claude/settings.json (sandbox block merged)"
+if [ "${MDM_ONLY:-0}" != "1" ]; then
+  echo "  ✓ .claude/settings.json (sandbox block merged)"
+  echo "  ✓ $OUTPUT_DIR/managed-settings.json"
+fi
+if [ "${MANAGED_ONLY:-0}" != "1" ]; then
+  echo "  ✓ $OUTPUT_DIR/com.anthropic.claudecode.plist"
+  echo "  ✓ $OUTPUT_DIR/Set-ClaudeCodePolicy.ps1"
+fi
 echo "  ✓ $OUTPUT_DIR/VERIFY.txt"
 echo ""
 echo "▸ See $OUTPUT_DIR/VERIFY.txt for testable verification commands."
