@@ -77,6 +77,63 @@ else
   warn ".claude/skills/ missing"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 27 — Schema checks (SCHM-01: SKILL.md frontmatter type validation)
+# ─────────────────────────────────────────────────────────────────────────────
+
+SCHEMA_FILE="${CONJURE_HOME}/lib/cc-schema.json"
+if [ ! -f "$SCHEMA_FILE" ] || ! command -v jq >/dev/null 2>&1; then
+  note "[schema] cc-schema.json not found at $SCHEMA_FILE — SCHM-01 skipped"
+else
+  while IFS= read -r skill; do
+    _skill_name="$(basename "$(dirname "$skill")")"
+    # shellcheck disable=SC2155
+    _fm_block="$(awk '/^---$/{n++; if(n==2)exit; next} n==1{print}' "$skill")"
+    # shellcheck disable=SC2155
+    _known_fields="$(jq -r '.skill_frontmatter | keys[]' "$SCHEMA_FILE" 2>/dev/null)"
+
+    # Check for unknown fields — warn (not fail)
+    _schm01_warn_errs="$(mktemp)"
+    printf '%s\n' "$_fm_block" | grep -E '^[a-zA-Z]' | while IFS= read -r _fmline; do
+      _field="$(printf '%s\n' "$_fmline" | cut -d: -f1)"
+      if ! printf '%s\n' "$_known_fields" | grep -qxF "$_field"; then
+        printf '%s\n' "Skill '$_skill_name': unknown frontmatter field '$_field' (not in CC schema — SCHM-01)" >> "$_schm01_warn_errs"
+      fi
+    done
+    if [ -s "$_schm01_warn_errs" ]; then
+      while IFS= read -r _msg; do warn "$_msg"; done < "$_schm01_warn_errs"
+    fi
+    rm -f "$_schm01_warn_errs"
+
+    # Detect object-typed fields using awk two-line lookahead (Pattern 1 from RESEARCH)
+    # Inline object: fieldname: {  — Block mapping: empty-value key followed by indented word:
+    _schm01_err_errs="$(mktemp)"
+    printf '%s\n' "$_fm_block" | awk '
+      /^[a-zA-Z]/ {
+        split($0, a, /:[[:space:]]*/); key=a[1]; val=substr($0, index($0,":")+1); gsub(/^[[:space:]]+/,"",val)
+        prev_key=key; prev_val=val
+        if (val ~ /^\{/) { print "OBJECT_FIELD:" key }
+        next
+      }
+      /^[[:space:]]+[a-zA-Z_-]+:/ && prev_key != "" && prev_val == "" {
+        print "OBJECT_FIELD:" prev_key; prev_key=""
+      }
+    ' | while IFS= read -r _result; do
+      _ofield="${_result#OBJECT_FIELD:}"
+      # shellcheck disable=SC2155
+      _expected="$(jq -r --arg f "$_ofield" '.skill_frontmatter[$f] // "unknown"' "$SCHEMA_FILE" 2>/dev/null)"
+      if [ "$_expected" = "array-or-space-string" ] || [ "$_expected" = "string" ]; then
+        printf '%s\n' "Skill '$_skill_name': field '$_ofield' is an object (YAML mapping) — expected $_expected (SCHM-01)" >> "$_schm01_err_errs"
+      fi
+    done
+    if [ -s "$_schm01_err_errs" ]; then
+      while IFS= read -r _msg; do err "$_msg"; done < "$_schm01_err_errs"
+    fi
+    rm -f "$_schm01_err_errs"
+
+  done < <(find .claude/skills -name SKILL.md 2>/dev/null)
+fi
+
 # Agents
 if [ -d .claude/agents ]; then
   COUNT=$(find .claude/agents -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
