@@ -248,8 +248,14 @@ validate_managed_settings_json() {
 # Note: does NOT include _conjure_regime or _conjure_unreviewed top-level keys (RESEARCH.md Q1 RESOLVED).
 # The sole "unreviewed" sentinel is forceLoginOrgUUID: "REPLACE_WITH_ORG_UUID".
 build_managed_settings() {
+  # IN-02: keep the documented (regime, deny_entries_json, sandbox_json) contract in
+  # sync with the body. regime ($1) is not embedded in the managed-settings JSON
+  # (no _conjure_regime key by design — RESEARCH.md Q1), but bind it so the
+  # signature and body agree and a future arg-order change cannot silently shift.
+  local regime="$1"
   local deny_entries_json="$2"
   local sandbox_json="$3"
+  : "$regime"  # consumed: documented arg, intentionally not embedded in output (IN-02)
 
   local result
   result="$(jq -n \

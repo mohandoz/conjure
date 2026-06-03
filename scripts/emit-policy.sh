@@ -199,7 +199,9 @@ VERIFY_CONTENT="$(printf '%s\n' \
   "   jq '[.sandbox.filesystem.denyRead // [], .permissions.deny // []]' .claude/settings.json" \
   "" \
   "5. Unreviewed template check (must be false before deploying):" \
-  "   grep -c REPLACE_WITH_ORG_UUID conjure-policy/managed-settings.json   # must return 0" \
+  "   grep -c REPLACE_WITH_ORG_UUID conjure-policy/managed-settings.json" \
+  "   # must return 0 AFTER you replace forceLoginOrgUUID with your org UUID —" \
+  "   # a freshly emitted file intentionally returns 1." \
   "" \
   "Compliance disclaimer: this configuration reduces non-compliant output risks" \
   "but does NOT make your project compliant. Engage your compliance officer.")"
