@@ -2,7 +2,7 @@
 phase: 26
 slug: sandbox-managed-settings-mdm
 status: draft
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-06-03
 ---
@@ -73,11 +73,11 @@ created: 2026-06-03
 
 ## Validation Sign-Off
 
-- [ ] All tasks have automated verify (fixture/test) or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references (fixtures + expected artifacts)
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 60s
-- [ ] `nyquist_compliant: true` set in frontmatter (after planner wires Wave 0)
+- [x] All tasks have automated verify (fixture/test) or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (fixtures + expected artifacts)
+- [x] No watch-mode flags
+- [x] Feedback latency < 60s
+- [x] `nyquist_compliant: true` set in frontmatter (after planner wires Wave 0)
 
-**Approval:** pending
+**Approval:** pending (wave_0_complete: false — Wave 0 has not yet executed; nyquist_compliant reflects plan structure completeness, not execution state)

@@ -333,10 +333,12 @@ build_deny_read_entries() {
     "network": {
       "allowedDomains": []
     }
-  },
-  "_conjure_regime": "hipaa",
-  "_conjure_unreviewed": true
+  }
 }
+<!-- Open Questions RESOLVED Q1: the deployed managed-settings.json ships ONLY the
+documented Claude Code keys above. Do NOT add _conjure_regime/_conjure_unreviewed
+top-level markers — Claude Code may reject unknown top-level keys at login. The sole
+"unreviewed" sentinel is forceLoginOrgUUID: "REPLACE_WITH_ORG_UUID". -->
 ```
 
 **Key type facts** (all VERIFIED from official docs):
@@ -519,9 +521,10 @@ if [ -f ".claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
 fi
 
 # Advisory: unreviewed template (note, exit 0)
-if [ -f "conjure-policy/managed-settings.json" ] && command -v jq >/dev/null 2>&1; then
-  if jq -e '._conjure_unreviewed == true' conjure-policy/managed-settings.json >/dev/null 2>&1 \
-     || grep -qF "REPLACE_WITH_ORG_UUID" conjure-policy/managed-settings.json 2>/dev/null; then
+# Detection keys off the REPLACE_WITH_ORG_UUID placeholder ONLY (Open Questions RESOLVED Q1) —
+# emitted files carry no _conjure_unreviewed marker, so do NOT check for it.
+if [ -f "conjure-policy/managed-settings.json" ]; then
+  if grep -qF "REPLACE_WITH_ORG_UUID" conjure-policy/managed-settings.json 2>/dev/null; then
     note "⚠ [policy] managed-settings.json contains unreviewed template values (REPLACE_WITH_ORG_UUID) — customize before deploying"
   fi
 fi
@@ -905,17 +908,19 @@ emit_verification_assertions() {
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Unknown key behavior in managed-settings.json**
    - What we know: jq/JSON spec allows unknown keys; Claude Code docs do not state it rejects them.
    - What's unclear: Whether Claude Code validates managed-settings.json against a strict schema and rejects files with unknown top-level keys like `_conjure_regime`.
    - Recommendation: Strip `_conjure_regime` and `_conjure_unreviewed` from the DEPLOYED managed-settings.json (the one written to `conjure-policy/managed-settings.json`). Keep only the `REPLACE_WITH_ORG_UUID` placeholder as the "unreviewed" sentinel — it is self-evidently fake and Claude Code will reject it at login time anyway.
+   - **RESOLVED:** Do NOT ship `_conjure_regime` or `_conjure_unreviewed` as top-level keys in the deployed `conjure-policy/managed-settings.json`. Claude Code may reject managed-settings.json files containing unknown top-level keys at login. The sole "unreviewed template" sentinel is the `forceLoginOrgUUID: "REPLACE_WITH_ORG_UUID"` placeholder value — Claude Code rejects it at login regardless (self-evidently fake UUID), and `conjure audit` POL-05-advisory keys its detection off the presence of that placeholder string. Assumption A3 (Claude Code ignores unknown keys) is withdrawn as too risky; strip the custom markers from all emitted files.
 
 2. **plutil availability on Linux CI**
    - What we know: `plutil` is a macOS system binary. Not present on Linux.
    - What's unclear: Whether the CI runner for this project is macOS or Linux.
    - Recommendation: Gate plist validation with `command -v plutil >/dev/null 2>&1` and skip on Linux; note in VERIFY.txt that plist should be linted on macOS before deploying.
+   - **RESOLVED:** `build_plist_xml` and the plist validation gate in `scripts/emit-policy.sh` guard with `command -v plutil >/dev/null 2>&1` before invoking `plutil -lint`. On Linux/CI where plutil is absent the validation step is skipped with a note; the emit still succeeds. No blocker.
 
 ---
 
