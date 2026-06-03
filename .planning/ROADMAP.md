@@ -185,7 +185,7 @@ Plans:
 
 **Wave 1** *(blocked on Wave 0 completion)*
 
-- [ ] 29-01-PLAN.md — Wave 1: lib/workspace.sh (manifest validate/load/discover helpers) + scripts/workspace.sh init + cli/conjure cmd_workspace dispatch (WS-01, WS-02)
+- [x] 29-01-PLAN.md — Wave 1: lib/workspace.sh (manifest validate/load/discover helpers) + scripts/workspace.sh init + cli/conjure cmd_workspace dispatch (WS-01, WS-02)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -221,5 +221,5 @@ Plans:
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 29. Workspace Orchestration — Read-Only | v0.7.0 | 1/3 | In Progress|  |
+| 29. Workspace Orchestration — Read-Only | v0.7.0 | 2/3 | In Progress|  |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |
