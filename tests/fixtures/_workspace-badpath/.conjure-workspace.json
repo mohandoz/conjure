@@ -2,8 +2,8 @@
   "schema_version": 1,
   "generated": "2026-06-03T00:00:00Z",
   "repos": [
-    {"name": "alpha",            "path": "../_workspace/repos/alpha", "tags": []},
-    {"name": "beta",             "path": "../_workspace/repos/beta",  "tags": []},
-    {"name": "nonexistent-repo", "path": "repos/nonexistent-repo",   "tags": []}
+    {"name": "alpha",            "path": "repos/alpha",            "tags": []},
+    {"name": "beta",             "path": "repos/beta",             "tags": []},
+    {"name": "nonexistent-repo", "path": "repos/nonexistent-repo", "tags": []}
   ]
 }

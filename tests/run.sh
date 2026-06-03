@@ -5884,10 +5884,13 @@ rm -rf "$P29_FTOL_DIR"
 P29_BPCHK_DIR="$(mktemp -d)"
 trap 'rm -rf "$P29_BPCHK_DIR"' EXIT
 cp "$CONJURE_HOME/tests/fixtures/_workspace-badpath/.conjure-workspace.json" "$P29_BPCHK_DIR/.conjure-workspace.json"
-mkdir -p "$P29_BPCHK_DIR/_workspace/repos/alpha/.claude"
-mkdir -p "$P29_BPCHK_DIR/_workspace/repos/beta/.claude"
-cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_BPCHK_DIR/_workspace/repos/alpha/CLAUDE.md"
-cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/beta/CLAUDE.md" "$P29_BPCHK_DIR/_workspace/repos/beta/CLAUDE.md"
+# Bad-path fixture: alpha/beta are real IN-BOUNDS repos; nonexistent-repo is the bad path.
+# (Paths stay in-bounds so the corrected traversal guard accepts the manifest at load time;
+#  the nonexistent repo is then skipped per-repo with a warning — CR-01.)
+mkdir -p "$P29_BPCHK_DIR/repos/alpha/.claude"
+mkdir -p "$P29_BPCHK_DIR/repos/beta/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_BPCHK_DIR/repos/alpha/CLAUDE.md"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/beta/CLAUDE.md" "$P29_BPCHK_DIR/repos/beta/CLAUDE.md"
 if [ "$P29_WS_SH_OK" -eq 1 ]; then
   P29_BPCHK_RC=0
   P29_BPCHK_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" check "$P29_BPCHK_DIR/.conjure-workspace.json" 2>&1)" || P29_BPCHK_RC=$?
@@ -5968,10 +5971,12 @@ rm -rf "$P29_AFF_DIR"
 P29_AUDPB_DIR="$(mktemp -d)"
 trap 'rm -rf "$P29_AUDPB_DIR"' EXIT
 cp "$CONJURE_HOME/tests/fixtures/_workspace-badpath/.conjure-workspace.json" "$P29_AUDPB_DIR/.conjure-workspace.json"
-mkdir -p "$P29_AUDPB_DIR/_workspace/repos/alpha/.claude"
-mkdir -p "$P29_AUDPB_DIR/_workspace/repos/beta/.claude"
-cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_AUDPB_DIR/_workspace/repos/alpha/CLAUDE.md"
-cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/beta/CLAUDE.md" "$P29_AUDPB_DIR/_workspace/repos/beta/CLAUDE.md"
+# Bad-path fixture: alpha/beta are real IN-BOUNDS repos; nonexistent-repo is the bad path.
+# (In-bounds paths so the corrected traversal guard accepts the manifest at load time — CR-01.)
+mkdir -p "$P29_AUDPB_DIR/repos/alpha/.claude"
+mkdir -p "$P29_AUDPB_DIR/repos/beta/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_AUDPB_DIR/repos/alpha/CLAUDE.md"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/beta/CLAUDE.md" "$P29_AUDPB_DIR/repos/beta/CLAUDE.md"
 if [ "$P29_WS_SH_OK" -eq 1 ]; then
   P29_AUDPB_RC=0
   P29_AUDPB_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" audit "$P29_AUDPB_DIR/.conjure-workspace.json" 2>&1)" || P29_AUDPB_RC=$?
@@ -5986,6 +5991,105 @@ else
 fi
 trap - EXIT
 rm -rf "$P29_AUDPB_DIR"
+
+# WS-SEC-traversal-escape: workspace_manifest_validate REJECTS a ../sibling escape (exit 2).
+# Regression for CR-01: the guard previously anchored the boundary at the workspace PARENT,
+# so ../sibling paths slipped through. The boundary is the workspace (manifest) dir itself.
+P29_ESC_ROOT="$(mktemp -d)"
+trap 'rm -rf "$P29_ESC_ROOT"' EXIT
+mkdir -p "$P29_ESC_ROOT/ws"
+mkdir -p "$P29_ESC_ROOT/sibling/.claude"
+printf '{"schema_version":1,"generated":"2026-06-03T00:00:00Z","repos":[{"name":"escapee","path":"../sibling","tags":[]}]}\n' > "$P29_ESC_ROOT/ws/.conjure-workspace.json"
+if [ "$P29_WS_LIB_OK" -eq 1 ]; then
+  P29_ESC_RC=0
+  ( workspace_manifest_validate "$P29_ESC_ROOT/ws/.conjure-workspace.json" ) >/dev/null 2>&1 || P29_ESC_RC=$?
+  if [ "$P29_ESC_RC" -eq 2 ]; then
+    pass "workspace_manifest_validate rejects ../sibling traversal escape with exit 2 (WS-SEC-traversal-escape)"
+  else
+    fail "workspace_manifest_validate accepted a ../sibling escape (exit $P29_ESC_RC, expected 2) (WS-SEC-traversal-escape)"
+  fi
+else
+  fail "lib/workspace.sh not implemented — Wave 1 must create it (WS-SEC-traversal-escape)"
+fi
+trap - EXIT
+rm -rf "$P29_ESC_ROOT"
+
+# WS-SEC-symlink-accept: a workspace reached through a SYMLINK must still validate (exit 0).
+# Regression for CR-01: resolving manifest_dir/.. via pwd -P previously diverged when the
+# workspace was symlinked, falsely rejecting legitimate in-bounds repos.
+P29_SYM_ROOT="$(mktemp -d)"
+trap 'rm -rf "$P29_SYM_ROOT"' EXIT
+mkdir -p "$P29_SYM_ROOT/real-ws/repos/alpha/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_SYM_ROOT/real-ws/repos/alpha/CLAUDE.md"
+printf '{"schema_version":1,"generated":"2026-06-03T00:00:00Z","repos":[{"name":"alpha","path":"repos/alpha","tags":[]}]}\n' > "$P29_SYM_ROOT/real-ws/.conjure-workspace.json"
+ln -s "$P29_SYM_ROOT/real-ws" "$P29_SYM_ROOT/link-ws"
+if [ "$P29_WS_LIB_OK" -eq 1 ]; then
+  P29_SYM_RC=0
+  ( workspace_manifest_validate "$P29_SYM_ROOT/link-ws/.conjure-workspace.json" ) >/dev/null 2>&1 || P29_SYM_RC=$?
+  if [ "$P29_SYM_RC" -eq 0 ]; then
+    pass "workspace_manifest_validate accepts a symlinked workspace with in-bounds repos (WS-SEC-symlink-accept)"
+  else
+    fail "workspace_manifest_validate rejected a legit symlinked workspace (exit $P29_SYM_RC, expected 0) (WS-SEC-symlink-accept)"
+  fi
+else
+  fail "lib/workspace.sh not implemented — Wave 1 must create it (WS-SEC-symlink-accept)"
+fi
+trap - EXIT
+rm -rf "$P29_SYM_ROOT"
+
+# WS-SEC-degenerate-paths: empty / "." / ".." / "null"(missing) repo paths are rejected (exit 2).
+# Regression for WR-04: degenerate path values previously targeted the workspace root itself
+# or a literal "null" subdir.
+P29_DEG_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_DEG_DIR"' EXIT
+if [ "$P29_WS_LIB_OK" -eq 1 ]; then
+  P29_DEG_OK=1
+  for _deg in '""' '"."' '".."'; do
+    printf '{"schema_version":1,"generated":"2026-06-03T00:00:00Z","repos":[{"name":"x","path":%s,"tags":[]}]}\n' "$_deg" > "$P29_DEG_DIR/.conjure-workspace.json"
+    _deg_rc=0
+    ( workspace_manifest_validate "$P29_DEG_DIR/.conjure-workspace.json" ) >/dev/null 2>&1 || _deg_rc=$?
+    [ "$_deg_rc" -eq 2 ] || P29_DEG_OK=0
+  done
+  # missing path key → jq -r emits literal "null"
+  printf '{"schema_version":1,"generated":"2026-06-03T00:00:00Z","repos":[{"name":"x","tags":[]}]}\n' > "$P29_DEG_DIR/.conjure-workspace.json"
+  _deg_rc=0
+  ( workspace_manifest_validate "$P29_DEG_DIR/.conjure-workspace.json" ) >/dev/null 2>&1 || _deg_rc=$?
+  [ "$_deg_rc" -eq 2 ] || P29_DEG_OK=0
+  if [ "$P29_DEG_OK" -eq 1 ]; then
+    pass "workspace_manifest_validate rejects empty/./../null repo paths with exit 2 (WS-SEC-degenerate-paths)"
+  else
+    fail "workspace_manifest_validate accepted a degenerate repo path (WS-SEC-degenerate-paths)"
+  fi
+else
+  fail "lib/workspace.sh not implemented — Wave 1 must create it (WS-SEC-degenerate-paths)"
+fi
+trap - EXIT
+rm -rf "$P29_DEG_DIR"
+
+# WS-SEC-no-exec-out-of-bounds: check/audit must NOT run a per-repo command against an
+# out-of-bounds dir; the manifest is rejected at load time (exit 2) and a sentinel file
+# the per-repo command would touch is never created. Regression for CR-02.
+P29_OOB_ROOT="$(mktemp -d)"
+trap 'rm -rf "$P29_OOB_ROOT"' EXIT
+mkdir -p "$P29_OOB_ROOT/ws"
+mkdir -p "$P29_OOB_ROOT/sibling/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_OOB_ROOT/sibling/CLAUDE.md"
+printf '{"schema_version":1,"generated":"2026-06-03T00:00:00Z","repos":[{"name":"escapee","path":"../sibling","tags":[]}]}\n' > "$P29_OOB_ROOT/ws/.conjure-workspace.json"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_OOB_CHK_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" check "$P29_OOB_ROOT/ws/.conjure-workspace.json" >/dev/null 2>&1 || P29_OOB_CHK_RC=$?
+  P29_OOB_AUD_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" audit "$P29_OOB_ROOT/ws/.conjure-workspace.json" >/dev/null 2>&1 || P29_OOB_AUD_RC=$?
+  if [ "$P29_OOB_CHK_RC" -eq 2 ] && [ "$P29_OOB_AUD_RC" -eq 2 ]; then
+    pass "workspace check/audit refuse to execute against an out-of-bounds repo (exit 2) (WS-SEC-no-exec-out-of-bounds)"
+  else
+    fail "workspace check/audit ran against out-of-bounds dir (check=$P29_OOB_CHK_RC audit=$P29_OOB_AUD_RC, expected 2/2) (WS-SEC-no-exec-out-of-bounds)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 1 must create it (WS-SEC-no-exec-out-of-bounds)"
+fi
+trap - EXIT
+rm -rf "$P29_OOB_ROOT"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh

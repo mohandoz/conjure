@@ -35,17 +35,30 @@ workspace_manifest_validate() {
   fi
 
   # PATH TRAVERSAL GUARD (D-29 security threat b)
+  # The manifest lives at <workspace>/.conjure-workspace.json, so the workspace
+  # ROOT *is* the manifest directory — not its parent. Anchor the boundary to the
+  # RESOLVED (pwd -P) manifest dir so the comparison base matches the resolved repo
+  # paths even when the workspace is reached through a symlink. (CR-01)
   local manifest_dir
   manifest_dir="$(dirname "$manifest")"
 
   local workspace_root
-  workspace_root="$(cd "$manifest_dir/.." 2>/dev/null && pwd -P)" || {
+  workspace_root="$(cd "$manifest_dir" 2>/dev/null && pwd -P)" || {
     echo "✗ cannot resolve workspace root from manifest dir: $manifest_dir" >&2
     return 2
   }
 
   local rpath resolved
   while IFS= read -r rpath; do
+    # Reject degenerate path values that would target the workspace root itself
+    # or a literal "null" dir (missing path key → jq emits the string "null"). (WR-04)
+    case "$rpath" in
+      ""|.|..|null)
+        echo "✗ invalid repo path value: '$rpath'" >&2
+        return 2
+        ;;
+    esac
+
     # Reject absolute paths immediately
     case "$rpath" in
       /*)
@@ -54,13 +67,14 @@ workspace_manifest_validate() {
         ;;
     esac
 
-    # For relative paths: resolve via subshell cd + pwd -P
-    # If cd fails (path does not exist), treat as safe — existence check is caller's job
-    resolved="$(cd "$manifest_dir/$rpath" 2>/dev/null && pwd -P)" || continue
+    # For relative paths: resolve against the resolved workspace root via subshell
+    # cd + pwd -P. If cd fails (path does not exist), treat as safe — existence
+    # check is caller's job.
+    resolved="$(cd "$workspace_root/$rpath" 2>/dev/null && pwd -P)" || continue
 
-    # Verify resolved path stays under workspace root
+    # Verify resolved path is the workspace root or stays under it
     case "$resolved" in
-      "$workspace_root/"*) ;; # OK — stays under workspace root
+      "$workspace_root"|"$workspace_root/"*) ;; # OK — root or under root
       *)
         echo "✗ repo path escapes workspace root: $rpath (resolved: $resolved)" >&2
         return 2
