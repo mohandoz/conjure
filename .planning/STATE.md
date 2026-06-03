@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
-status: verifying
-last_updated: "2026-06-03T13:12:37.747Z"
+status: ready_to_plan
+last_updated: 2026-06-03T13:59:42.835Z
 last_activity: 2026-06-03
 progress:
   total_phases: 6
@@ -11,6 +11,7 @@ progress:
   total_plans: 12
   completed_plans: 12
   percent: 50
+stopped_at: Phase 27 complete (4/4) — ready to discuss Phase 28
 ---
 
 # Project State
@@ -20,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** A developer can turn any repo into a production-grade, eval-backed Claude Code harness with one trustworthy command — and keep it healthy over time.
-**Current focus:** Phase 27 — schema-version-aware-audit
+**Current focus:** Phase 28 — promptfoo eval + context budget linter
 
 ## Current Position
 
-Phase: 27 (schema-version-aware-audit) — EXECUTING
-Plan: 4 of 4
-Status: Phase complete — ready for verification
+Phase: 28
+Plan: Not started
+Status: Ready to plan
 Last activity: 2026-06-03
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 87 (v0.3.0: 22, v0.4.0: 23, v0.5.0: 10, v0.6.0: 12, v0.6.1 quick: 1 [qk-260603-302])
+- Total plans completed: 91 (v0.3.0: 22, v0.4.0: 23, v0.5.0: 10, v0.6.0: 12, v0.6.1 quick: 1 [qk-260603-302])
 - Average duration: — min
 - Total execution time: —
 
@@ -50,6 +51,7 @@ Last activity: 2026-06-03
 | 24 | 2 | - | - |
 | 25 | 4 | - | - |
 | 26 | 4 | - | - |
+| 27 | 4 | - | - |
 
 **Recent Trend:**
 
