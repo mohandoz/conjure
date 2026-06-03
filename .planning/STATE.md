@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
 status: executing
-last_updated: "2026-06-03T23:22:01.225Z"
+last_updated: "2026-06-03T23:32:27.556Z"
 last_activity: 2026-06-03
 progress:
   total_phases: 6
   completed_phases: 5
   total_plans: 24
-  completed_plans: 20
+  completed_plans: 21
   percent: 83
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 30 (workspace-orchestration-mutating-rollback-saga) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-06-03
 
@@ -75,6 +75,7 @@ Last activity: 2026-06-03
 | Phase 28 P01 | 30 | 2 tasks | 3 files |
 | Phase 29 P01 | 15 | 2 tasks | 3 files |
 | Phase 30 P00 | 25 | 2 tasks | 11 files |
+| Phase 30 P01 | 15min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,7 @@ v0.7.0 design decisions (from research + roadmap):
 - [Phase ?]: SCHM-02 subsumed POL-05c: deliberate refactor covering both permissions. and top-level disableBypassPermissionsMode paths; Phase 26 exit-2 behavior preserved
 - [Phase ?]: awk two-line lookahead for YAML object detection in SCHM-01 (T-27-01 mitigate)
 - [Phase ?]: SCHM-01 reads lib/cc-schema.json at runtime via jq — schema file is single source of truth
+- [Phase ?]: workspace_state_validate accepts snapshotting as valid in-progress status; status-level validation is the caller's responsibility
 
 ### Pending Todos
 
@@ -133,7 +135,7 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T23:22:01.220Z
+Last session: 2026-06-03T23:32:17.207Z
 Stopped at: Completed Phase 27 Plan 01: SCHM-01 + SCHM-02 implemented in audit-setup.sh
 Resume file: None
 

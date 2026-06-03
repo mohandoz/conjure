@@ -214,7 +214,7 @@ Plans:
 
 **Wave 1** *(blocked on Wave 0 completion)*
 
-- [ ] 30-01-PLAN.md — Wave 1: lib/workspace.sh state helpers — workspace_state_write (atomic jq>tmp+mv), workspace_state_read, workspace_state_validate; schema {run_id, started, phase, repos[{name, snapshot_ref, sha256_pre_ref, status}]} (WS-06, WS-07)
+- [x] 30-01-PLAN.md — Wave 1: lib/workspace.sh state helpers — workspace_state_write (atomic jq>tmp+mv), workspace_state_read, workspace_state_validate; schema {run_id, started, phase, repos[{name, snapshot_ref, sha256_pre_ref, status}]} (WS-06, WS-07)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -243,4 +243,4 @@ Plans:
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 3/3 | Complete    | 2026-06-03 |
-| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 1/5 | In Progress|  |
+| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 2/5 | In Progress|  |
