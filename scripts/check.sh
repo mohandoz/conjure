@@ -26,7 +26,12 @@ sha256_file() {
 # Build manifest (relative harness paths) into a temp file.
 # bash 3.2 compatible: no declare -A, no mapfile, no local -n.
 MANIFEST="$(mktemp)"
-trap 'rm -f "$MANIFEST"' EXIT
+# Single EXIT trap for ALL tempfiles. bash has one EXIT trap slot — registering
+# a second `trap ... EXIT` later would silently clobber this one and leak files
+# (WR-02). The cleanup function rm -f's every tempfile the script may create;
+# unset vars expand to empty via the :- default and are harmless.
+_check_cleanup() { rm -f "${MANIFEST:-}" "${_SCHM03_TMP:-}" "${_SCHM04_NEWER:-}"; }
+trap _check_cleanup EXIT
 
 # Root dotfiles (3)
 printf '%s\n' ".editorconfig" ".gitattributes" ".claudeignore" >> "$MANIFEST"
@@ -165,7 +170,9 @@ if [ -f "${TARGET}/.claude/settings.json" ] && \
    command -v jq >/dev/null 2>&1 && \
    [ -f "$SCHEMA_FILE" ]; then
   _SCHM03_TMP="$(mktemp)"
-  trap 'rm -f "${_SCHM03_TMP:-}"' EXIT
+  # No per-block EXIT trap here — _check_cleanup (registered near line 29)
+  # already rm -f's _SCHM03_TMP. Re-registering would clobber the MANIFEST
+  # cleanup and leak it (WR-02).
 
   _KNOWN_EVENTS="$(jq -r '.hook_events[]' "$SCHEMA_FILE" 2>/dev/null)"
   _RENAMED_ENTRIES="$(jq -r '.renamed_events // {} | to_entries[] | "\(.key)=\(.value)"' "$SCHEMA_FILE" 2>/dev/null)"
@@ -208,9 +215,17 @@ if [ "$CONJURE_SCHEMA" = "1" ] && \
    [ -f "${TARGET}/.claude/settings.json" ] && \
    command -v jq >/dev/null 2>&1 && \
    [ -f "$SCHEMA_FILE" ]; then
+  # WR-04: under --porcelain the human-readable report must NOT land on stdout
+  # (it interleaves with the M/R/A machine lines and corrupts any consumer).
+  # Route every SCHM-04 line through _schm04_out: stderr when porcelain (mirrors
+  # SCHM-03's >&2), stdout otherwise.
+  _schm04_out() { if [ "$PORCELAIN" = "1" ]; then printf '%s\n' "$1" >&2; else printf '%s\n' "$1"; fi; }
+
   # CC version detection (Pattern 5: parse claude --version; absent → warn + use schema baseline)
   _CC_VER=""
+  _CC_PRESENT=0
   if command -v claude >/dev/null 2>&1; then
+    _CC_PRESENT=1
     _CC_VER="$(claude --version 2>/dev/null | awk '{print $1}')"
     if ! printf '%s\n' "$_CC_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
       _CC_VER=""
@@ -218,24 +233,50 @@ if [ "$CONJURE_SCHEMA" = "1" ] && \
   fi
   _SCHEMA_CC_VER="$(jq -r '.cc_version // "unknown"' "$SCHEMA_FILE" 2>/dev/null)"
   if [ -z "$_CC_VER" ]; then
-    printf 'SCHM-04 [warn] claude not found on PATH — using bundled schema baseline (cc_version: %s)\n' \
-      "$_SCHEMA_CC_VER"
+    _schm04_out "$(printf 'SCHM-04 [warn] claude not found on PATH — using bundled schema baseline (cc_version: %s)' "$_SCHEMA_CC_VER")"
     _CC_VER="$_SCHEMA_CC_VER"
+    # claude absent (or unparseable) → skip the forward-compat comparison below.
+    _CC_PRESENT=0
   fi
 
   _SCHEMA_GEN="$(jq -r '.generated // "unknown"' "$SCHEMA_FILE" 2>/dev/null)"
-  printf '\n'
-  printf '── Schema Version Report (--schema) ──────────────────────────\n'
-  printf '  Bundled schema: CC v%s (lib/cc-schema.json generated %s)\n' \
-    "$_SCHEMA_CC_VER" "$_SCHEMA_GEN"
-  printf '  Detected CC version: %s\n' "$_CC_VER"
-  printf '\n'
-  printf '  Settings keys in this harness and CC version introduced:\n'
+  _schm04_out ""
+  _schm04_out "── Schema Version Report (--schema) ──────────────────────────"
+  _schm04_out "$(printf '  Bundled schema: CC v%s (lib/cc-schema.json generated %s)' "$_SCHEMA_CC_VER" "$_SCHEMA_GEN")"
+  _schm04_out "$(printf '  Detected CC version: %s' "$_CC_VER")"
+  _schm04_out ""
+  _schm04_out "  Settings keys in this harness and CC version introduced:"
+  # WR-05: collect keys whose introduced_version is NEWER than the detected CC
+  # version into a tempfile so the post-loop WARN runs in the main shell
+  # (the while-loop body is a subshell under the jq pipe).
+  _SCHM04_NEWER="$(mktemp)"
   jq -r 'keys[]' "${TARGET}/.claude/settings.json" 2>/dev/null | while IFS= read -r _key; do
     _intro="$(jq -r --arg k "$_key" '.settings_keys[$k] // "unknown"' "$SCHEMA_FILE" 2>/dev/null)"
-    printf '    %-40s introduced: %s\n' "$_key" "$_intro"
+    _schm04_out "$(printf '    %-40s introduced: %s' "$_key" "$_intro")"
+    # WR-05 comparison: flag keys the running CC cannot yet honor. Only when CC
+    # was actually detected (_CC_PRESENT=1), the introduced version is a real
+    # semver (not "all"/"unknown"), and introduced_version > detected CC version.
+    if [ "$_CC_PRESENT" = "1" ] && \
+       printf '%s\n' "$_intro" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+      # POSIX-safe numeric semver compare via sort -V: if the GREATER of the two
+      # is _intro AND they differ, _intro is newer than the detected CC version.
+      _greater="$(printf '%s\n%s\n' "$_CC_VER" "$_intro" | sort -V | tail -1)"
+      if [ "$_greater" = "$_intro" ] && [ "$_intro" != "$_CC_VER" ]; then
+        printf '%s|%s\n' "$_key" "$_intro" >> "$_SCHM04_NEWER"
+      fi
+    fi
   done
-  printf '─────────────────────────────────────────────────────────────\n'
+  _schm04_out "─────────────────────────────────────────────────────────────"
+
+  # WR-05: emit an advisory WARN (never fail — newer-than-known is advisory per
+  # the SCHM-04 non-goal) for each key introduced after the detected CC version.
+  if [ -s "$_SCHM04_NEWER" ]; then
+    while IFS='|' read -r _nk _nv; do
+      [ -z "$_nk" ] && continue
+      _schm04_out "$(printf 'SCHM-04 [warn] settings key "%s" was introduced in CC v%s, newer than detected CC v%s — your installed Claude Code may not honor it yet' "$_nk" "$_nv" "$_CC_VER")"
+    done < "$_SCHM04_NEWER"
+  fi
+  rm -f "$_SCHM04_NEWER"
 
   # Staleness advisory (Pattern 4: BSD date || GNU date || skip)
   _GEN_FIELD="$(jq -r '.generated // empty' "$SCHEMA_FILE" 2>/dev/null)"
@@ -246,8 +287,7 @@ if [ "$CONJURE_SCHEMA" = "1" ] && \
     if [ "$_GEN_EPOCH" != "0" ]; then
       _SCHEMA_AGE_DAYS=$(( ($(date +%s) - _GEN_EPOCH) / 86400 ))
       if [ "$_SCHEMA_AGE_DAYS" -gt 90 ]; then
-        printf 'SCHM-04 [warn] cc-schema.json is %s days old (>90) — Conjure update recommended\n' \
-          "$_SCHEMA_AGE_DAYS"
+        _schm04_out "$(printf 'SCHM-04 [warn] cc-schema.json is %s days old (>90) — Conjure update recommended' "$_SCHEMA_AGE_DAYS")"
       fi
     fi
   fi
