@@ -4070,6 +4070,31 @@ fi
 rm -rf "$P25_PLUG05_DIR"
 trap - EXIT
 
+# PLUG-05-blank: blank/whitespace-only .conjure-version falls through to git SHA (WR-01)
+# Regression guard: tr -d '[:space:]' on a blank file must NOT emit "version": ""
+P25_PLUG05B_DIR="$(mktemp -d)"
+trap 'rm -rf "$P25_PLUG05B_DIR"' EXIT
+git -C "$P25_PLUG05B_DIR" init -q
+git -C "$P25_PLUG05B_DIR" config user.email "test@conjure"
+git -C "$P25_PLUG05B_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-plugin/harness/." "$P25_PLUG05B_DIR/"
+printf '\n' > "$P25_PLUG05B_DIR/.conjure-version"   # whitespace-only
+git -C "$P25_PLUG05B_DIR" add -A
+git -C "$P25_PLUG05B_DIR" commit -q -m "test fixture"
+if [ "$P25_EMIT_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P25_EMIT_SH" --path "$P25_PLUG05B_DIR" >/dev/null 2>&1
+  VER="$(jq -r '.version' "$P25_PLUG05B_DIR/.claude-plugin/plugin.json")"
+  if printf '%s' "$VER" | grep -qE '^[0-9a-f]{40}$'; then
+    pass "emit-plugin falls through to git SHA when .conjure-version is blank (PLUG-05-blank)"
+  else
+    fail "emit-plugin emitted version '$VER' for blank .conjure-version — expected git SHA (PLUG-05-blank)"
+  fi
+else
+  fail "emit-plugin.sh not found — Wave 1 must create scripts/emit-plugin.sh (PLUG-05-blank)"
+fi
+rm -rf "$P25_PLUG05B_DIR"
+trap - EXIT
+
 # PLUG-04: schema validation blocks write on invalid manifest
 # Strategy: harness with empty .claude/ (no skills/agents) and a pre-existing plugin.json
 # missing the required "name" field — bundled schema check must exit 2

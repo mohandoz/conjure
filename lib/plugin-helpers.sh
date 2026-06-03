@@ -178,8 +178,15 @@ resolve_version() {
   # whitespace so a trailing newline / multi-line / padded file does not corrupt the
   # version embedded in plugin.json / marketplace.json (WR-05).
   if [ -f "$target/.conjure-version" ]; then
-    head -1 "$target/.conjure-version" | tr -d '[:space:]'
-    return 0
+    local _ver
+    _ver="$(head -1 "$target/.conjure-version" | tr -d '[:space:]')"
+    if [ -n "$_ver" ]; then
+      printf '%s' "$_ver"
+      return 0
+    fi
+    # Blank / whitespace-only file: do not emit an empty version (WR-01) — fall
+    # through to the git-SHA (Tier 2) / 0.0.0 (Tier 3) fallbacks below.
+    echo "WARN: .conjure-version is empty — falling back to git SHA / 0.0.0" >&2
   fi
 
   # Tier 2: git HEAD SHA
