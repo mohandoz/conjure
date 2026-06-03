@@ -60,15 +60,17 @@ validate_plugin_json() {
   local content="$1"
   local errors=0
 
-  # Required: name (string)
-  if ! printf '%s' "$content" | jq -e '(.name | type) == "string"' >/dev/null 2>&1; then
-    echo "✗ plugin.json: 'name' is required and must be a string" >&2
+  # Required: name (non-empty string). An empty string is a string, so the bare
+  # type check let "name": "" through to mutate_write (WR-02). Reject blank names.
+  if ! printf '%s' "$content" | jq -e '(.name | type) == "string" and (.name | length > 0)' >/dev/null 2>&1; then
+    echo "✗ plugin.json: 'name' is required and must be a non-empty string" >&2
     errors=$((errors + 1))
   fi
 
-  # Optional typed: version must be string if present
-  if ! printf '%s' "$content" | jq -e 'if .version then (.version | type) == "string" else true end' >/dev/null 2>&1; then
-    echo "✗ plugin.json: 'version' must be a string" >&2
+  # Optional typed: version must be a non-empty string if present. jq treats ""
+  # as truthy, so a blank .conjure-version slipped through here too (WR-02 / WR-01).
+  if ! printf '%s' "$content" | jq -e 'if (.version != null) then ((.version | type) == "string" and (.version | length > 0)) else true end' >/dev/null 2>&1; then
+    echo "✗ plugin.json: 'version' must be a non-empty string" >&2
     errors=$((errors + 1))
   fi
 
