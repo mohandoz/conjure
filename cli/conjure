@@ -35,7 +35,7 @@ Usage:
                                                 from-aider, from-continue, from-copilot)
   conjure audit [target]
   conjure update [--check|--apply|--pr|--cron] [target]
-  conjure check [--porcelain] [target]
+  conjure check [--porcelain] [--schema] [target]
   conjure resolve [--dry-run] [target]
   conjure adopt [--dry-run] [--force] [--rollback] [--resume] [--start-fresh] [--apply-step <id>] [--update-manifest] [--full-inventory] [target]
   conjure refresh-graph [target] [--full|--update]
@@ -163,16 +163,17 @@ cmd_audit() {
 }
 
 cmd_check() {
-  local porcelain=0 target="$(pwd)"
+  local porcelain=0 schema=0 target="$(pwd)"
   while [ $# -gt 0 ]; do
     case "$1" in
       --porcelain)  porcelain=1 ;;
-      --help|-h)    echo "Usage: conjure check [--porcelain] [target]"; return 0 ;;
+      --schema)     schema=1 ;;
+      --help|-h)    echo "Usage: conjure check [--porcelain] [--schema] [target]"; return 0 ;;
       *)            target="$1" ;;
     esac
     shift
   done
-  CONJURE_HOME="$CONJURE_HOME" CONJURE_PORCELAIN="$porcelain" \
+  CONJURE_HOME="$CONJURE_HOME" CONJURE_PORCELAIN="$porcelain" CONJURE_SCHEMA="$schema" \
     bash "$CONJURE_HOME/scripts/check.sh" "$target"
 }
 
