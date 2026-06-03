@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "generated": "2026-06-04T00:00:00Z",
+  "repos": [
+    {"name": "alpha", "path": "repos/alpha", "tags": ["team-a"]},
+    {"name": "beta",  "path": "repos/beta",  "tags": ["team-a"]},
+    {"name": "gamma", "path": "repos/gamma", "tags": ["team-b"]}
+  ]
+}
