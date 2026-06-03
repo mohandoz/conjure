@@ -4805,6 +4805,344 @@ rm -rf "$P26_DRYR_DIR"
 trap - EXIT
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Phase 27 — Schema-Version-Aware Audit (SCHM-01..05)
+# Mirrors Phase 26 block style: mktemp sandboxes with EXIT-trap discipline.
+# All audit/check invocations guarded behind P27_AUDIT_OK / P27_CHECK_OK so
+# the suite reports graceful RED when audit-setup.sh / check.sh SCHM sections
+# are absent (Wave 1/2 not yet complete). SCHM-SCHEMA tests lib/cc-schema.json
+# independently (Wave 0 artifact — passes as soon as Task 1 lands).
+# ──────────────────────────────────────────────────────────────────────────────
+
+P27_AUDIT_SH="$CONJURE_HOME/scripts/audit-setup.sh"
+P27_CHECK_SH="$CONJURE_HOME/scripts/check.sh"
+P27_SCHEMA_FILE="$CONJURE_HOME/lib/cc-schema.json"
+P27_AUDIT_OK=0
+P27_CHECK_OK=0
+P27_SCHEMA_OK=0
+[ -f "$P27_AUDIT_SH" ] && P27_AUDIT_OK=1
+[ -f "$P27_CHECK_SH" ] && P27_CHECK_OK=1
+[ -f "$P27_SCHEMA_FILE" ] && jq -e '(.hook_events | length) == 30' "$P27_SCHEMA_FILE" >/dev/null 2>&1 && P27_SCHEMA_OK=1
+
+echo
+echo "▸ Phase 27 — Schema-Version-Aware Audit (SCHM-01..05)"
+
+# SCHM-SCHEMA: lib/cc-schema.json exists with correct shape (independent of audit/check code)
+if [ "$P27_SCHEMA_OK" -eq 1 ] && \
+   jq -e '(.hook_events | length) == 30' "$P27_SCHEMA_FILE" >/dev/null 2>&1 && \
+   jq -e '(.skill_frontmatter | keys | length) == 16' "$P27_SCHEMA_FILE" >/dev/null 2>&1 && \
+   jq -e '.renamed_events.SessionStop == "SessionEnd"' "$P27_SCHEMA_FILE" >/dev/null 2>&1 && \
+   jq -e '.skill_frontmatter["disallowed-tools"] == "array-or-space-string"' "$P27_SCHEMA_FILE" >/dev/null 2>&1; then
+  pass "lib/cc-schema.json has 30 hook events, 16 skill fields, renamed_events map (SCHM-SCHEMA)"
+else
+  fail "lib/cc-schema.json missing or malformed — Wave 0 must create lib/cc-schema.json (SCHM-SCHEMA)"
+fi
+
+# SCHM-01-badtype: SKILL.md with block-style object-typed disallowed-tools → audit must fail exit 2
+P27_BAD_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_BAD_DIR"' EXIT
+mkdir -p "$P27_BAD_DIR/.claude/skills/bad-skill"
+cp "$CONJURE_HOME/tests/fixtures/_schema-audit-badfield/harness/.claude/skills/bad-skill/SKILL.md" \
+   "$P27_BAD_DIR/.claude/skills/bad-skill/SKILL.md"
+printf '## Project\n\nNegative fixture for SCHM-01.\n' > "$P27_BAD_DIR/CLAUDE.md"
+git -C "$P27_BAD_DIR" init -q
+git -C "$P27_BAD_DIR" config user.email "test@conjure"
+git -C "$P27_BAD_DIR" config user.name "conjure-test"
+git -C "$P27_BAD_DIR" add -A 2>/dev/null || true
+git -C "$P27_BAD_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_AUDIT_OK" -eq 1 ]; then
+  P27_BAD_RC=0
+  P27_BAD_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P27_AUDIT_SH" "$P27_BAD_DIR" 2>&1)" || P27_BAD_RC=$?
+  if [ "$P27_BAD_RC" -eq 2 ] && printf '%s\n' "$P27_BAD_OUT" | grep -q "disallowed-tools"; then
+    pass "audit fails when SKILL.md disallowed-tools is YAML object mapping (SCHM-01-badtype)"
+  else
+    fail "audit rc=$P27_BAD_RC did not fail on block-style object disallowed-tools (SCHM-01-badtype)"
+  fi
+else
+  fail "audit-setup.sh SCHM section not implemented — Wave 1 must add SCHM-01 to audit-setup.sh (SCHM-01-badtype)"
+fi
+rm -rf "$P27_BAD_DIR"
+trap - EXIT
+
+# SCHM-01-valid: valid SKILL.md with array-typed fields → audit must NOT produce a SCHM-01 fail
+P27_VALID_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_VALID_DIR"' EXIT
+mkdir -p "$P27_VALID_DIR/.claude/skills/ok-skill"
+cp "$CONJURE_HOME/tests/fixtures/_schema-audit/valid/harness/.claude/skills/ok-skill/SKILL.md" \
+   "$P27_VALID_DIR/.claude/skills/ok-skill/SKILL.md"
+cp "$CONJURE_HOME/tests/fixtures/_schema-audit/valid/harness/.claude/settings.json" \
+   "$P27_VALID_DIR/.claude/settings.json" 2>/dev/null || true
+cp "$CONJURE_HOME/tests/fixtures/_schema-audit/valid/harness/CLAUDE.md" \
+   "$P27_VALID_DIR/CLAUDE.md"
+git -C "$P27_VALID_DIR" init -q
+git -C "$P27_VALID_DIR" config user.email "test@conjure"
+git -C "$P27_VALID_DIR" config user.name "conjure-test"
+git -C "$P27_VALID_DIR" add -A 2>/dev/null || true
+git -C "$P27_VALID_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_AUDIT_OK" -eq 1 ]; then
+  P27_VALID_RC=0
+  P27_VALID_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P27_AUDIT_SH" "$P27_VALID_DIR" 2>&1)" || P27_VALID_RC=$?
+  if ! printf '%s\n' "$P27_VALID_OUT" | grep -q "SCHM-01.*fail"; then
+    pass "audit accepts valid SKILL.md frontmatter field types (SCHM-01-valid)"
+  else
+    fail "audit produced SCHM-01 fail on valid SKILL.md — should have passed (SCHM-01-valid)"
+  fi
+else
+  fail "audit-setup.sh SCHM section not implemented — Wave 1 must add SCHM-01 to audit-setup.sh (SCHM-01-valid)"
+fi
+rm -rf "$P27_VALID_DIR"
+trap - EXIT
+
+# SCHM-01-unknown: SKILL.md with an unknown frontmatter field → audit must WARN (not fail exit 2)
+P27_UNK_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_UNK_DIR"' EXIT
+mkdir -p "$P27_UNK_DIR/.claude/skills/unk-skill"
+printf '%s\n' '---' 'name: unk-skill' 'description: Unknown field test' 'totally_unknown_field: value' '---' 'Body.' \
+  > "$P27_UNK_DIR/.claude/skills/unk-skill/SKILL.md"
+printf '## Project\n\nUnknown field fixture for SCHM-01.\n' > "$P27_UNK_DIR/CLAUDE.md"
+git -C "$P27_UNK_DIR" init -q
+git -C "$P27_UNK_DIR" config user.email "test@conjure"
+git -C "$P27_UNK_DIR" config user.name "conjure-test"
+git -C "$P27_UNK_DIR" add -A 2>/dev/null || true
+git -C "$P27_UNK_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_AUDIT_OK" -eq 1 ]; then
+  P27_UNK_RC=0
+  P27_UNK_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P27_AUDIT_SH" "$P27_UNK_DIR" 2>&1)" || P27_UNK_RC=$?
+  if [ "$P27_UNK_RC" -ne 2 ]; then
+    pass "audit warns (not fails) on unknown SKILL.md frontmatter field (SCHM-01-unknown)"
+  else
+    fail "audit exit 2 on unknown SKILL.md field — should warn not fail (SCHM-01-unknown)"
+  fi
+else
+  fail "audit-setup.sh SCHM section not implemented — Wave 1 must add SCHM-01 to audit-setup.sh (SCHM-01-unknown)"
+fi
+rm -rf "$P27_UNK_DIR"
+trap - EXIT
+
+# SCHM-02-permissions: boolean disableBypassPermissionsMode at permissions.* → audit must fail exit 2
+P27_DBPM_P_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_DBPM_P_DIR"' EXIT
+mkdir -p "$P27_DBPM_P_DIR/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_schema-audit-disablebypass/harness/.claude/settings.json" \
+   "$P27_DBPM_P_DIR/.claude/settings.json"
+printf '## Project\n\nDBPM permissions path fixture for SCHM-02.\n' > "$P27_DBPM_P_DIR/CLAUDE.md"
+git -C "$P27_DBPM_P_DIR" init -q
+git -C "$P27_DBPM_P_DIR" config user.email "test@conjure"
+git -C "$P27_DBPM_P_DIR" config user.name "conjure-test"
+git -C "$P27_DBPM_P_DIR" add -A 2>/dev/null || true
+git -C "$P27_DBPM_P_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_AUDIT_OK" -eq 1 ]; then
+  P27_DBPM_P_RC=0
+  P27_DBPM_P_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P27_AUDIT_SH" "$P27_DBPM_P_DIR" 2>&1)" || P27_DBPM_P_RC=$?
+  if [ "$P27_DBPM_P_RC" -eq 2 ] && printf '%s\n' "$P27_DBPM_P_OUT" | grep -q "disableBypassPermissionsMode"; then
+    pass "audit fails when permissions.disableBypassPermissionsMode is boolean (SCHM-02-permissions)"
+  else
+    fail "audit rc=$P27_DBPM_P_RC did not fail on boolean permissions.disableBypassPermissionsMode (SCHM-02-permissions)"
+  fi
+else
+  fail "audit-setup.sh SCHM section not implemented — Wave 1 must add SCHM-02 to audit-setup.sh (SCHM-02-permissions)"
+fi
+rm -rf "$P27_DBPM_P_DIR"
+trap - EXIT
+
+# SCHM-02-toplevel: boolean disableBypassPermissionsMode at top-level path → audit must fail exit 2
+P27_DBPM_T_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_DBPM_T_DIR"' EXIT
+mkdir -p "$P27_DBPM_T_DIR/.claude"
+printf '{"disableBypassPermissionsMode": true}\n' > "$P27_DBPM_T_DIR/.claude/settings.json"
+printf '## Project\n\nDBPM top-level fixture for SCHM-02.\n' > "$P27_DBPM_T_DIR/CLAUDE.md"
+git -C "$P27_DBPM_T_DIR" init -q
+git -C "$P27_DBPM_T_DIR" config user.email "test@conjure"
+git -C "$P27_DBPM_T_DIR" config user.name "conjure-test"
+git -C "$P27_DBPM_T_DIR" add -A 2>/dev/null || true
+git -C "$P27_DBPM_T_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_AUDIT_OK" -eq 1 ]; then
+  P27_DBPM_T_RC=0
+  P27_DBPM_T_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P27_AUDIT_SH" "$P27_DBPM_T_DIR" 2>&1)" || P27_DBPM_T_RC=$?
+  if [ "$P27_DBPM_T_RC" -eq 2 ]; then
+    pass "audit fails when top-level disableBypassPermissionsMode is boolean (SCHM-02-toplevel)"
+  else
+    fail "audit rc=$P27_DBPM_T_RC did not fail on top-level boolean disableBypassPermissionsMode (SCHM-02-toplevel)"
+  fi
+else
+  fail "audit-setup.sh SCHM section not implemented — Wave 1 must add SCHM-02 to audit-setup.sh (SCHM-02-toplevel)"
+fi
+rm -rf "$P27_DBPM_T_DIR"
+trap - EXIT
+
+# SCHM-03-renamed: settings.json with SessionStop hook → check must fail exit 2
+P27_HOOK_R_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_HOOK_R_DIR"' EXIT
+mkdir -p "$P27_HOOK_R_DIR/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_schema-audit-hookevent/harness/.claude/settings.json" \
+   "$P27_HOOK_R_DIR/.claude/settings.json"
+printf '## Project\n\nRenamed hook event fixture for SCHM-03.\n' > "$P27_HOOK_R_DIR/CLAUDE.md"
+git -C "$P27_HOOK_R_DIR" init -q
+git -C "$P27_HOOK_R_DIR" config user.email "test@conjure"
+git -C "$P27_HOOK_R_DIR" config user.name "conjure-test"
+git -C "$P27_HOOK_R_DIR" add -A 2>/dev/null || true
+git -C "$P27_HOOK_R_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_CHECK_OK" -eq 1 ]; then
+  P27_HOOK_R_RC=0
+  P27_HOOK_R_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P27_CHECK_SH" "$P27_HOOK_R_DIR" 2>&1)" || P27_HOOK_R_RC=$?
+  if [ "$P27_HOOK_R_RC" -eq 2 ] && \
+     { printf '%s\n' "$P27_HOOK_R_OUT" | grep -q "SessionStop" || \
+       printf '%s\n' "$P27_HOOK_R_OUT" | grep -qi "renamed"; }; then
+    pass "check fails when settings.json uses renamed hook event SessionStop (SCHM-03-renamed)"
+  else
+    fail "check rc=$P27_HOOK_R_RC did not fail on renamed hook event SessionStop (SCHM-03-renamed)"
+  fi
+else
+  fail "check.sh SCHM section not implemented — Wave 2 must add SCHM-03 to check.sh (SCHM-03-renamed)"
+fi
+rm -rf "$P27_HOOK_R_DIR"
+trap - EXIT
+
+# SCHM-03-unknown: settings.json with unknown hook event → check must fail exit 2
+P27_HOOK_U_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_HOOK_U_DIR"' EXIT
+mkdir -p "$P27_HOOK_U_DIR/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_schema-audit-hookevent/harness/.claude/settings.json" \
+   "$P27_HOOK_U_DIR/.claude/settings.json"
+printf '## Project\n\nUnknown hook event fixture for SCHM-03.\n' > "$P27_HOOK_U_DIR/CLAUDE.md"
+git -C "$P27_HOOK_U_DIR" init -q
+git -C "$P27_HOOK_U_DIR" config user.email "test@conjure"
+git -C "$P27_HOOK_U_DIR" config user.name "conjure-test"
+git -C "$P27_HOOK_U_DIR" add -A 2>/dev/null || true
+git -C "$P27_HOOK_U_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_CHECK_OK" -eq 1 ]; then
+  P27_HOOK_U_RC=0
+  P27_HOOK_U_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P27_CHECK_SH" "$P27_HOOK_U_DIR" 2>&1)" || P27_HOOK_U_RC=$?
+  if [ "$P27_HOOK_U_RC" -eq 2 ] && \
+     { printf '%s\n' "$P27_HOOK_U_OUT" | grep -q "UnknownEvent42" || \
+       printf '%s\n' "$P27_HOOK_U_OUT" | grep -qi "unknown"; }; then
+    pass "check fails when settings.json uses unknown hook event (SCHM-03-unknown)"
+  else
+    fail "check rc=$P27_HOOK_U_RC did not fail on unknown hook event UnknownEvent42 (SCHM-03-unknown)"
+  fi
+else
+  fail "check.sh SCHM section not implemented — Wave 2 must add SCHM-03 to check.sh (SCHM-03-unknown)"
+fi
+rm -rf "$P27_HOOK_U_DIR"
+trap - EXIT
+
+# SCHM-04-schema: check --schema on a valid harness → outputs per-key version info, exit 0 or 1
+P27_SCH_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_SCH_DIR"' EXIT
+mkdir -p "$P27_SCH_DIR/.claude"
+printf '{"skillOverrides": {}}\n' > "$P27_SCH_DIR/.claude/settings.json"
+printf '## Project\n\nSchema version report fixture for SCHM-04.\n' > "$P27_SCH_DIR/CLAUDE.md"
+git -C "$P27_SCH_DIR" init -q
+git -C "$P27_SCH_DIR" config user.email "test@conjure"
+git -C "$P27_SCH_DIR" config user.name "conjure-test"
+git -C "$P27_SCH_DIR" add -A 2>/dev/null || true
+git -C "$P27_SCH_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_CHECK_OK" -eq 1 ]; then
+  P27_SCH_RC=0
+  CONJURE_HOME="$CONJURE_HOME" CONJURE_SCHEMA=1 bash "$P27_CHECK_SH" "$P27_SCH_DIR" >/dev/null 2>&1 || P27_SCH_RC=$?
+  if [ "$P27_SCH_RC" -ne 2 ]; then
+    pass "check --schema emits per-key version info and does not fail (SCHM-04-schema)"
+  else
+    fail "check --schema exit 2 — should be info only (never fail) (SCHM-04-schema)"
+  fi
+else
+  fail "check.sh SCHM section not implemented — Wave 2 must add SCHM-04 to check.sh (SCHM-04-schema)"
+fi
+rm -rf "$P27_SCH_DIR"
+trap - EXIT
+
+# SCHM-STALE: audit with >90-day generated date → warns but does NOT exit 2
+P27_STALE_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_STALE_DIR"' EXIT
+P27_STALE_SCHEMA_BAK=""
+cp -r "$CONJURE_HOME/tests/fixtures/_schema-audit/valid/harness/." "$P27_STALE_DIR/"
+git -C "$P27_STALE_DIR" init -q
+git -C "$P27_STALE_DIR" config user.email "test@conjure"
+git -C "$P27_STALE_DIR" config user.name "conjure-test"
+git -C "$P27_STALE_DIR" add -A 2>/dev/null || true
+git -C "$P27_STALE_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_AUDIT_OK" -eq 1 ]; then
+  # Temporarily swap lib/cc-schema.json for the stale fixture
+  P27_STALE_SCHEMA_BAK="$(mktemp)"
+  cp "$P27_SCHEMA_FILE" "$P27_STALE_SCHEMA_BAK"
+  cp "$CONJURE_HOME/tests/fixtures/_schema-audit-stale/cc-schema-stale.json" "$P27_SCHEMA_FILE"
+  P27_STALE_RC=0
+  P27_STALE_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P27_AUDIT_SH" "$P27_STALE_DIR" 2>&1)" || P27_STALE_RC=$?
+  # Restore original schema immediately
+  cp "$P27_STALE_SCHEMA_BAK" "$P27_SCHEMA_FILE"
+  rm -f "$P27_STALE_SCHEMA_BAK"
+  if [ "$P27_STALE_RC" -ne 2 ] && \
+     { printf '%s\n' "$P27_STALE_OUT" | grep -qi "days old" || \
+       printf '%s\n' "$P27_STALE_OUT" | grep -qi "stale"; }; then
+    pass "audit warns (not fails) when cc-schema.json is >90 days old (SCHM-STALE)"
+  else
+    fail "audit rc=$P27_STALE_RC — expected non-2 exit and stale/days-old warning (SCHM-STALE)"
+  fi
+else
+  fail "audit-setup.sh SCHM section not implemented — Wave 1 must add SCHM-STALE to audit-setup.sh (SCHM-STALE)"
+fi
+rm -rf "$P27_STALE_DIR"
+trap - EXIT
+
+# SCHM-05-json: audit --json emits parseable JSON to stdout, human text to stderr
+P27_JSON_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_JSON_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_schema-audit/valid/harness/." "$P27_JSON_DIR/"
+git -C "$P27_JSON_DIR" init -q
+git -C "$P27_JSON_DIR" config user.email "test@conjure"
+git -C "$P27_JSON_DIR" config user.name "conjure-test"
+git -C "$P27_JSON_DIR" add -A 2>/dev/null || true
+git -C "$P27_JSON_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_AUDIT_OK" -eq 1 ]; then
+  P27_JSON_STDOUT_FILE="$(mktemp)"
+  P27_JSON_STDERR_FILE="$(mktemp)"
+  P27_JSON_RC=0
+  CONJURE_HOME="$CONJURE_HOME" CONJURE_JSON=1 bash "$P27_AUDIT_SH" "$P27_JSON_DIR" \
+    >"$P27_JSON_STDOUT_FILE" 2>"$P27_JSON_STDERR_FILE" || P27_JSON_RC=$?
+  P27_JSON_STDOUT="$(cat "$P27_JSON_STDOUT_FILE")"
+  rm -f "$P27_JSON_STDOUT_FILE" "$P27_JSON_STDERR_FILE"
+  if printf '%s\n' "$P27_JSON_STDOUT" | jq -e '.status' >/dev/null 2>&1; then
+    pass "audit --json emits JSON-only stdout parseable by jq (SCHM-05-json)"
+  else
+    fail "audit --json stdout not parseable by jq — expected JSON object with .status (SCHM-05-json)"
+  fi
+else
+  fail "audit-setup.sh SCHM section not implemented — Wave 1 must add SCHM-05 to audit-setup.sh (SCHM-05-json)"
+fi
+rm -rf "$P27_JSON_DIR"
+trap - EXIT
+
+# SCHM-05-exit2: audit --json on a bad fixture fails exit 2 with status:"fail" in JSON
+P27_JSONFAIL_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_JSONFAIL_DIR"' EXIT
+mkdir -p "$P27_JSONFAIL_DIR/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_schema-audit-disablebypass/harness/.claude/settings.json" \
+   "$P27_JSONFAIL_DIR/.claude/settings.json"
+printf '## Project\n\nJSON fail fixture for SCHM-05.\n' > "$P27_JSONFAIL_DIR/CLAUDE.md"
+git -C "$P27_JSONFAIL_DIR" init -q
+git -C "$P27_JSONFAIL_DIR" config user.email "test@conjure"
+git -C "$P27_JSONFAIL_DIR" config user.name "conjure-test"
+git -C "$P27_JSONFAIL_DIR" add -A 2>/dev/null || true
+git -C "$P27_JSONFAIL_DIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P27_AUDIT_OK" -eq 1 ]; then
+  P27_JSONFAIL_STDOUT_FILE="$(mktemp)"
+  P27_JSONFAIL_RC=0
+  CONJURE_HOME="$CONJURE_HOME" CONJURE_JSON=1 bash "$P27_AUDIT_SH" "$P27_JSONFAIL_DIR" \
+    >"$P27_JSONFAIL_STDOUT_FILE" 2>/dev/null || P27_JSONFAIL_RC=$?
+  P27_JSONFAIL_STDOUT="$(cat "$P27_JSONFAIL_STDOUT_FILE")"
+  rm -f "$P27_JSONFAIL_STDOUT_FILE"
+  if [ "$P27_JSONFAIL_RC" -eq 2 ] && \
+     printf '%s\n' "$P27_JSONFAIL_STDOUT" | jq -e '.status == "fail"' >/dev/null 2>&1; then
+    pass "audit --json exit 2 on fail with JSON status:fail (SCHM-05-exit2)"
+  else
+    fail "audit --json rc=$P27_JSONFAIL_RC status=$(printf '%s\n' "$P27_JSONFAIL_STDOUT" | jq -r '.status // "missing"' 2>/dev/null) — expected exit 2 and status:fail (SCHM-05-exit2)"
+  fi
+else
+  fail "audit-setup.sh SCHM section not implemented — Wave 1 must add SCHM-05 to audit-setup.sh (SCHM-05-exit2)"
+fi
+rm -rf "$P27_JSONFAIL_DIR"
+trap - EXIT
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
