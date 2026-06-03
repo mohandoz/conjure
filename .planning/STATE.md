@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
-status: ready_to_plan
-last_updated: 2026-06-03T17:50:29.996Z
+status: executing
+last_updated: "2026-06-03T18:30:10.087Z"
 last_activity: 2026-06-03
 progress:
   total_phases: 6
   completed_phases: 4
-  total_plans: 16
-  completed_plans: 16
+  total_plans: 19
+  completed_plans: 17
   percent: 67
-stopped_at: Phase 28 complete (4/4) — ready to discuss Phase 29
 ---
 
 # Project State
@@ -21,13 +20,13 @@ stopped_at: Phase 28 complete (4/4) — ready to discuss Phase 29
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** A developer can turn any repo into a production-grade, eval-backed Claude Code harness with one trustworthy command — and keep it healthy over time.
-**Current focus:** Phase 29 — workspace orchestration — read only
+**Current focus:** Phase 29 — workspace-orchestration-read-only
 
 ## Current Position
 
-Phase: 29
-Plan: Not started
-Status: Ready to plan
+Phase: 29 (workspace-orchestration-read-only) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
 Last activity: 2026-06-03
 
 ## Performance Metrics
@@ -131,7 +130,7 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T17:06:14.078Z
+Last session: 2026-06-03T18:30:10.082Z
 Stopped at: Completed Phase 27 Plan 01: SCHM-01 + SCHM-02 implemented in audit-setup.sh
 Resume file: None
 

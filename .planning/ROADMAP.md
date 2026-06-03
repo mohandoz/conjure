@@ -181,7 +181,7 @@ Plans:
 Plans:
 **Wave 0**
 
-- [ ] 29-00-PLAN.md — Wave 0: workspace fixtures (_workspace/ 3-repo tree + gamma-bad audit-fail variant + _workspace-badpath/ bad-path manifest) + graceful-red WS test block in tests/run.sh (WS-01..04 Nyquist)
+- [x] 29-00-PLAN.md — Wave 0: workspace fixtures (_workspace/ 3-repo tree + gamma-bad audit-fail variant + _workspace-badpath/ bad-path manifest) + graceful-red WS test block in tests/run.sh (WS-01..04 Nyquist)
 
 **Wave 1** *(blocked on Wave 0 completion)*
 
@@ -221,5 +221,5 @@ Plans:
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/3 | Not started | - |
+| 29. Workspace Orchestration — Read-Only | v0.7.0 | 1/3 | In Progress|  |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |

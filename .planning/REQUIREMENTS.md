@@ -48,10 +48,10 @@ Build order (research consensus): **A plugin → B policy → C eval → D schem
 
 ### Cross-Repo / Workspace Orchestration (WS)
 
-- [ ] **WS-01**: `.conjure-workspace.json` manifest (schema + validation + parent-dir discovery, same pattern as `.conjure-version`)
-- [ ] **WS-02**: `conjure workspace init` discovers sibling repos containing `.claude/` (TTY prompt; non-TTY requires `--yes`); writes manifest via `mutate_write`
-- [ ] **WS-03**: `conjure workspace check` runs `conjure check --porcelain` per repo → aggregated per-repo status table
-- [ ] **WS-04**: `conjure workspace audit` runs `conjure audit --json` per repo → aggregated pass/fail + global summary
+- [x] **WS-01**: `.conjure-workspace.json` manifest (schema + validation + parent-dir discovery, same pattern as `.conjure-version`)
+- [x] **WS-02**: `conjure workspace init` discovers sibling repos containing `.claude/` (TTY prompt; non-TTY requires `--yes`); writes manifest via `mutate_write`
+- [x] **WS-03**: `conjure workspace check` runs `conjure check --porcelain` per repo → aggregated per-repo status table
+- [x] **WS-04**: `conjure workspace audit` runs `conjure audit --json` per repo → aggregated pass/fail + global summary
 - [ ] **WS-05**: `conjure workspace update` runs `conjure update` per repo serially, reports per-repo merge/conflict status, `--continue-on-error` (default stop-on-first-error)
 - [ ] **WS-06**: `conjure workspace adopt` across repos (optional tag filter), serial, **all snapshots taken before any apply** (saga); per-repo `.conjure-workspace-state.json` crash durability; stop-on-fail
 - [ ] **WS-07**: `conjure workspace adopt --rollback` rolls back each repo independently from its pre-run snapshot; SIGKILL-mid-batch → rollback yields per-repo sha256 zero-diff (CI fixture test)
@@ -131,10 +131,10 @@ Which phases cover which requirements. Populated during roadmap creation.
 | EVAL-03 | Phase 28 | Complete |
 | EVAL-04 | Phase 28 | Complete |
 | EVAL-05 | Phase 28 | Complete |
-| WS-01 | Phase 29 | Pending |
-| WS-02 | Phase 29 | Pending |
-| WS-03 | Phase 29 | Pending |
-| WS-04 | Phase 29 | Pending |
+| WS-01 | Phase 29 | Complete |
+| WS-02 | Phase 29 | Complete |
+| WS-03 | Phase 29 | Complete |
+| WS-04 | Phase 29 | Complete |
 | WS-05 | Phase 30 | Pending |
 | WS-06 | Phase 30 | Pending |
 | WS-07 | Phase 30 | Pending |
