@@ -5729,6 +5729,265 @@ rm -rf "$P28_RELBASE"
 trap - EXIT
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Phase 29 — Workspace Orchestration — Read-Only (WS-01..04)
+# Mirrors Phase 28 block style: mktemp sandboxes with EXIT-trap discipline.
+# All workspace.sh invocations guarded behind P29_WS_SH_OK so the suite reports
+# graceful RED when scripts/workspace.sh is absent (Wave 1 not yet complete).
+# lib/workspace.sh helper invocations guarded behind P29_WS_LIB_OK.
+# ──────────────────────────────────────────────────────────────────────────────
+
+P29_WS_LIB="$CONJURE_HOME/lib/workspace.sh"
+P29_WS_SH="$CONJURE_HOME/scripts/workspace.sh"
+P29_WS_LIB_OK=0
+P29_WS_SH_OK=0
+[ -f "$P29_WS_LIB" ] && P29_WS_LIB_OK=1
+[ -f "$P29_WS_SH" ] && P29_WS_SH_OK=1
+
+echo
+echo "▸ Phase 29 — Workspace Orchestration — Read-Only (WS-01..04)"
+
+# WS-01-manifest-valid: workspace_manifest_validate accepts a well-formed manifest
+P29_MV_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_MV_DIR"' EXIT
+cp "$CONJURE_HOME/tests/fixtures/_workspace/.conjure-workspace.json" "$P29_MV_DIR/.conjure-workspace.json"
+if [ "$P29_WS_LIB_OK" -eq 1 ]; then
+  # shellcheck source=/dev/null
+  . "$P29_WS_LIB"
+  P29_MV_RC=0
+  workspace_manifest_validate "$P29_MV_DIR/.conjure-workspace.json" || P29_MV_RC=$?
+  if [ "$P29_MV_RC" -eq 0 ]; then
+    pass "workspace_manifest_validate accepts a well-formed manifest (WS-01-manifest-valid)"
+  else
+    fail "workspace_manifest_validate rejected a valid manifest (exit $P29_MV_RC) (WS-01-manifest-valid)"
+  fi
+else
+  fail "lib/workspace.sh not implemented — Wave 1 must create it (WS-01-manifest-valid)"
+fi
+trap - EXIT
+rm -rf "$P29_MV_DIR"
+
+# WS-01-manifest-invalid: workspace_manifest_validate rejects malformed JSON with exit 2
+P29_MV2_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_MV2_DIR"' EXIT
+printf 'not-json\n' > "$P29_MV2_DIR/.conjure-workspace.json"
+if [ "$P29_WS_LIB_OK" -eq 1 ]; then
+  P29_MV2_RC=0
+  workspace_manifest_validate "$P29_MV2_DIR/.conjure-workspace.json" || P29_MV2_RC=$?
+  if [ "$P29_MV2_RC" -eq 2 ]; then
+    pass "workspace_manifest_validate rejects malformed manifest with exit 2 (WS-01-manifest-invalid)"
+  else
+    fail "workspace_manifest_validate returned $P29_MV2_RC (expected 2) for malformed JSON (WS-01-manifest-invalid)"
+  fi
+else
+  fail "lib/workspace.sh not implemented — Wave 1 must create it (WS-01-manifest-invalid)"
+fi
+trap - EXIT
+rm -rf "$P29_MV2_DIR"
+
+# WS-02-init-writes: workspace init --yes writes a valid manifest with relative paths
+P29_INIT_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_INIT_DIR"' EXIT
+mkdir -p "$P29_INIT_DIR/sib-a/.claude"
+mkdir -p "$P29_INIT_DIR/sib-b/.claude"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_INIT_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" init --yes "$P29_INIT_DIR" >/dev/null 2>&1 || P29_INIT_RC=$?
+  if [ "$P29_INIT_RC" -eq 0 ] && \
+     [ -f "$P29_INIT_DIR/.conjure-workspace.json" ] && \
+     jq empty "$P29_INIT_DIR/.conjure-workspace.json" >/dev/null 2>&1; then
+    P29_TOTAL="$(jq '.repos | length' "$P29_INIT_DIR/.conjure-workspace.json")"
+    P29_REL_COUNT="$(jq -r '.repos[].path' "$P29_INIT_DIR/.conjure-workspace.json" | grep -cv '^/')"
+    if [ "$P29_REL_COUNT" -eq "$P29_TOTAL" ]; then
+      pass "workspace init --yes writes valid .conjure-workspace.json (WS-02-init-writes)"
+    else
+      fail "workspace init wrote absolute paths (rel=$P29_REL_COUNT total=$P29_TOTAL) (WS-02-init-writes)"
+    fi
+  else
+    fail "workspace init --yes exit=$P29_INIT_RC or no manifest written (WS-02-init-writes)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 1 must create it (WS-02-init-writes)"
+fi
+trap - EXIT
+rm -rf "$P29_INIT_DIR"
+
+# WS-02-init-no-tty: workspace init without --yes in non-TTY exits 2 and writes no file
+P29_NOTTY_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_NOTTY_DIR"' EXIT
+mkdir -p "$P29_NOTTY_DIR/sib-a/.claude"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_NOTTY_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" init "$P29_NOTTY_DIR" </dev/null >/dev/null 2>&1 || P29_NOTTY_RC=$?
+  if [ "$P29_NOTTY_RC" -eq 2 ] && [ ! -f "$P29_NOTTY_DIR/.conjure-workspace.json" ]; then
+    pass "workspace init without --yes in non-TTY exits 2 and writes no file (WS-02-init-no-tty)"
+  else
+    fail "workspace init non-TTY: exit=$P29_NOTTY_RC file_written=$([ -f "$P29_NOTTY_DIR/.conjure-workspace.json" ] && echo yes || echo no) (WS-02-init-no-tty)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 1 must create it (WS-02-init-no-tty)"
+fi
+trap - EXIT
+rm -rf "$P29_NOTTY_DIR"
+
+# WS-03-check-table: workspace check on valid manifest emits a per-repo table
+P29_CHK_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_CHK_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_workspace/." "$P29_CHK_DIR/"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_CHK_RC=0
+  P29_CHK_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" check "$P29_CHK_DIR/.conjure-workspace.json" 2>&1)" || P29_CHK_RC=$?
+  if [ "$P29_CHK_RC" -le 1 ] && \
+     printf '%s\n' "$P29_CHK_OUT" | grep -q "alpha" && \
+     printf '%s\n' "$P29_CHK_OUT" | grep -q "beta"; then
+    pass "workspace check emits per-repo status table (WS-03-check-table)"
+  else
+    fail "workspace check exit=$P29_CHK_RC output missing alpha/beta rows (WS-03-check-table)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 1 must create it (WS-03-check-table)"
+fi
+trap - EXIT
+rm -rf "$P29_CHK_DIR"
+
+# WS-03-check-fail-tolerant: workspace check exits exactly 1 when one repo is unreadable
+P29_FTOL_DIR="$(mktemp -d)"
+trap 'chmod -R 755 "$P29_FTOL_DIR" 2>/dev/null; rm -rf "$P29_FTOL_DIR"' EXIT
+mkdir -p "$P29_FTOL_DIR/sib-ok-a/.claude"
+mkdir -p "$P29_FTOL_DIR/sib-ok-b/.claude"
+mkdir -p "$P29_FTOL_DIR/sib-err"
+printf '# sib-ok-a\n' > "$P29_FTOL_DIR/sib-ok-a/CLAUDE.md"
+printf '# sib-ok-b\n' > "$P29_FTOL_DIR/sib-ok-b/CLAUDE.md"
+printf '# sib-err\n' > "$P29_FTOL_DIR/sib-err/CLAUDE.md"
+printf '{"schema_version":1,"generated":"2026-06-03T00:00:00Z","repos":[{"name":"sib-ok-a","path":"sib-ok-a","tags":[]},{"name":"sib-err","path":"sib-err","tags":[]},{"name":"sib-ok-b","path":"sib-ok-b","tags":[]}]}\n' > "$P29_FTOL_DIR/.conjure-workspace.json"
+chmod 000 "$P29_FTOL_DIR/sib-err"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_FTOL_RC=0
+  P29_FTOL_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" check "$P29_FTOL_DIR/.conjure-workspace.json" 2>&1)" || P29_FTOL_RC=$?
+  chmod 755 "$P29_FTOL_DIR/sib-err" 2>/dev/null || true
+  if [ "$P29_FTOL_RC" -eq 1 ] && \
+     printf '%s\n' "$P29_FTOL_OUT" | grep -q "sib-ok-a" && \
+     printf '%s\n' "$P29_FTOL_OUT" | grep -q "sib-ok-b"; then
+    pass "workspace check exits exactly 1 when one repo is unreadable, remaining repos processed (WS-03-check-fail-tolerant)"
+  else
+    chmod 755 "$P29_FTOL_DIR/sib-err" 2>/dev/null || true
+    fail "workspace check exit=$P29_FTOL_RC (expected 1) or missing ok-repo rows (WS-03-check-fail-tolerant)"
+  fi
+else
+  chmod 755 "$P29_FTOL_DIR/sib-err" 2>/dev/null || true
+  fail "scripts/workspace.sh not implemented — Wave 1 must create it (WS-03-check-fail-tolerant)"
+fi
+trap - EXIT
+chmod -R 755 "$P29_FTOL_DIR" 2>/dev/null || true
+rm -rf "$P29_FTOL_DIR"
+
+# WS-03-check-badpath: workspace check skips bad-path repo with a warning and processes the rest
+P29_BPCHK_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_BPCHK_DIR"' EXIT
+cp "$CONJURE_HOME/tests/fixtures/_workspace-badpath/.conjure-workspace.json" "$P29_BPCHK_DIR/.conjure-workspace.json"
+mkdir -p "$P29_BPCHK_DIR/_workspace/repos/alpha/.claude"
+mkdir -p "$P29_BPCHK_DIR/_workspace/repos/beta/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_BPCHK_DIR/_workspace/repos/alpha/CLAUDE.md"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/beta/CLAUDE.md" "$P29_BPCHK_DIR/_workspace/repos/beta/CLAUDE.md"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_BPCHK_RC=0
+  P29_BPCHK_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" check "$P29_BPCHK_DIR/.conjure-workspace.json" 2>&1)" || P29_BPCHK_RC=$?
+  if [ "$P29_BPCHK_RC" -le 1 ] && \
+     { printf '%s\n' "$P29_BPCHK_OUT" | grep -qi "skip\|warn\|missing\|not found\|nonexistent"; }; then
+    pass "workspace check skips bad-path repo with warning and processes remaining repos (WS-03-check-badpath)"
+  else
+    fail "workspace check exit=$P29_BPCHK_RC missing skip/warn for bad path (WS-03-check-badpath)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 1 must create it (WS-03-check-badpath)"
+fi
+trap - EXIT
+rm -rf "$P29_BPCHK_DIR"
+
+# WS-04-audit-pass: workspace audit on all-good manifest exits 0 or 1
+P29_AUD_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_AUD_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_workspace/." "$P29_AUD_DIR/"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_AUD_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" audit "$P29_AUD_DIR/.conjure-workspace.json" >/dev/null 2>&1 || P29_AUD_RC=$?
+  if [ "$P29_AUD_RC" -le 1 ]; then
+    pass "workspace audit on all-good repos exits 0 or 1 (WS-04-audit-pass)"
+  else
+    fail "workspace audit exit=$P29_AUD_RC (expected 0 or 1) on all-good manifest (WS-04-audit-pass)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 2 must create it (WS-04-audit-pass)"
+fi
+trap - EXIT
+rm -rf "$P29_AUD_DIR"
+
+# WS-04-audit-fail: workspace audit exits 2 when any repo audit status is fail
+P29_AUDF_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_AUDF_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha" "$P29_AUDF_DIR/alpha"
+cp -r "$CONJURE_HOME/tests/fixtures/_workspace/repos/beta" "$P29_AUDF_DIR/beta"
+cp -r "$CONJURE_HOME/tests/fixtures/_workspace/repos/gamma-bad" "$P29_AUDF_DIR/gamma-bad"
+printf '{"schema_version":1,"generated":"2026-06-03T00:00:00Z","repos":[{"name":"alpha","path":"alpha","tags":[]},{"name":"beta","path":"beta","tags":[]},{"name":"gamma-bad","path":"gamma-bad","tags":[]}]}\n' > "$P29_AUDF_DIR/.conjure-workspace.json"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_AUDF_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" audit "$P29_AUDF_DIR/.conjure-workspace.json" >/dev/null 2>&1 || P29_AUDF_RC=$?
+  if [ "$P29_AUDF_RC" -eq 2 ]; then
+    pass "workspace audit exits 2 when any repo status is fail (WS-04-audit-fail)"
+  else
+    fail "workspace audit exit=$P29_AUDF_RC (expected 2) with failing repo (WS-04-audit-fail)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 2 must create it (WS-04-audit-fail)"
+fi
+trap - EXIT
+rm -rf "$P29_AUDF_DIR"
+
+# WS-04-audit-failfast: workspace audit --fail-fast stops at first failure
+P29_AFF_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_AFF_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/_workspace/repos/gamma-bad" "$P29_AFF_DIR/gamma-bad"
+cp -r "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha" "$P29_AFF_DIR/alpha"
+# gamma-bad is first so --fail-fast fires before alpha is processed
+printf '{"schema_version":1,"generated":"2026-06-03T00:00:00Z","repos":[{"name":"gamma-bad","path":"gamma-bad","tags":[]},{"name":"alpha","path":"alpha","tags":[]}]}\n' > "$P29_AFF_DIR/.conjure-workspace.json"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_AFF_RC=0
+  P29_AFF_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" audit --fail-fast "$P29_AFF_DIR/.conjure-workspace.json" 2>&1)" || P29_AFF_RC=$?
+  if [ "$P29_AFF_RC" -eq 2 ] && \
+     ! printf '%s\n' "$P29_AFF_OUT" | grep -q "^alpha"; then
+    pass "workspace audit --fail-fast stops at first failure (WS-04-audit-failfast)"
+  else
+    fail "workspace audit --fail-fast exit=$P29_AFF_RC or processed repos after failure (WS-04-audit-failfast)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 2 must create it (WS-04-audit-failfast)"
+fi
+trap - EXIT
+rm -rf "$P29_AFF_DIR"
+
+# WS-04-audit-badpath: workspace audit skips bad-path repo with warning and processes rest
+P29_AUDPB_DIR="$(mktemp -d)"
+trap 'rm -rf "$P29_AUDPB_DIR"' EXIT
+cp "$CONJURE_HOME/tests/fixtures/_workspace-badpath/.conjure-workspace.json" "$P29_AUDPB_DIR/.conjure-workspace.json"
+mkdir -p "$P29_AUDPB_DIR/_workspace/repos/alpha/.claude"
+mkdir -p "$P29_AUDPB_DIR/_workspace/repos/beta/.claude"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/alpha/CLAUDE.md" "$P29_AUDPB_DIR/_workspace/repos/alpha/CLAUDE.md"
+cp "$CONJURE_HOME/tests/fixtures/_workspace/repos/beta/CLAUDE.md" "$P29_AUDPB_DIR/_workspace/repos/beta/CLAUDE.md"
+if [ "$P29_WS_SH_OK" -eq 1 ]; then
+  P29_AUDPB_RC=0
+  P29_AUDPB_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P29_WS_SH" audit "$P29_AUDPB_DIR/.conjure-workspace.json" 2>&1)" || P29_AUDPB_RC=$?
+  if [ "$P29_AUDPB_RC" -le 1 ] && \
+     { printf '%s\n' "$P29_AUDPB_OUT" | grep -qi "skip\|warn\|missing\|not found\|nonexistent"; }; then
+    pass "workspace audit skips bad-path repo with warning and processes remaining repos (WS-04-audit-badpath)"
+  else
+    fail "workspace audit exit=$P29_AUDPB_RC missing skip/warn for bad path (WS-04-audit-badpath)"
+  fi
+else
+  fail "scripts/workspace.sh not implemented — Wave 2 must create it (WS-04-audit-badpath)"
+fi
+trap - EXIT
+rm -rf "$P29_AUDPB_DIR"
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
