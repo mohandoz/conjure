@@ -45,6 +45,7 @@ Usage:
   conjure publish [--submit] [--dry-run]
   conjure publish-skill <name> [--to <org/repo>] [--dry-run]
   conjure publish-plugin [--path <dir>] [--marketplace] [--enable] [--validate] [--dry-run]
+  conjure emit-policy --regime hipaa|soc2|gdpr|pci [--output DIR] [--managed-only|--mdm-only] [--dry-run]
   conjure version
   conjure help [<subcommand>]
 
@@ -506,6 +507,36 @@ cmd_publish_plugin() {
     bash "$CONJURE_HOME/scripts/emit-plugin.sh"
 }
 
+cmd_emit_policy() {
+  local regime output_dir target dryrun managed_only mdm_only
+  regime=""; output_dir=""; target="$(pwd)"; dryrun=0; managed_only=0; mdm_only=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --regime)       shift; regime="${1:-}" ;;
+      --regime=*)     regime="${1#--regime=}" ;;
+      --output)       shift; output_dir="${1:-}" ;;
+      --output=*)     output_dir="${1#--output=}" ;;
+      --path)         shift; target="${1:-}" ;;
+      --path=*)       target="${1#--path=}" ;;
+      --managed-only) managed_only=1 ;;
+      --mdm-only)     mdm_only=1 ;;
+      --dry-run)      dryrun=1 ;;
+      --help|-h)
+        echo "Usage: conjure emit-policy --regime hipaa|soc2|gdpr|pci [--output DIR] [--managed-only|--mdm-only] [--dry-run]"
+        return 0 ;;
+      *) echo "Unknown option: $1" >&2; return 2 ;;
+    esac
+    shift
+  done
+  CONJURE_HOME="$CONJURE_HOME" DRY_RUN="$dryrun" \
+    CONJURE_POLICY_REGIME="$regime" \
+    CONJURE_POLICY_OUTPUT="$output_dir" \
+    CONJURE_POLICY_TARGET="$target" \
+    CONJURE_POLICY_MANAGED_ONLY="$managed_only" \
+    CONJURE_POLICY_MDM_ONLY="$mdm_only" \
+    bash "$CONJURE_HOME/scripts/emit-policy.sh"
+}
+
 cmd_help() {
   if [ -n "${1:-}" ]; then
     local fn_name
@@ -532,6 +563,7 @@ case "${1:-help}" in
   publish)         shift; cmd_publish "$@"         ;;
   publish-skill)   shift; cmd_publish_skill "$@"   ;;
   publish-plugin)  shift; cmd_publish_plugin "$@"  ;;
+  emit-policy)     shift; cmd_emit_policy "$@"     ;;
   version|-v|--version) cmd_version                ;;
   help|-h|--help)  shift; cmd_help "$@"            ;;
   *)               echo "Unknown command: $1"; usage; exit 2 ;;
