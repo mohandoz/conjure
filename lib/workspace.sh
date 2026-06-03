@@ -130,6 +130,20 @@ workspace_discover_siblings() {
   local canon_parent
   canon_parent="$(cd "$parent" && pwd -P)"
 
+  # WR-01: `find` (without -L) does not descend into symlinked subdirectories, so a
+  # workspace member exposed via a symlink (parent/linked -> /elsewhere/repo containing
+  # .claude) would be silently dropped from discovery — a false "everything is monitored"
+  # signal. We deliberately do NOT switch to `find -L` (it re-introduces symlink-escape
+  # risk); instead we emit an explicit WARNING (to stderr) when a symlinked direct child
+  # that looks like a repo is skipped, so the operator knows it is not covered. stdout
+  # stays strictly canonical paths (IN-02).
+  local child
+  for child in "$parent"/*; do
+    [ -L "$child" ] || continue
+    [ -d "$child/.claude" ] || continue
+    printf '  ⚠ skipping symlinked repo (not added to manifest): %s\n' "$child" >&2
+  done
+
   # maxdepth 2: parent_dir/sibling/.claude — .claude is one level inside each sibling
   # Filter out the parent dir itself (in case parent_dir/.claude exists)
   find "$parent" -maxdepth 2 -name '.claude' -type d 2>/dev/null | while IFS= read -r claude_dir; do

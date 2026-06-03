@@ -6126,6 +6126,29 @@ fi
 trap - EXIT
 rm -rf "$P29_DID_ROOT"
 
+# WS-DISC-symlink-warn: workspace_discover_siblings WARNS (stderr) about a symlinked repo
+# instead of silently dropping it, and keeps stdout strictly to canonical paths. WR-01.
+P29_SLW_ROOT="$(mktemp -d)"
+trap 'rm -rf "$P29_SLW_ROOT"' EXIT
+mkdir -p "$P29_SLW_ROOT/ws/real-repo/.claude"
+mkdir -p "$P29_SLW_ROOT/elsewhere/linked-repo/.claude"
+ln -s "$P29_SLW_ROOT/elsewhere/linked-repo" "$P29_SLW_ROOT/ws/linked-repo"
+if [ "$P29_WS_LIB_OK" -eq 1 ]; then
+  P29_SLW_ERR="$P29_SLW_ROOT/_err.txt"
+  P29_SLW_OUT="$(workspace_discover_siblings "$P29_SLW_ROOT/ws" 2>"$P29_SLW_ERR")"
+  if grep -qi "symlink" "$P29_SLW_ERR" && \
+     printf '%s\n' "$P29_SLW_OUT" | grep -q "real-repo" && \
+     ! printf '%s\n' "$P29_SLW_OUT" | grep -q "linked-repo"; then
+    pass "workspace_discover_siblings warns about symlinked repos and keeps stdout canonical (WS-DISC-symlink-warn)"
+  else
+    fail "workspace_discover_siblings did not warn about / correctly handle symlinked repo (WS-DISC-symlink-warn)"
+  fi
+else
+  fail "lib/workspace.sh not implemented — Wave 1 must create it (WS-DISC-symlink-warn)"
+fi
+trap - EXIT
+rm -rf "$P29_SLW_ROOT"
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
