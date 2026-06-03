@@ -15,6 +15,8 @@ set -euo pipefail
 
 CONJURE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
 source "$CONJURE_HOME/lib/mutate.sh"
+source "$CONJURE_HOME/lib/log.sh"              # snapshot.sh log_step integration
+source "$CONJURE_HOME/lib/snapshot.sh"         # backup-before-mutate (CLAUDE.md safety invariant)
 source "$CONJURE_HOME/lib/plugin-helpers.sh"   # shared jq transforms + guards
 
 # Env defaults — both env var and flag paths work
@@ -99,6 +101,14 @@ printf '%s' "$NEW_PLG" | jq empty 2>/dev/null || {
   echo "✗ jq produced invalid JSON for plugin.json" >&2
   exit 2
 }
+
+# Backup-before-mutate (CLAUDE.md safety invariant): snapshot the repo before
+# overwriting its committed manifests. Live mode only — snapshot_create no-ops the
+# copy under DRY_RUN=1.
+if [ "${DRY_RUN:-0}" != "1" ]; then
+  snapshot_create "$CONJURE_HOME" "$CONJURE_HOME/.conjure-adopt-backups"
+  echo "▸ backup created: $CONJURE_SNAPSHOT_PATH"
+fi
 
 # Write via mutate_write
 echo "▸ conjure publish: updating marketplace.json (version=$CURRENT_VERSION sha=${CURRENT_SHA:0:12}...)"

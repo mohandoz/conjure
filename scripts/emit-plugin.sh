@@ -13,6 +13,8 @@ set -euo pipefail
 
 CONJURE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
 source "$CONJURE_HOME/lib/mutate.sh"
+source "$CONJURE_HOME/lib/log.sh"        # snapshot.sh log_step integration
+source "$CONJURE_HOME/lib/snapshot.sh"   # backup-before-mutate (CLAUDE.md safety invariant)
 source "$CONJURE_HOME/lib/plugin-helpers.sh"
 
 # Env defaults — cli/conjure sets these; script also accepts CLI flags for direct invocation
@@ -80,6 +82,17 @@ secret_scan "$PLUGIN_JSON" "plugin.json" || exit 2
 
 # Bundled schema validation before write (D-09)
 validate_plugin_json "$PLUGIN_JSON" || exit 2
+
+# Backup-before-mutate (CLAUDE.md safety invariant): snapshot the target before the
+# first write that can overwrite pre-existing manifests / settings. Live mode only —
+# snapshot_create no-ops the copy under DRY_RUN=1. Skipped when nothing would be
+# overwritten (clean emit into a repo with no prior plugin.json/marketplace.json/settings).
+if [ "${DRY_RUN:-0}" != "1" ] && { [ -f "$TARGET/.claude-plugin/plugin.json" ] || \
+   [ -f "$TARGET/.claude-plugin/marketplace.json" ] || \
+   [ -f "$TARGET/.claude/settings.json" ]; }; then
+  snapshot_create "$TARGET" "$TARGET/.conjure-adopt-backups"
+  echo "▸ backup created: $CONJURE_SNAPSHOT_PATH"
+fi
 
 # Write plugin.json
 mutate_mkdir "$TARGET/.claude-plugin"
