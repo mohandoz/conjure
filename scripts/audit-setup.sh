@@ -216,6 +216,63 @@ MKT_NAMES_EOF
   fi
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 26 — Policy checks (POL-05a/b/c + advisory)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Detect active compliance overlay via <!-- compliance:REGIME --> marker in CLAUDE.md.
+# The same marker is emitted by compliance/<regime>/apply.sh.
+_pol_regime="$(grep -oE '<!-- compliance:(hipaa|soc2|gdpr|pci) -->' CLAUDE.md 2>/dev/null \
+  | sed 's/<!-- compliance://;s/ -->//' | head -1)"
+
+# POL-05c — disableBypassPermissionsMode type check (UNCONDITIONAL — not gated on overlay).
+# A boolean disableBypassPermissionsMode is always wrong regardless of compliance state.
+if [ -f ".claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
+  _dbpm_type="$(jq -r '.permissions.disableBypassPermissionsMode | type' .claude/settings.json 2>/dev/null)"
+  _dbpm_val="$(jq -r '.permissions.disableBypassPermissionsMode // empty' .claude/settings.json 2>/dev/null)"
+  if [ "$_dbpm_type" = "boolean" ]; then
+    err "[policy] disableBypassPermissionsMode is boolean (got: $_dbpm_val) — must be string \"disable\". Re-run: conjure emit-policy"
+  fi
+fi
+
+# POL-05a — compliance overlay active but sandbox.enabled not true.
+if [ -n "$_pol_regime" ] && [ -f ".claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
+  _sandbox_enabled="$(jq -r '.sandbox.enabled // false' .claude/settings.json 2>/dev/null)"
+  if [ "$_sandbox_enabled" != "true" ]; then
+    err "[policy:$_pol_regime] compliance overlay active but sandbox.enabled is not true — run: conjure emit-policy --regime $_pol_regime"
+  fi
+elif [ -n "$_pol_regime" ] && [ -f ".claude/settings.json" ] && ! command -v jq >/dev/null 2>&1; then
+  note "[policy] jq not found — policy checks skipped (install jq to enable POL-05 audit)"
+fi
+
+# POL-05b — denyRead path with no matching Read() in permissions.deny.
+# Uses a tempfile to collect errors from the while-loop subshell so the FAIL
+# counter (incremented by err()) is updated in the main shell (not the subshell).
+if [ -n "$_pol_regime" ] && [ -f ".claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
+  _deny_paths="$(jq -r '.sandbox.filesystem.denyRead // [] | .[]' .claude/settings.json 2>/dev/null)"
+  _perm_deny="$(jq -r '.permissions.deny // [] | .[]' .claude/settings.json 2>/dev/null)"
+  _pol_b_errs="$(mktemp)"
+  printf '%s\n' "$_deny_paths" | while IFS= read -r _dpath; do
+    [ -z "$_dpath" ] && continue
+    if ! printf '%s\n' "$_perm_deny" | grep -qF "Read($_dpath)"; then
+      printf '%s\n' "[policy:$_pol_regime] denyRead path '$_dpath' has no matching Read($_dpath) in permissions.deny (POL-02 enforcement gap)" >> "$_pol_b_errs"
+    fi
+  done
+  if [ -s "$_pol_b_errs" ]; then
+    while IFS= read -r _msg; do err "$_msg"; done < "$_pol_b_errs"
+  fi
+  rm -f "$_pol_b_errs"
+fi
+
+# POL-05-advisory — unreviewed template placeholder still present.
+# Detection keys off REPLACE_WITH_ORG_UUID ONLY (RESEARCH.md Open Questions RESOLVED Q1).
+# Uses note() — does NOT increment any counter; exits 0 for advisory-only findings.
+if [ -f "conjure-policy/managed-settings.json" ]; then
+  if grep -qF "REPLACE_WITH_ORG_UUID" "conjure-policy/managed-settings.json" 2>/dev/null; then
+    note "⚠ [policy] managed-settings.json contains unreviewed template values (REPLACE_WITH_ORG_UUID) — customize forceLoginOrgUUID before deploying"
+  fi
+fi
+
 # Summary
 echo
 echo "─────────────────────────────────────"
