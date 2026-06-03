@@ -5614,6 +5614,49 @@ fi
 rm -rf "$P28_GAPDIR"
 trap - EXIT
 
+# WR-03-skill-extract-robust: skill-used extraction must tolerate a key
+# (description:) interleaved between `type: skill-used` and `value:`, and must
+# skip commented-out assertion lines. Pre-fix, the interleaved description: reset
+# the awk state → s1 reported as an unasserted gap (false-negative), and a
+# commented `#   value: 'ghost'` leaked into extraction.
+P28_EXTDIR="$(mktemp -d)"
+trap 'rm -rf "$P28_EXTDIR"' EXIT
+mkdir -p "$P28_EXTDIR/.claude/skills/s1"
+printf '## Project\n\nExtraction-robustness harness.\n' > "$P28_EXTDIR/CLAUDE.md"
+printf -- '---\nname: s1\ndescription: Skill one\nallowed-tools:\n  - Read\n---\nBody.\n' > "$P28_EXTDIR/.claude/skills/s1/SKILL.md"
+mkdir -p "$P28_EXTDIR/.conjure/eval"
+# Reordered block (description between type and value) + a commented ghost line.
+{
+  printf 'tests:\n'
+  printf '  - assert:\n'
+  printf '      - type: skill-used\n'
+  printf '        description: routing check\n'
+  printf "        value: 's1'\n"
+  printf "  #   value: 'ghost'\n"
+} > "$P28_EXTDIR/.conjure/eval/promptfooconfig.yaml"
+git -C "$P28_EXTDIR" init -q
+git -C "$P28_EXTDIR" config user.email "test@conjure"
+git -C "$P28_EXTDIR" config user.name "conjure-test"
+git -C "$P28_EXTDIR" add -A 2>/dev/null || true
+git -C "$P28_EXTDIR" commit -q -m "test fixture" 2>/dev/null || true
+if [ "$P28_AUDIT_OK" -eq 1 ]; then
+  P28_EXT_RC=0
+  P28_EXT_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P28_AUDIT_SH" "$P28_EXTDIR" 2>&1)" || P28_EXT_RC=$?
+  # s1 IS asserted (reordered block) → must NOT be flagged as a gap, and the
+  # commented 'ghost' must NOT appear as an extracted/asserted skill.
+  if [ "$P28_EXT_RC" -ne 2 ] && \
+     ! printf '%s\n' "$P28_EXT_OUT" | grep -q "skill 's1' has no skill-used assertion" && \
+     ! printf '%s\n' "$P28_EXT_OUT" | grep -qi "ghost"; then
+    pass "skill-used extraction tolerates key reordering and skips comments (WR-03-skill-extract-robust)"
+  else
+    fail "skill-used extraction false-negative on reordered block or leaked comment (WR-03-skill-extract-robust)"
+  fi
+else
+  fail "audit-setup.sh EVAL section not implemented — Wave 3 must add it (WR-03-skill-extract-robust)"
+fi
+rm -rf "$P28_EXTDIR"
+trap - EXIT
+
 # EVAL-05-noconfig: audit on harness with no eval config emits advisory but exits 0
 P28_NOCFGDIR="$(mktemp -d)"
 trap 'rm -rf "$P28_NOCFGDIR"' EXIT

@@ -495,17 +495,24 @@ fi
 # Always runs (no gate condition) — advisory note() only; never exit 2.
 # _eval_extract_skill_used defined BEFORE its call site (no forward reference).
 _eval_extract_skill_used() {
+  # Anchor extraction to the `type: skill-used` assertion and stay in-block until
+  # the next list item (`- `) regardless of intervening keys (e.g. description:),
+  # so a reordered `type: ... / description: ... / value: ...` block still
+  # extracts. Comment lines (#) are skipped so commented-out assertions do not
+  # leak ghost skill names into the gap diff (WR-03).
   awk '
-    /type: skill-used/ { found=1; next }
-    found && /value:/ {
-      gsub(/^[[:space:]]*value:[[:space:]]*/, "")
-      gsub(/[[:space:]]*$/, "")
+    /^[[:space:]]*#/ { next }
+    /type:[[:space:]]*skill-used/ { in_assert=1; next }
+    in_assert && /^[[:space:]]*value:[[:space:]]*/ {
+      sub(/^[[:space:]]*value:[[:space:]]*/, "")
+      sub(/[[:space:]]*$/, "")
       gsub(/'"'"'/, "")
       gsub(/"/, "")
       print
-      found=0
+      in_assert=0
+      next
     }
-    !/value:/ { found=0 }
+    /^[[:space:]]*-[[:space:]]/ { in_assert=0 }
   ' "$1"
 }
 
