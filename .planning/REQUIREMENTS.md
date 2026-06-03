@@ -16,11 +16,11 @@ Build order (research consensus): **A plugin → B policy → C eval → D schem
 
 ### Plugin + Marketplace Emission (PLUG)
 
-- [ ] **PLUG-01**: `conjure publish-plugin` emits `.claude-plugin/plugin.json` from the scaffolded harness (correct `skills`/`agents`/`hooks`/`mcpServers` paths; `version` from `.conjure-version`)
-- [ ] **PLUG-02**: `conjure publish-plugin --marketplace` generates `.claude-plugin/marketplace.json` (kebab-case `name`, `owner`, `plugins[]` with `source`); reserved-name guard
-- [ ] **PLUG-03**: wires `extraKnownMarketplaces` (object form) + `enabledPlugins` into `.claude/settings.json` via idempotent `mutate_write` merge
-- [ ] **PLUG-04**: `conjure publish-plugin --validate` runs `claude plugin validate` + JSON-schema check at emit time (no-silent-no-op gate); refuses on invalid manifest
-- [ ] **PLUG-05**: version fallback — when `version` absent in `plugin.json`/marketplace entry, emit current git SHA as the version
+- [x] **PLUG-01**: `conjure publish-plugin` emits `.claude-plugin/plugin.json` from the scaffolded harness (correct `skills`/`agents`/`hooks`/`mcpServers` paths; `version` from `.conjure-version`)
+- [x] **PLUG-02**: `conjure publish-plugin --marketplace` generates `.claude-plugin/marketplace.json` (kebab-case `name`, `owner`, `plugins[]` with `source`); reserved-name guard
+- [x] **PLUG-03**: wires `extraKnownMarketplaces` (object form) + `enabledPlugins` into `.claude/settings.json` via idempotent `mutate_write` merge
+- [x] **PLUG-04**: `conjure publish-plugin --validate` runs `claude plugin validate` + JSON-schema check at emit time (no-silent-no-op gate); refuses on invalid manifest
+- [x] **PLUG-05**: version fallback — when `version` absent in `plugin.json`/marketplace entry, emit current git SHA as the version
 
 ### Policy: Sandbox + Managed-Settings / MDM (POL)
 
@@ -111,11 +111,11 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PLUG-01 | Phase 25 | Pending |
-| PLUG-02 | Phase 25 | Pending |
-| PLUG-03 | Phase 25 | Pending |
-| PLUG-04 | Phase 25 | Pending |
-| PLUG-05 | Phase 25 | Pending |
+| PLUG-01 | Phase 25 | Complete |
+| PLUG-02 | Phase 25 | Complete |
+| PLUG-03 | Phase 25 | Complete |
+| PLUG-04 | Phase 25 | Complete |
+| PLUG-05 | Phase 25 | Complete |
 | POL-01 | Phase 26 | Pending |
 | POL-02 | Phase 26 | Pending |
 | POL-03 | Phase 26 | Pending |
