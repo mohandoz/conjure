@@ -111,6 +111,8 @@ None found — eval.sh is an offline YAML generator (eval init) and a thin npx s
 
 ## Self-Check: PASSED
 
+All created files exist. All task commits confirmed in git log:
+
 Files verified:
 - `/Users/mohandoz/u01/innovate/conjure/scripts/eval.sh` — FOUND
 - `/Users/mohandoz/u01/innovate/conjure/cli/conjure` — FOUND (modified)
