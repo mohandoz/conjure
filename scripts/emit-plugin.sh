@@ -112,10 +112,13 @@ if [ "$DO_MARKETPLACE" = "1" ]; then
       MKT_NAME="$(basename "$TARGET" | tr '[:upper:]' '[:lower:]' | tr '_.' '-' | tr -cd 'a-z0-9-')"
     fi
   fi
-  # Validate kebab-case: only a-z, 0-9, hyphens
+  # Validate kebab-case — aligned with marketplace.schema.json `name` pattern
+  # (^[a-z][a-z0-9-]{0,63}$): leading LETTER only, max 64 chars. Rejecting here
+  # avoids writing a manifest that passes the emitter but fails schema validation
+  # downstream (WR-01).
   # shellcheck disable=SC2016
-  if ! printf '%s' "$MKT_NAME" | grep -qE '^[a-z0-9][a-z0-9-]*$'; then
-    echo "✗ Marketplace name '$MKT_NAME' is not valid kebab-case (a-z, 0-9, hyphens only)" >&2
+  if ! printf '%s' "$MKT_NAME" | grep -qE '^[a-z][a-z0-9-]{0,63}$'; then
+    echo "✗ Marketplace name '$MKT_NAME' must start with a letter and be ≤64 chars (a-z, 0-9, hyphens)" >&2
     exit 2
   fi
 
