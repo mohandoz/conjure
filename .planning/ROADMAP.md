@@ -144,7 +144,25 @@ Plans:
   4. `conjure audit --budget` measures estimated tokens for CLAUDE.md + always-loaded skills (chars/4 heuristic), flags over-threshold sessions, lists top contributors, and supports `--porcelain` JSON output
   5. `conjure audit` reports which installed skills have no `skill-used` assertion in `.conjure/eval/promptfooconfig.yaml`; a skill added after `conjure eval init` appears in the coverage gap report
 
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+
+**Wave 0**
+
+- [ ] 28-00-PLAN.md — Wave 0: eval fixture harnesses + golden promptfooconfig.yaml + A1/A2/A3 probe README + Phase 28 graceful-red EVAL test block (EVAL-01..05 Nyquist)
+
+**Wave 1** *(blocked on Wave 0 completion)*
+
+- [ ] 28-01-PLAN.md — Wave 1: scripts/eval.sh (cmd_eval_init + cmd_eval_run) + cli/conjure cmd_eval dispatch (EVAL-01, EVAL-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 28-02-PLAN.md — Wave 2: scripts/eval.sh cmd_eval_emit_workflow — conjure-eval.yml GitHub Actions workflow (EVAL-03)
+
+**Wave 3** *(blocked on Wave 0 completion; runs parallel to Waves 1+2)*
+
+- [ ] 28-03-PLAN.md — Wave 3: scripts/audit-setup.sh --budget linter + EVAL-05 coverage gap + cli/conjure --budget/--porcelain wiring (EVAL-04, EVAL-05)
+
 **UI hint**: no
 
 ### Phase 29: Workspace Orchestration — Read-Only

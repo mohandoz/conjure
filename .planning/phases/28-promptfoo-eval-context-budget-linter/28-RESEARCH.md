@@ -802,28 +802,33 @@ jq -cn \
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does `npx --yes promptfoo@0.121.14` auto-install `@anthropic-ai/claude-agent-sdk`?**
-   - What we know: promptfoo docs call it an "optional dependency" that "only needs to be
-     installed if you want to use the Claude Agent SDK provider."
-   - What's unclear: whether npx's `--yes` installs optional peer deps automatically, or
-     whether a separate install step is needed.
-   - Recommendation: In Wave 0, add a test that runs `npx --yes promptfoo@0.121.14 eval --help`
-     and checks that `anthropic:claude-agent-sdk` is listed. If not, add an explicit install
-     step to `eval run`.
+**A1 — Does `npx --yes promptfoo@0.121.14` auto-install `@anthropic-ai/claude-agent-sdk`?**
 
-2. **Does `ANTHROPIC_API_KEY` need to be set for `conjure eval init` (scaffold only)?**
-   - What we know: `init` only generates YAML; it does not invoke promptfoo or Claude.
-   - What's unclear: whether promptfoo does any API key validation at import time.
-   - Recommendation: `eval init` does not require `ANTHROPIC_API_KEY`; document it only
-     for `eval run`.
+RESOLVED: Treated as [ASSUMED] per Package Legitimacy Audit — auto-install not explicitly
+verified in docs for npx + optional peer deps combination. Wave 0 includes a gated integration
+probe (skips cleanly when node/promptfoo/network absent) that documents whether auto-install
+succeeds. If the probe finds the SDK is NOT auto-installed, eval.sh must add an explicit
+`npx --yes @anthropic-ai/claude-agent-sdk@0.3.161` pre-install step before the promptfoo run.
+The probe result is written to tests/fixtures/_eval-probe/A1-result.txt for traceability.
+The eval run path in eval.sh handles both cases via `command -v` detection of the installed SDK.
 
-3. **Does the promptfoo-action@v1 support `anthropic-api-key` as an explicit input?**
-   - What we know: The action has many provider-specific API key inputs. ANTHROPIC_API_KEY
-     via `env:` is the safe approach.
-   - What's unclear: Whether there's a dedicated `anthropic-api-key:` action input vs env var.
-   - Recommendation: Use `env: ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}` (safest).
+**A2 — Does `working_dir: .` point to the project root where `.claude/` lives?**
+
+RESOLVED: The emitted promptfooconfig.yaml uses `working_dir: .` and `setting_sources: ['project']`
+exactly as documented in RESEARCH Pattern 1. The Wave 0 fixture `tests/fixtures/_eval/harness/`
+establishes the expected layout (CLAUDE.md + .claude/skills/*/SKILL.md at the project root).
+Actual live behavior (whether skills are discovered correctly with a real Claude SDK run) is
+Manual-Only verification, already documented in VALIDATION.md — it requires ANTHROPIC_API_KEY
+and a real promptfoo run. The fixture test only validates that the generated YAML contains
+the correct `working_dir` and `setting_sources` keys.
+
+**A3 — Does `setting_sources: ['project']` discover `.claude/skills/*/SKILL.md` without `local`?**
+
+RESOLVED: Same disposition as A2. The fixture golden `tests/fixtures/_eval/expected-promptfooconfig.yaml`
+captures the correct `setting_sources: ['project']` configuration. Behavioral correctness (actual
+skill discovery during a real Claude run) is Manual-Only. Fixture tests validate YAML structure only.
 
 ---
 
