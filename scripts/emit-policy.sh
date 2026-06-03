@@ -148,7 +148,9 @@ if [ "${MDM_ONLY:-0}" != "1" ]; then
 fi
 
 # Build Read() deny entries JSON array from combined denyRead paths (for managed-settings + plist)
-DENY_ENTRIES_JSON="$(build_deny_read_entries "$COMBINED_DENY_READ" | jq -R . | jq -sc '.')"
+# Filter empties so an empty deny list yields [] — NOT [""] (WR-01).
+DENY_ENTRIES_JSON="$(build_deny_read_entries "$COMBINED_DENY_READ" \
+  | jq -R . | jq -sc '[.[] | select(length > 0)]')"
 
 # Build managed-settings JSON — always needed (used for managed-settings.json file and ps1 heredoc)
 MANAGED_JSON="$(build_managed_settings "$REGIME" "$DENY_ENTRIES_JSON" "$SANDBOX_JSON")"

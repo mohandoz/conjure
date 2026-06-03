@@ -151,9 +151,13 @@ merge_deny_read_permissions() {
   local read_entries
   read_entries="$(build_deny_read_entries "$deny_read_json")"
 
-  # Convert newline-separated Read() entries to a JSON array
+  # Convert newline-separated Read() entries to a JSON array.
+  # Filter empties so an empty deny list yields [] — NOT [""] (WR-01). The naive
+  # `printf '%s\n' "" | jq -R . | jq -sc .` produces [""] (one empty string),
+  # planting a stray meaningless deny rule.
   local read_entries_json
-  read_entries_json="$(printf '%s\n' "$read_entries" | jq -R . | jq -sc '.')"
+  read_entries_json="$(printf '%s\n' "$read_entries" \
+    | jq -R . | jq -sc '[.[] | select(length > 0)]')"
 
   local CURRENT
   CURRENT="$(cat "$settings_file" 2>/dev/null || printf '{}')"
