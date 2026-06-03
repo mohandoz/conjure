@@ -177,7 +177,20 @@ Plans:
   3. `conjure workspace audit` runs `conjure audit --json` per repo and emits a per-repo pass/fail table plus a global summary; `--fail-fast` flag switches to abort-on-first-failure mode
   4. A workspace manifest with 3 repos where 1 has an invalid path exits 2 on `conjure workspace init` before writing anything; `conjure workspace check` on the manifest skips the bad-path repo with a warning and processes the remaining 2
 
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+**Wave 0**
+
+- [ ] 29-00-PLAN.md — Wave 0: workspace fixtures (_workspace/ 3-repo tree + gamma-bad audit-fail variant + _workspace-badpath/ bad-path manifest) + graceful-red WS test block in tests/run.sh (WS-01..04 Nyquist)
+
+**Wave 1** *(blocked on Wave 0 completion)*
+
+- [ ] 29-01-PLAN.md — Wave 1: lib/workspace.sh (manifest validate/load/discover helpers) + scripts/workspace.sh init + cli/conjure cmd_workspace dispatch (WS-01, WS-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 29-02-PLAN.md — Wave 2: workspace check (per-repo --porcelain aggregation, fail-tolerant) + workspace audit (per-repo --json aggregation, --fail-fast, exit semantics) in scripts/workspace.sh (WS-03, WS-04)
+
 **UI hint**: no
 
 ### Phase 30: Workspace Orchestration — Mutating + Rollback Saga
@@ -208,5 +221,5 @@ Plans:
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/? | Not started | - |
+| 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/3 | Not started | - |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |
