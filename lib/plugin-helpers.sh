@@ -264,6 +264,108 @@ plugin_build_plugin_json() {
   printf '%s' "$updated"
 }
 
+# plugin_build_marketplace_json(target, mkt_name, version, owner_name)
+# Builds marketplace.json JSON string. Prints to stdout.
+# D-05: auto-detects GitHub source (SSH + HTTPS remote forms). Falls back to local.
+# D-16: github source includes both sha and ref.
+plugin_build_marketplace_json() {
+  local target="$1"
+  local mkt_name="$2"
+  local version="$3"
+  local owner_name="$4"
+
+  # Detect GitHub source
+  local owner_repo
+  owner_repo="$(detect_github_source "$target" 2>/dev/null)" || owner_repo=""
+
+  local source_obj
+  if [ -n "$owner_repo" ]; then
+    # github source: pin sha + ref (D-16)
+    local sha ref
+    sha="$(git -C "$target" rev-parse HEAD 2>/dev/null)" || sha=""
+    ref="$(git -C "$target" rev-parse --abbrev-ref HEAD 2>/dev/null)" || ref="main"
+    source_obj="$(jq -n \
+      --arg source "github" \
+      --arg repo "$owner_repo" \
+      --arg ref "$ref" \
+      --arg sha "$sha" \
+      '{"source": $source, "repo": $repo, "ref": $ref, "sha": $sha}')"
+  else
+    # local fallback (no GitHub remote or no git)
+    source_obj='{"source": "local"}'
+  fi
+
+  # Build marketplace JSON (D-16 shape)
+  local MKT_JSON
+  MKT_JSON="$(jq -n \
+    --arg mkt_name "$mkt_name" \
+    --arg version "$version" \
+    --arg owner_name "$owner_name" \
+    --argjson source_obj "$source_obj" \
+    '{
+      name: $mkt_name,
+      owner: {name: $owner_name},
+      plugins: [{
+        name: $mkt_name,
+        source: $source_obj,
+        version: $version
+      }]
+    }')"
+
+  # Validate JSON before returning
+  printf '%s' "$MKT_JSON" | jq empty 2>/dev/null || {
+    echo "✗ jq produced invalid JSON for marketplace.json" >&2
+    return 1
+  }
+
+  printf '%s' "$MKT_JSON"
+}
+
+# plugin_wire_settings(settings_file, mkt_name, mkt_source_obj, plugin_key, do_enable)
+# Merges extraKnownMarketplaces[$mkt_name] into settings_file as a keyed object.
+# If do_enable=1, also merges enabledPlugins[$plugin_key]=true.
+# D-15: keyed-object idempotent — re-run updates in place, never duplicates.
+# Caller must ensure: lib/mutate.sh already sourced.
+plugin_wire_settings() {
+  local settings_file="$1"
+  local mkt_name="$2"
+  local mkt_source_obj="$3"
+  local plugin_key="$4"
+  local do_enable="$5"
+
+  # Read current settings (default to empty object)
+  local CURRENT
+  CURRENT="$(cat "$settings_file" 2>/dev/null || echo '{}')"
+
+  # Build updated settings with extraKnownMarketplaces keyed-object merge
+  # and optional enabledPlugins merge — single jq call for atomicity (D-15)
+  local UPDATED
+  if [ "$do_enable" = "1" ]; then
+    UPDATED="$(printf '%s' "$CURRENT" | jq \
+      --arg name "$mkt_name" \
+      --argjson src "$mkt_source_obj" \
+      --arg key "$plugin_key" \
+      '.extraKnownMarketplaces = (.extraKnownMarketplaces // {}) |
+       .extraKnownMarketplaces[$name] = {"source": $src} |
+       .enabledPlugins = (.enabledPlugins // {}) |
+       .enabledPlugins[$key] = true')"
+  else
+    UPDATED="$(printf '%s' "$CURRENT" | jq \
+      --arg name "$mkt_name" \
+      --argjson src "$mkt_source_obj" \
+      '.extraKnownMarketplaces = (.extraKnownMarketplaces // {}) |
+       .extraKnownMarketplaces[$name] = {"source": $src}')"
+  fi
+
+  # Validate before write
+  printf '%s' "$UPDATED" | jq empty 2>/dev/null || {
+    echo "✗ jq produced invalid JSON for settings.json" >&2
+    return 1
+  }
+
+  mutate_write "$settings_file" "$UPDATED"
+}
+
 # run_cli_validate(target)
 # Runs `claude plugin validate` on target.
 # Exits 2 if claude is absent (when --validate was explicitly requested).
