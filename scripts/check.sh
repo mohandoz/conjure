@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/check.sh — compare installed harness against upstream kit snapshot.
-# Usage: CONJURE_HOME=<path> CONJURE_PORCELAIN=<0|1> bash check.sh [target]
-# Exit codes: 0 = harness is current, 1 = drift detected, 2 = bad args
+# Usage: CONJURE_HOME=<path> CONJURE_PORCELAIN=<0|1> CONJURE_SCHEMA=<0|1> bash check.sh [target]
+# Exit codes: 0 = harness is current, 1 = drift detected, 2 = schema error (renamed/unknown hook event)
 # Read-only: no mutations, no lib/mutate.sh required.
 
 set -uo pipefail
@@ -150,4 +150,109 @@ else
   fi
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 27 — Schema checks (SCHM-03 + SCHM-04)
+# SCHM-03: hook event name validation — always-on, not gated on --schema flag.
+# SCHM-04: per-key CC-version report   — gated on CONJURE_SCHEMA=1 (--schema).
+# SCHEMA_FAIL counter is separate from drift; schema exit 2 > drift exit 1.
+# ─────────────────────────────────────────────────────────────────────────────
+
+SCHEMA_FILE="${CONJURE_HOME}/lib/cc-schema.json"
+SCHEMA_FAIL=0
+
+# SCHM-03 — Hook event name validation (always-on)
+if [ -f "${TARGET}/.claude/settings.json" ] && \
+   command -v jq >/dev/null 2>&1 && \
+   [ -f "$SCHEMA_FILE" ]; then
+  _SCHM03_TMP="$(mktemp)"
+  trap 'rm -f "${_SCHM03_TMP:-}"' EXIT
+
+  _KNOWN_EVENTS="$(jq -r '.hook_events[]' "$SCHEMA_FILE" 2>/dev/null)"
+  _RENAMED_ENTRIES="$(jq -r '.renamed_events // {} | to_entries[] | "\(.key)=\(.value)"' "$SCHEMA_FILE" 2>/dev/null)"
+  _HOOK_EVENTS_IN_SETTINGS="$(jq -r '.hooks // {} | keys[]' "${TARGET}/.claude/settings.json" 2>/dev/null)"
+
+  printf '%s\n' "$_HOOK_EVENTS_IN_SETTINGS" | while IFS= read -r _ev; do
+    [ -z "$_ev" ] && continue
+    _rn="$(printf '%s\n' "$_RENAMED_ENTRIES" | grep "^${_ev}=" | head -1)"
+    if [ -n "$_rn" ]; then
+      printf 'SCHM03_RENAMED:%s:%s\n' "$_ev" "${_rn#*=}"
+    elif ! printf '%s\n' "$_KNOWN_EVENTS" | grep -qxF "$_ev"; then
+      printf 'SCHM03_UNKNOWN:%s\n' "$_ev"
+    fi
+  done > "$_SCHM03_TMP"
+
+  while IFS= read -r _finding; do
+    case "$_finding" in
+      SCHM03_RENAMED:*)
+        _old="${_finding#SCHM03_RENAMED:}"; _old="${_old%%:*}"
+        _new="${_finding#*:}"; _new="${_new#*:}"
+        printf 'SCHM-03 [fail] Hook event "%s" was renamed — use "%s" instead (settings.json)\n' \
+          "$_old" "$_new" >&2
+        SCHEMA_FAIL=$((SCHEMA_FAIL+1))
+        ;;
+      SCHM03_UNKNOWN:*)
+        _unk="${_finding#SCHM03_UNKNOWN:}"
+        _cc_ver="$(jq -r '.cc_version // "unknown"' "$SCHEMA_FILE" 2>/dev/null)"
+        printf 'SCHM-03 [fail] Unknown hook event "%s" — not in CC schema v%s (settings.json)\n' \
+          "$_unk" "$_cc_ver" >&2
+        SCHEMA_FAIL=$((SCHEMA_FAIL+1))
+        ;;
+    esac
+  done < "$_SCHM03_TMP"
+  rm -f "$_SCHM03_TMP"
+fi  # end SCHM-03
+
+# SCHM-04 — Per-key CC-version report (gated on CONJURE_SCHEMA=1)
+CONJURE_SCHEMA="${CONJURE_SCHEMA:-0}"
+if [ "$CONJURE_SCHEMA" = "1" ] && \
+   [ -f "${TARGET}/.claude/settings.json" ] && \
+   command -v jq >/dev/null 2>&1 && \
+   [ -f "$SCHEMA_FILE" ]; then
+  # CC version detection (Pattern 5: parse claude --version; absent → warn + use schema baseline)
+  _CC_VER=""
+  if command -v claude >/dev/null 2>&1; then
+    _CC_VER="$(claude --version 2>/dev/null | awk '{print $1}')"
+    if ! printf '%s\n' "$_CC_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+      _CC_VER=""
+    fi
+  fi
+  _SCHEMA_CC_VER="$(jq -r '.cc_version // "unknown"' "$SCHEMA_FILE" 2>/dev/null)"
+  if [ -z "$_CC_VER" ]; then
+    printf 'SCHM-04 [warn] claude not found on PATH — using bundled schema baseline (cc_version: %s)\n' \
+      "$_SCHEMA_CC_VER"
+    _CC_VER="$_SCHEMA_CC_VER"
+  fi
+
+  _SCHEMA_GEN="$(jq -r '.generated // "unknown"' "$SCHEMA_FILE" 2>/dev/null)"
+  printf '\n'
+  printf '── Schema Version Report (--schema) ──────────────────────────\n'
+  printf '  Bundled schema: CC v%s (lib/cc-schema.json generated %s)\n' \
+    "$_SCHEMA_CC_VER" "$_SCHEMA_GEN"
+  printf '  Detected CC version: %s\n' "$_CC_VER"
+  printf '\n'
+  printf '  Settings keys in this harness and CC version introduced:\n'
+  jq -r 'keys[]' "${TARGET}/.claude/settings.json" 2>/dev/null | while IFS= read -r _key; do
+    _intro="$(jq -r --arg k "$_key" '.settings_keys[$k] // "unknown"' "$SCHEMA_FILE" 2>/dev/null)"
+    printf '    %-40s introduced: %s\n' "$_key" "$_intro"
+  done
+  printf '─────────────────────────────────────────────────────────────\n'
+
+  # Staleness advisory (Pattern 4: BSD date || GNU date || skip)
+  _GEN_FIELD="$(jq -r '.generated // empty' "$SCHEMA_FILE" 2>/dev/null)"
+  if [ -n "$_GEN_FIELD" ]; then
+    _GEN_EPOCH=$(date -j -f "%Y-%m-%d" "$_GEN_FIELD" "+%s" 2>/dev/null \
+      || date -d "$_GEN_FIELD" "+%s" 2>/dev/null \
+      || echo 0)
+    if [ "$_GEN_EPOCH" != "0" ]; then
+      _SCHEMA_AGE_DAYS=$(( ($(date +%s) - _GEN_EPOCH) / 86400 ))
+      if [ "$_SCHEMA_AGE_DAYS" -gt 90 ]; then
+        printf 'SCHM-04 [warn] cc-schema.json is %s days old (>90) — Conjure update recommended\n' \
+          "$_SCHEMA_AGE_DAYS"
+      fi
+    fi
+  fi
+fi  # end SCHM-04
+
+# Schema failures override drift: exit 2 > exit 1 > exit 0
+[ "$SCHEMA_FAIL" -gt 0 ] && exit 2
 exit "$drift"
