@@ -5050,6 +5050,60 @@ fi
 rm -rf "$P27_SCH_DIR"
 trap - EXIT
 
+# WR-04: check --porcelain --schema → stdout stays machine-clean (no human report).
+# The SCHM-04 "Schema Version Report" must route to stderr under --porcelain so it
+# does not interleave with the M/R/A lines and corrupt machine consumers.
+P27_PSCH_DIR="$(mktemp -d)"
+trap 'rm -rf "$P27_PSCH_DIR"' EXIT
+mkdir -p "$P27_PSCH_DIR/.claude"
+# Drifted settings.json (differs from kit) → guarantees at least one M/R/A line.
+printf '{"skillOverrides": {}}\n' > "$P27_PSCH_DIR/.claude/settings.json"
+printf '## Project\n\nPorcelain+schema fixture (WR-04).\n' > "$P27_PSCH_DIR/CLAUDE.md"
+if [ "$P27_CHECK_OK" -eq 1 ]; then
+  P27_PSCH_STDOUT_FILE="$(mktemp)"
+  CONJURE_HOME="$CONJURE_HOME" CONJURE_PORCELAIN=1 CONJURE_SCHEMA=1 \
+    bash "$P27_CHECK_SH" "$P27_PSCH_DIR" >"$P27_PSCH_STDOUT_FILE" 2>/dev/null || true
+  P27_PSCH_STDOUT="$(cat "$P27_PSCH_STDOUT_FILE")"
+  rm -f "$P27_PSCH_STDOUT_FILE"
+  # Pass only if stdout has NO human-report markers (Schema Version Report / introduced:).
+  if printf '%s\n' "$P27_PSCH_STDOUT" | grep -qE 'Schema Version Report|introduced:'; then
+    fail "check --porcelain --schema leaked human report onto porcelain stdout (WR-04)"
+  else
+    pass "check --porcelain --schema keeps stdout machine-clean (WR-04)"
+  fi
+else
+  fail "check.sh SCHM section not implemented — Wave 2 must add SCHM-04 to check.sh (WR-04)"
+fi
+rm -rf "$P27_PSCH_DIR"
+trap - EXIT
+
+# WR-05: check --schema flags a settings key whose introduced_version is NEWER than
+# the detected claude --version (advisory WARN, never exit 2). Stub `claude` to
+# report an old version so skillOverrides (introduced 2.1.129) is newer.
+P27_NEWER_DIR="$(mktemp -d)"
+P27_NEWER_STUB="$(mktemp -d)"
+trap 'rm -rf "$P27_NEWER_DIR" "$P27_NEWER_STUB"' EXIT
+mkdir -p "$P27_NEWER_DIR/.claude"
+printf '{"skillOverrides": {}}\n' > "$P27_NEWER_DIR/.claude/settings.json"
+printf '## Project\n\nNewer-than-CC key fixture (WR-05).\n' > "$P27_NEWER_DIR/CLAUDE.md"
+printf '#!/bin/sh\necho "2.1.105 (Claude Code)"\n' > "$P27_NEWER_STUB/claude"
+chmod +x "$P27_NEWER_STUB/claude"
+if [ "$P27_CHECK_OK" -eq 1 ]; then
+  P27_NEWER_RC=0
+  P27_NEWER_OUT="$(PATH="$P27_NEWER_STUB:$PATH" CONJURE_HOME="$CONJURE_HOME" CONJURE_SCHEMA=1 \
+    bash "$P27_CHECK_SH" "$P27_NEWER_DIR" 2>&1)" || P27_NEWER_RC=$?
+  if [ "$P27_NEWER_RC" -ne 2 ] && \
+     printf '%s\n' "$P27_NEWER_OUT" | grep -qiE 'newer than detected CC'; then
+    pass "check --schema WARNs on key newer than detected CC version, never fails (WR-05)"
+  else
+    fail "check --schema rc=$P27_NEWER_RC did not WARN on newer-than-CC key (WR-05)"
+  fi
+else
+  fail "check.sh SCHM section not implemented — Wave 2 must add SCHM-04 to check.sh (WR-05)"
+fi
+rm -rf "$P27_NEWER_DIR" "$P27_NEWER_STUB"
+trap - EXIT
+
 # SCHM-STALE: audit with >90-day generated date → warns but does NOT exit 2
 P27_STALE_DIR="$(mktemp -d)"
 trap 'rm -rf "$P27_STALE_DIR"' EXIT
