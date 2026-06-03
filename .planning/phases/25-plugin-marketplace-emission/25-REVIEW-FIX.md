@@ -2,70 +2,95 @@
 phase: 25-plugin-marketplace-emission
 fixed_at: 2026-06-03T00:00:00Z
 review_path: .planning/phases/25-plugin-marketplace-emission/25-REVIEW.md
-iteration: 2
-findings_in_scope: 3
-fixed: 3
+iteration: 3
+findings_in_scope: 2
+fixed: 2
 skipped: 0
 status: all_fixed
 ---
 
-# Phase 25: Code Review Fix Report (Iteration 2)
+# Phase 25: Code Review Fix Report
 
 **Fixed at:** 2026-06-03T00:00:00Z
 **Source review:** .planning/phases/25-plugin-marketplace-emission/25-REVIEW.md
-**Iteration:** 2
+**Iteration:** 3
 
 **Summary:**
-- Findings in scope: 3 (Warnings WR-01, WR-02, WR-03; Info findings out of scope)
-- Fixed: 3
+- Findings in scope: 2 (CR-01 critical; IN-01 info — fixed as trivial/non-regressing)
+- Fixed: 2
 - Skipped: 0
-
-Verification: `bash tests/run.sh` → **484 PASS / 0 FAIL** (was 483; one regression
-test added for WR-01). `shellcheck -S error -e SC2164,SC2044,SC2034,SC2155` clean on
-`lib/plugin-helpers.sh`, `scripts/emit-plugin.sh`, `cli/conjure`, and `tests/run.sh`.
+- Test suite after fixes: **485 PASS / 0 FAIL** (was 484/0; +1 new regression test)
+- `shellcheck -S error -e SC2164,SC2044,SC2034,SC2155` clean on both modified shell files
 
 ## Fixed Issues
 
-### WR-01: blank `.conjure-version` emitted `"version": ""` (regression from iteration-1 WR-05 fix)
+### CR-01: First-time `publish-plugin` always exits 2 — emitted plugin.json has no `name`
 
-**Files modified:** `lib/plugin-helpers.sh`, `tests/run.sh`
-**Commit:** ff57cd9
-**Applied fix:** In `resolve_version`, captured the `head -1 … | tr -d '[:space:]'`
-result into `_ver` and only `printf`/`return 0` when it is non-empty. A blank or
-whitespace-only file now logs `WARN: .conjure-version is empty` and falls through to
-the Tier 2 (git SHA) / Tier 3 (`0.0.0`) fallbacks instead of returning the empty
-string. Added regression test **PLUG-05-blank**: a whitespace-only `.conjure-version`
-must yield a 40-char git SHA in the emitted `plugin.json`. Verified manually that a
-blank file now resolves to the HEAD SHA and a populated file (`v1.2.3`) is still
-honoured verbatim.
+**Files modified:** `lib/plugin-helpers.sh`, `scripts/emit-plugin.sh`, `tests/run.sh`
+**Commit:** 8b49651
+**Classification:** Critical blocker (correctness — breaks the core greenfield happy path)
 
-### WR-02: `validate_plugin_json` accepted empty `name` and empty `version`
+**Applied fix:**
+
+1. **`plugin_build_plugin_json` now derives and sets `.name`** (lib/plugin-helpers.sh).
+   Added a third parameter `fallback_name` (`local fallback_name="${3:-}"`). When the
+   caller passes nothing, the name is derived from the target repo basename using the
+   SAME kebab normalization already used for the marketplace name in emit-plugin.sh:
+   `basename | tr '[:upper:]' '[:lower:]' | tr '_.' '-' | tr -cd 'a-z0-9-'`, then
+   validated against the marketplace/plugin schema constraint `^[a-z][a-z0-9-]{0,63}$`
+   (leading letter, ≤64 chars). A non-conforming derived name is dropped (set empty)
+   so the validator surfaces a clear "name required" error rather than emitting a bad
+   name.
+
+2. **Merge-preserve, never overwrite.** The jq pipeline gained
+   `(if (.name // "") == "" and $name != "" then .name = $name else . end)` placed
+   before `.version = $version`. A user-set `.name` in an existing manifest is left
+   untouched (re-run idempotency, verified by the existing PLUG-01-merge test); the
+   derived name is only applied when the existing manifest has no name.
+
+3. **`--name` / `CONJURE_PLUGIN_MKT_NAME` seeds the plugin name too.** Documented choice:
+   the caller `scripts/emit-plugin.sh` now threads `MKT_NAME` (the marketplace name,
+   possibly empty) as the third argument. When set, it seeds plugin.json's `name`; when
+   empty, the helper derives from the basename. This keeps a single source of truth and
+   means an explicit `--name` makes a first-time greenfield emit succeed (previously it
+   could not — `--name` was wired only to the marketplace name).
+
+4. **Regression test added** (`tests/run.sh`, `PLUG-01-greenfield/CR-01`). Creates a
+   fresh git repo in a dir named `My_Cool_Repo` (mixed case + underscore, to exercise
+   kebab normalization), copies the shared harness fixture, **removes the fixture's
+   pre-existing `.claude-plugin/plugin.json`** so the merge base is `{}`, runs a
+   first-time emit, and asserts exit 0 plus a schema-valid non-empty `.name`. This path
+   was previously untested — the shared fixture ships a `plugin.json` carrying
+   `"name": "test-plugin"`, which masked the greenfield bug.
+
+5. **Pre-existing `PLUG-04` test updated to preserve its intent.** `PLUG-04` asserts
+   that validation exits 2 when no name can be inferred. Since name derivation now
+   succeeds for any kebab-able basename, the target was moved into a subdir named `123`
+   (starts with a digit → fails `^[a-z]…` → derived name dropped → validator exits 2),
+   keeping the original "no name available → exit 2" assertion meaningful. Trap/cleanup
+   updated to the new parent dir.
+
+**Conventions honored:** scripts exit 2 never 1 (unchanged paths preserved); POSIX bash
+3.2+ (no associative arrays/mapfile/local -n; only bash parameter expansion + `tr` +
+`grep -E`); shellcheck clean with the project's ignore set.
+
+### IN-01: `.conjure-version` with a blank first line silently resolves to 0.0.0
 
 **Files modified:** `lib/plugin-helpers.sh`
-**Commit:** b3fb0c0
-**Applied fix:** Tightened the two required-field jq predicates in the bundled
-validator (the last gate before `mutate_write`). `name` now requires
-`(.name | type) == "string" and (.name | length > 0)`; `version`, when present
-(`.version != null`), requires a non-empty string. This rejects `"name": ""` /
-`"version": ""` that previously flowed through unchanged via the `.`-based jq merge
-base, and catches a blank version independently of WR-01 as defence in depth.
+**Commit:** d599a49
+**Classification:** Info (trivial, non-regressing — fixed per reviewer's optional suggestion)
 
-### WR-03: marketplace `--name` override was plumbed end-to-end but unreachable from the CLI
-
-**Files modified:** `cli/conjure`, `scripts/emit-plugin.sh`
-**Commit:** 08bad8a
-**Applied fix:** Chose the wire-the-flag option (lower risk than removing the
-plumbing, since the override is a genuine escape hatch for repo basenames that
-auto-derivation cannot turn into a schema-valid name — e.g. digit-leading or
-all-hyphen, which otherwise hard-`exit 2`). Added `--name`/`--name=*` cases to both
-arg loops (`cmd_publish_plugin` in `cli/conjure` and the arg loop in
-`scripts/emit-plugin.sh`), feeding `mkt_name` / `MKT_NAME` which were already
-threaded into the marketplace path. Surfaced `[--name <kebab-name>]` in both usage
-strings and the emit-plugin.sh Options header comment. `CONJURE_PLUGIN_MKT_NAME`
-remains the env path; `--name` is now the documented CLI route.
+**Applied fix:** `resolve_version` Tier 1 now reads the first **non-blank** line:
+`grep -m1 -v '^[[:space:]]*$' "$target/.conjure-version" | tr -d '[:space:]'` replacing
+`head -1 … | tr -d '[:space:]'`. A stray leading newline followed by a real version on
+line 2 now resolves to that version instead of falling through to `0.0.0`. A wholly
+blank / whitespace-only file still yields an empty result and correctly falls through to
+the git-SHA / 0.0.0 tiers (verified — `PLUG-05-blank` writes a `\n`-only file and still
+passes). Non-regressing: no existing test asserts the old leading-blank-line → 0.0.0
+behavior.
 
 ---
 
 _Fixed: 2026-06-03T00:00:00Z_
 _Fixer: Claude (gsd-code-fixer)_
-_Iteration: 2_
+_Iteration: 3_
