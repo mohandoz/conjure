@@ -283,12 +283,21 @@ if [ "${CONJURE_BUDGET:-0}" = "1" ]; then
       jq -cn --arg path "$_path" --argjson tokens "$_tok" \
         '{path: $path, tokens: $tokens}' >> "$_contrib_jsonl"
     done < "$_top5_tmp"
+    # WR-04: the process exit code here is the HOLISTIC audit verdict (governed
+    # by the global FAIL/WARN summary gate at the bottom of this script), NOT the
+    # budget status. A caller may see exit 1 purely because of unrelated warnings
+    # (missing .claudeignore, docs/, …) even when the budget is well under
+    # threshold (over:false). Consumers of --budget --porcelain MUST branch on
+    # the JSON `over` field for budget status, not on $?. This contract is made
+    # explicit via the `_comment` field below; the exit-code behaviour is the
+    # established audit-summary-gate contract and is deliberately UNCHANGED.
     jq -cn \
       --argjson total "$TOTAL_BUDGET_TOKENS" \
       --argjson threshold "$BUDGET_THRESHOLD_ERR" \
       --argjson over "$_over" \
+      --arg comment "budget status is the 'over' field; process exit code is the holistic audit verdict, not budget status" \
       --slurpfile contributors "$_contrib_jsonl" \
-      '{total_tokens: $total, threshold: $threshold, over: $over, contributors: ($contributors | flatten)}'
+      '{total_tokens: $total, threshold: $threshold, over: $over, contributors: ($contributors | flatten), _comment: $comment}'
     rm -f "$_top5_tmp" "$_contrib_jsonl"
   else
     # Human output

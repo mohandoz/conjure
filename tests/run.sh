@@ -5584,6 +5584,15 @@ if [ "$P28_AUDIT_OK" -eq 1 ]; then
   else
     fail "audit --budget --porcelain rc=$P28_PORC_RC — JSON missing total_tokens/contributors/over (EVAL-04-porcelain)"
   fi
+  # WR-04: the porcelain JSON must carry an explicit `_comment` documenting that
+  # budget status is the `over` field, not the process exit code (the exit code
+  # is the holistic audit verdict and is intentionally unchanged).
+  if printf '%s\n' "$P28_PORC_OUT" | jq -e 'has("_comment")' >/dev/null 2>&1 && \
+     printf '%s\n' "$P28_PORC_OUT" | jq -e '._comment | test("over")' >/dev/null 2>&1; then
+    pass "audit --budget --porcelain JSON documents exit-code/over-field contract via _comment (WR-04-porcelain-contract)"
+  else
+    fail "audit --budget --porcelain JSON missing _comment contract note (WR-04-porcelain-contract)"
+  fi
 else
   fail "audit-setup.sh EVAL section not implemented — Wave 3 must add it (EVAL-04-porcelain)"
 fi
