@@ -176,12 +176,14 @@ detect_github_source() {
 resolve_version() {
   local target="$1"
 
-  # Tier 1: .conjure-version file — take the first line and strip surrounding
+  # Tier 1: .conjure-version file — take the first NON-BLANK line and strip surrounding
   # whitespace so a trailing newline / multi-line / padded file does not corrupt the
-  # version embedded in plugin.json / marketplace.json (WR-05).
+  # version embedded in plugin.json / marketplace.json (WR-05). IN-01: skipping blank
+  # leading lines means a stray leading newline no longer silently resolves to 0.0.0.
+  # A wholly blank / whitespace-only file still yields an empty result and falls through.
   if [ -f "$target/.conjure-version" ]; then
     local _ver
-    _ver="$(head -1 "$target/.conjure-version" | tr -d '[:space:]')"
+    _ver="$(grep -m1 -v '^[[:space:]]*$' "$target/.conjure-version" 2>/dev/null | tr -d '[:space:]')"
     if [ -n "$_ver" ]; then
       printf '%s' "$_ver"
       return 0
