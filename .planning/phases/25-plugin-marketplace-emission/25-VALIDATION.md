@@ -2,7 +2,7 @@
 phase: 25
 slug: plugin-marketplace-emission
 status: draft
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-06-03
 ---
@@ -39,6 +39,7 @@ created: 2026-06-03
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
 | 25-00-01 | 00 | 0 | — | — | golden fixture harness exists | infra | `test -d tests/fixtures/_emit-plugin` | ❌ W0 | ⬜ pending |
+| 25-00-02 | 00 | 0 | PLUG-02 | T-25-badpath | `--path` pointing at non-existent dir exits 2 (D-02 negative case) | unit | `bash tests/run.sh 2>&1 \| grep PLUG-02-badpath` | ❌ W0 | ⬜ pending |
 | 25-01-01 | 01 | 1 | PLUG-01 | — | plugin.json emits correct skills/agents/hooks/mcpServers/version | golden-fixture | `bash tests/run.sh 2>&1 \| grep PLUG-01` | ❌ W0 | ⬜ pending |
 | 25-01-02 | 01 | 1 | PLUG-01 | — | merge-preserve: re-run keeps description/keywords/author/license | golden-fixture | `bash tests/run.sh 2>&1 \| grep PLUG-01-merge` | ❌ W0 | ⬜ pending |
 | 25-01-03 | 01 | 1 | PLUG-05 | — | version chain `.conjure-version`→SHA→0.0.0 | unit | `bash tests/run.sh 2>&1 \| grep PLUG-05` | ❌ W0 | ⬜ pending |
@@ -49,8 +50,8 @@ created: 2026-06-03
 | 25-03-02 | 03 | 2 | PLUG-02 | T-25-squat | reserved-name guard exits 2 | unit | `bash tests/run.sh 2>&1 \| grep PLUG-02-reserved` | ❌ W0 | ⬜ pending |
 | 25-03-03 | 03 | 2 | PLUG-03 | — | `extraKnownMarketplaces` written as object into settings.json | golden-fixture | `bash tests/run.sh 2>&1 \| grep PLUG-03` | ❌ W0 | ⬜ pending |
 | 25-03-04 | 03 | 2 | PLUG-03 | — | re-run updates sha in place, never appends duplicate | golden-fixture re-run | `bash tests/run.sh 2>&1 \| grep PLUG-03-idem` | ❌ W0 | ⬜ pending |
-| 25-04-01 | 04 | 2 | PLUG-01..05 | — | audit reconciliation: plugin.json out-of-sync → warning exit 0 | smoke | `bash tests/run.sh 2>&1 \| grep PLUG-REC` | ❌ W0 | ⬜ pending |
-| 25-04-02 | 04 | 2 | PLUG-03 | — | audit ref-without-sha entry → warning exit 0 | smoke | `bash tests/run.sh 2>&1 \| grep PLUG-REFSHA` | ❌ W0 | ⬜ pending |
+| 25-04-01 | 03 | 2 | PLUG-01..05 | — | audit reconciliation: plugin.json out-of-sync → warning exit 0 | smoke | `bash tests/run.sh 2>&1 \| grep PLUG-REC` | ❌ W0 | ⬜ pending |
+| 25-04-02 | 03 | 2 | PLUG-03 | — | audit ref-without-sha entry → warning exit 0 | smoke | `bash tests/run.sh 2>&1 \| grep PLUG-REFSHA` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -79,11 +80,11 @@ created: 2026-06-03
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 30s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 30s
+- [x] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** pending

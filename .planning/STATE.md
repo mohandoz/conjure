@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
-status: Roadmap created; awaiting `/gsd-plan-phase 25`
-last_updated: "2026-06-03T00:50:47.287Z"
-last_activity: 2026-06-03 — v0.7.0 roadmap created (Phases 25–30, 27 requirements mapped)
+status: executing
+last_updated: "2026-06-03T01:29:28.474Z"
+last_activity: 2026-06-03 -- Phase 25 planning complete
 progress:
   total_phases: 6
   completed_phases: 0
-  total_plans: 0
+  total_plans: 4
   completed_plans: 0
   percent: 0
 ---
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 
 Phase: 25 — Plugin + Marketplace Emission (Not started)
 Plan: —
-Status: Roadmap created; awaiting `/gsd-plan-phase 25`
-Last activity: 2026-06-03 — v0.7.0 roadmap created (Phases 25–30, 27 requirements mapped)
+Status: Ready to execute
+Last activity: 2026-06-03 -- Phase 25 planning complete
 
 ## Performance Metrics
 

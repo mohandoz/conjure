@@ -701,20 +701,20 @@ CONJURE_RESERVED_MARKETPLACE_NAMES="
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **`sha` in `extraKnownMarketplaces` source object**
+1. **`sha` in `extraKnownMarketplaces` source object** — **RESOLVED**
    - What we know: Official docs example for `extraKnownMarketplaces` shows only `source` + `repo` (no `sha`); the docs note that "marketplace source — supports `ref` (branch/tag) but not `sha`" for the marketplace source itself.
    - What's unclear: Is D-16's intent to include `sha` in the `extraKnownMarketplaces` source harmless, or does CC reject settings with unknown `sha` field in that context?
-   - Recommendation: Emit both `ref` and `sha` per D-16. If CC ignores `sha` at the marketplace level, it's harmless. The audit check (ref-without-sha warning) remains useful for the `marketplace.json` plugin entries where `sha` IS supported and critical.
+   - **Resolution (D-16):** Emit both `sha` and `ref` per D-16 (conservative/harmless). If CC ignores `sha` at the marketplace level it is dropped silently — no breakage. The audit ref-without-sha warning still passes because `ref` is present. Implementation must write both fields.
 
-2. **Hooks inline vs hooks file for plugin.json**
+2. **Hooks inline vs hooks file for plugin.json** — **RESOLVED**
    - What we know: plugin.json accepts either a path string (`"./hooks/hooks.json"`) OR an inline object for the `hooks` field. The `.claude/settings.json` hooks block is the canonical source in a conjure harness.
-   - Recommendation: Emit hooks INLINE in plugin.json (build from `.claude/settings.json` hooks block via jq). Avoids needing to generate a separate `hooks/hooks.json` file in `.claude-plugin/`.
+   - **Resolution:** plugin.json emits `hooks` inline from the `.claude/settings.json` hooks block (read via `jq '.hooks // null'`). No separate `hooks/hooks.json` file is generated in `.claude-plugin/`. This is simpler and keeps everything in one manifest file.
 
-3. **Target repos with no `.claude/` harness**
+3. **Target repos with no `.claude/` harness** — **RESOLVED**
    - What we know: `conjure publish-plugin` runs on target repos. Some repos may not yet have `conjure init` applied.
-   - Recommendation: Exit 2 with "run `conjure init` first" if `.claude/` directory is absent. Document this as a prerequisite in the help output.
+   - **Resolution:** `emit-plugin.sh` exits 2 with a "run: conjure init" hint when no `.claude/` directory is present in the target path. This prerequisite check runs before any other logic.
 
 ---
 
@@ -759,7 +759,7 @@ CONJURE_RESERVED_MARKETPLACE_NAMES="
 | PLUG-04 | Secret-pattern in emitted manifest → exit 2 before write | unit | `bash tests/run.sh 2>&1 | grep PLUG-04-secret` | No — Wave 0 |
 | PLUG-05 | Version resolution: `.conjure-version` → SHA → 0.0.0 fallback | unit | `bash tests/run.sh 2>&1 | grep PLUG-05` | No — Wave 0 |
 | SC-25 | Audit reconciliation: plugin.json out-of-sync → warning exit 0 | smoke | `bash tests/run.sh 2>&1 | grep PLUG-REC` | No — Wave 0 |
-| SC-25 | Audit ref-without-sha: `extraKnownMarketplaces` entry missing sha → warning | smoke | `bash tests/run.sh 2>&1 | grep PLUG-REFSYM` | No — Wave 0 |
+| SC-25 | Audit ref-without-sha: `extraKnownMarketplaces` entry missing sha → warning | smoke | `bash tests/run.sh 2>&1 | grep PLUG-REFSHA` | No — Wave 0 |
 
 ### Sampling Rate
 
