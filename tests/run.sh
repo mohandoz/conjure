@@ -4609,6 +4609,25 @@ else
   fail "build_plist_xml did not reject XML metachars — entry_rc=$P26_XMLMETA_RC1 domain_rc=$P26_XMLMETA_RC2 (POL-04-macos-xmlmeta)"
 fi
 
+# POL-04-win-herestring: build_ps1_script rejects a managed JSON whose pretty body
+# contains a line beginning with '@ — the PowerShell here-string terminator (WR-06).
+# jq normally indents nested values so this cannot occur from valid input; the test
+# stubs jq within a subshell so the guard receives a body whose first line is '@,
+# proving the terminator-hazard guard fires (returns 2) rather than emitting a
+# corruptible script.
+P26_HERESTR_RC=0
+( set -uo pipefail
+  source "$CONJURE_HOME/lib/policy-helpers.sh"
+  # Stub jq so json_body starts with the '@ here-string terminator.
+  jq() { printf "%s\n" "'@malicious"; }
+  build_ps1_script "hipaa" '{"x":1}' >/dev/null 2>&1
+) || P26_HERESTR_RC=$?
+if [ "$P26_HERESTR_RC" -eq 2 ]; then
+  pass "build_ps1_script rejects JSON body line beginning with '@ here-string terminator (POL-04-win-herestring)"
+else
+  fail "build_ps1_script did not reject '@-leading JSON body — rc=$P26_HERESTR_RC (POL-04-win-herestring)"
+fi
+
 # POL-04-win: emit-policy produces Windows ps1 with correct path (no deprecated ProgramData)
 P26_POL04W_DIR="$(mktemp -d)"
 trap 'rm -rf "$P26_POL04W_DIR"' EXIT

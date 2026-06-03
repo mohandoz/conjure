@@ -485,6 +485,22 @@ build_ps1_script() {
   local json_body
   json_body="$(printf '%s' "$managed_settings_json" | jq '.')"
 
+  # WR-06: a PowerShell @'...'@ here-string terminates at a line whose first
+  # characters are '@ (closing delimiter). A crafted deny path beginning with '@,
+  # embedded as a JSON array element, could prematurely close the here-string and
+  # corrupt the emitted script (injection-into-generated-artifact). Guard: reject
+  # if any line of $json_body begins with '@ before embedding.
+  while IFS= read -r json_line; do
+    case "$json_line" in
+      "'@"*)
+        echo "✗ build_ps1_script: managed-settings JSON line begins with '@ — refusing to emit (here-string terminator hazard): $json_line" >&2
+        return 2
+        ;;
+    esac
+  done <<EOF
+$json_body
+EOF
+
   printf '%s\n' \
     '<#' \
     'Deploys Claude Code managed settings as a JSON file.' \
