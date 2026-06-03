@@ -136,6 +136,13 @@ merge_sandbox_block() {
     return 1
   }
 
+  # WR-04: scan the FINAL merged result before write. The operator's pre-existing
+  # settings.json content ($CURRENT) is merged back into $UPDATED; scanning only the
+  # generated SANDBOX_JSON upstream misses a credential already living in the
+  # operator's file. Return 1 on hit so the caller's `set -e` aborts before write,
+  # preserving the "secret_scan before any write" invariant for this write path.
+  secret_scan "$UPDATED" "settings.json" || return 1
+
   mutate_write "$settings_file" "$UPDATED"
 }
 
@@ -191,6 +198,9 @@ merge_deny_read_permissions() {
     echo "✗ jq produced invalid JSON for settings.json (permissions.deny merge)" >&2
     return 1
   }
+
+  # WR-04: scan the FINAL merged result before write (see merge_sandbox_block).
+  secret_scan "$UPDATED" "settings.json" || return 1
 
   mutate_write "$settings_file" "$UPDATED"
 }

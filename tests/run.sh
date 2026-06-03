@@ -4451,6 +4451,37 @@ fi
 rm -rf "$P26_POL02OP_DIR"
 trap - EXIT
 
+# POL-secret-merged: a credential already present in the operator's existing
+# settings.json aborts emit before write (WR-04 — scan the merged result, not just
+# the generated block).
+P26_SECMRG_DIR="$(mktemp -d)"
+trap 'rm -rf "$P26_SECMRG_DIR"' EXIT
+git -C "$P26_SECMRG_DIR" init -q
+git -C "$P26_SECMRG_DIR" config user.email "test@conjure"
+git -C "$P26_SECMRG_DIR" config user.name "conjure-test"
+cp -r "$CONJURE_HOME/tests/fixtures/_emit-policy/harness/." "$P26_SECMRG_DIR/"
+mkdir -p "$P26_SECMRG_DIR/.claude"
+# Plant a credential pattern in the operator's pre-existing settings.json. The key
+# is assembled at runtime so no literal credential lives in this test source.
+P26_SECMRG_KEY="AKIA$(printf 'IOSFODNN7EXAMPLE')"
+printf '{"hooks":{},"_note":"%s"}' "$P26_SECMRG_KEY" > "$P26_SECMRG_DIR/.claude/settings.json"
+git -C "$P26_SECMRG_DIR" add -A
+git -C "$P26_SECMRG_DIR" commit -q -m "test fixture"
+if [ "$P26_EMIT_OK" -eq 1 ]; then
+  P26_SECMRG_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P26_EMIT_SH" --regime hipaa \
+    --output "$P26_SECMRG_DIR/conjure-policy" >/dev/null 2>&1 || P26_SECMRG_RC=$?
+  if [ "$P26_SECMRG_RC" -ne 0 ]; then
+    pass "emit aborts when operator's existing settings.json contains a credential (POL-secret-merged)"
+  else
+    fail "emit did NOT abort on credential in operator's existing settings.json (POL-secret-merged)"
+  fi
+else
+  fail "emit-policy.sh not found — Wave 1 must create scripts/emit-policy.sh (POL-secret-merged)"
+fi
+rm -rf "$P26_SECMRG_DIR"
+trap - EXIT
+
 # POL-02: emit-policy mirrors denyRead paths into permissions.deny
 P26_POL02_DIR="$(mktemp -d)"
 trap 'rm -rf "$P26_POL02_DIR"' EXIT
