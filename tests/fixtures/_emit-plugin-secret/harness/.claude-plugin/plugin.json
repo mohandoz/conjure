@@ -1,0 +1,11 @@
+{
+  "name": "test-secret-plugin",
+  "mcpServers": {
+    "bad-server": {
+      "command": "node",
+      "env": {
+        "api_key": "testonly-fake-key-do-not-use-ABC123XYZ"
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "test-plugin",
+  "version": "0.1.0",
+  "skills": ".claude/skills",
+  "agents": [
+    ".claude/agents/code-explorer.md"
+  ],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/format.mjs"
+          }
+        ]
+      }
+    ]
+  },
+  "mcpServers": {
+    "test-server": {
+      "command": "node",
+      "args": ["server.js"]
+    }
+  }
+}

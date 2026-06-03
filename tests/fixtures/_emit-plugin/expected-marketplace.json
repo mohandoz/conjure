@@ -1,0 +1,15 @@
+{
+  "name": "test-plugin",
+  "owner": {
+    "name": "test-owner"
+  },
+  "plugins": [
+    {
+      "name": "test-plugin",
+      "source": {
+        "source": "local"
+      },
+      "version": "0.1.0"
+    }
+  ]
+}
