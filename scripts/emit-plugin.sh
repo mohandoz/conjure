@@ -4,7 +4,7 @@
 # repo's .claude/ harness. Called by cli/conjure cmd_publish_plugin.
 #
 # Usage: bash scripts/emit-plugin.sh [options]
-# Options: --path <dir>  --marketplace  --enable  --validate  --dry-run
+# Options: --path <dir>  --name <kebab-name>  --marketplace  --enable  --validate  --dry-run
 # Exit codes: 0 = success; 2 = hard failure (missing dep, reserved name, secret, invalid schema)
 #
 # shellcheck shell=bash
@@ -30,12 +30,14 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --path)       shift; TARGET="${1:-}" ;;
     --path=*)     TARGET="${1#--path=}" ;;
+    --name)       shift; MKT_NAME="${1:-}" ;;
+    --name=*)     MKT_NAME="${1#--name=}" ;;
     --marketplace) DO_MARKETPLACE=1 ;;
     --enable)     DO_ENABLE=1 ;;
     --validate)   DO_VALIDATE=1 ;;
     --dry-run)    DRY_RUN=1 ;;
     -h|--help)
-      echo "Usage: conjure publish-plugin [--path <dir>] [--marketplace] [--enable] [--validate] [--dry-run]"
+      echo "Usage: conjure publish-plugin [--path <dir>] [--name <kebab-name>] [--marketplace] [--enable] [--validate] [--dry-run]"
       exit 0
       ;;
     *)

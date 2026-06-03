@@ -484,12 +484,14 @@ cmd_publish_plugin() {
     case "$1" in
       --path)        shift; target="${1:-}" ;;
       --path=*)      target="${1#--path=}" ;;
+      --name)        shift; mkt_name="${1:-}" ;;
+      --name=*)      mkt_name="${1#--name=}" ;;
       --marketplace) do_marketplace=1 ;;
       --enable)      do_enable=1 ;;
       --validate)    do_validate=1 ;;
       --dry-run)     dryrun=1 ;;
       --help|-h)
-        echo "Usage: conjure publish-plugin [--path <dir>] [--marketplace] [--enable] [--validate] [--dry-run]"
+        echo "Usage: conjure publish-plugin [--path <dir>] [--name <kebab-name>] [--marketplace] [--enable] [--validate] [--dry-run]"
         return 0 ;;
       *) echo "Unknown option: $1"; return 2 ;;
     esac
