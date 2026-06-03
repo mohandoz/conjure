@@ -33,7 +33,7 @@ Usage:
   conjure init [new|existing|migrate] [--profile=<stack>] [--overlay=<git-url>] [--dry-run] [target]
   conjure migrate <source> [target]            (sources: from-claude, from-cursor,
                                                 from-aider, from-continue, from-copilot)
-  conjure audit [--json] [--cost] [--exact] [--retire-list] [target]
+  conjure audit [--json] [--cost] [--exact] [--retire-list] [--budget] [--porcelain] [target]
   conjure update [--check|--apply|--pr|--cron] [target]
   conjure check [--porcelain] [--schema] [target]
   conjure resolve [--dry-run] [target]
@@ -147,25 +147,32 @@ cmd_migrate() {
 
 cmd_audit() {
   # --json sets CONJURE_JSON=1 env var forwarded to audit-setup.sh (SCHM-05 machine-readable output)
-  local target="$(pwd)" do_cost=0 do_exact=0 do_retire=0 do_json=0
+  # --budget sets CONJURE_BUDGET=1 for EVAL-04 context budget linter
+  # --porcelain sets CONJURE_PORCELAIN=1 for budget JSON output (intentional independent reuse
+  #   of the same var name used in cmd_check → check.sh; separate process scope, no collision)
+  local target do_cost do_exact do_retire do_json do_budget do_porcelain
+  target="$(pwd)"; do_cost=0; do_exact=0; do_retire=0; do_json=0; do_budget=0; do_porcelain=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --cost)         do_cost=1 ;;
       --exact)        do_exact=1 ;;
       --retire-list)  do_retire=1 ;;
       --json)         do_json=1 ;;
-      --help|-h)      echo "Usage: conjure audit [--json] [--cost] [--exact] [--retire-list] [target]"; return 0 ;;
+      --budget)       do_budget=1 ;;
+      --porcelain)    do_porcelain=1 ;;
+      --help|-h)      echo "Usage: conjure audit [--json] [--cost] [--exact] [--retire-list] [--budget] [--porcelain] [target]"; return 0 ;;
       *)              target="$1" ;;
     esac
     shift
   done
-  if [ "$do_json" = "1" ]; then
+  if [ "$do_json" = "1" ] || [ "$do_porcelain" = "1" ]; then
     cmd_preflight >/dev/stderr 2>&1 || return 1
   else
     cmd_preflight || return 1
   fi
   CONJURE_HOME="$CONJURE_HOME" CONJURE_COST="$do_cost" CONJURE_EXACT="$do_exact" \
     CONJURE_RETIRE="$do_retire" CONJURE_JSON="$do_json" \
+    CONJURE_BUDGET="$do_budget" CONJURE_PORCELAIN="$do_porcelain" \
     bash "$CONJURE_HOME/scripts/audit-setup.sh" "$target"
 }
 
