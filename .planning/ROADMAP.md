@@ -157,7 +157,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 28-02-PLAN.md — Wave 2: scripts/eval.sh cmd_eval_emit_workflow — conjure-eval.yml GitHub Actions workflow (EVAL-03)
+- [x] 28-02-PLAN.md — Wave 2: scripts/eval.sh cmd_eval_emit_workflow — conjure-eval.yml GitHub Actions workflow (EVAL-03)
 
 **Wave 3** *(blocked on Wave 0 completion; runs parallel to Waves 1+2)*
 
@@ -207,6 +207,6 @@ Plans:
 | 25. Plugin + Marketplace Emission | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 2/4 | In Progress|  |
+| 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 3/4 | In Progress|  |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/? | Not started | - |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |
