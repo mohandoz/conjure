@@ -4246,12 +4246,15 @@ rm -rf "$P25_IDEM_DIR"
 trap - EXIT
 
 # PLUG-REC: audit-setup.sh warns when plugin.json lists skills path but no SKILL.md found
+# Uses go-gin as a complete audit-clean base; empties .claude/skills to trigger reconciliation advisory.
 P25_REC_DIR="$(mktemp -d)"
 trap 'rm -rf "$P25_REC_DIR"' EXIT
+cp -r "$CONJURE_HOME/tests/fixtures/go-gin/." "$P25_REC_DIR/"
+# Remove all SKILL.md files so .claude/skills/ exists but has 0 skills (triggers reconciliation advisory)
+find "$P25_REC_DIR/.claude/skills" -name "SKILL.md" -delete 2>/dev/null || true
 mkdir -p "$P25_REC_DIR/.claude-plugin"
-# plugin.json listing skills path but the .claude/skills dir is absent
+# plugin.json listing skills path but no SKILL.md on disk
 printf '{"name":"test-rec","skills":".claude/skills"}' > "$P25_REC_DIR/.claude-plugin/plugin.json"
-# No .claude/skills directory — on-disk count = 0
 P25_REC_OUT=0
 PLUG_REC_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P25_AUDIT_SH" "$P25_REC_DIR" 2>&1)" || P25_REC_OUT=$?
 if [ "$P25_REC_OUT" -eq 0 ] && printf '%s\n' "$PLUG_REC_OUT" | grep -q "publish-plugin"; then
@@ -4263,11 +4266,16 @@ rm -rf "$P25_REC_DIR"
 trap - EXIT
 
 # PLUG-REFSHA: audit-setup.sh warns when extraKnownMarketplaces entry has ref but no sha
+# Uses go-gin as a complete audit-clean base; overlays settings.json with ref-without-sha entry.
 P25_REFSHA_DIR="$(mktemp -d)"
 trap 'rm -rf "$P25_REFSHA_DIR"' EXIT
-mkdir -p "$P25_REFSHA_DIR/.claude"
-printf '{"extraKnownMarketplaces":{"my-mkt":{"source":{"source":"github","repo":"org/repo","ref":"main"}}}}' \
-  > "$P25_REFSHA_DIR/.claude/settings.json"
+cp -r "$CONJURE_HOME/tests/fixtures/go-gin/." "$P25_REFSHA_DIR/"
+# Overlay settings.json: keep hooks block but add extraKnownMarketplaces with ref but no sha
+jq '. + {"extraKnownMarketplaces":{"my-mkt":{"source":{"source":"github","repo":"org/repo","ref":"main"}}}}' \
+  "$P25_REFSHA_DIR/.claude/settings.json" > "$P25_REFSHA_DIR/.claude/settings.json.tmp" 2>/dev/null \
+  && mv "$P25_REFSHA_DIR/.claude/settings.json.tmp" "$P25_REFSHA_DIR/.claude/settings.json" \
+  || printf '{"extraKnownMarketplaces":{"my-mkt":{"source":{"source":"github","repo":"org/repo","ref":"main"}}}}' \
+       > "$P25_REFSHA_DIR/.claude/settings.json"
 P25_REFSHA_RC=0
 PLUG_REFSHA_OUT="$(CONJURE_HOME="$CONJURE_HOME" bash "$P25_AUDIT_SH" "$P25_REFSHA_DIR" 2>&1)" || P25_REFSHA_RC=$?
 if [ "$P25_REFSHA_RC" -eq 0 ] && printf '%s\n' "$PLUG_REFSHA_OUT" | grep -q "ref"; then

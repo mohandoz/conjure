@@ -174,6 +174,48 @@ else
   fi
 fi
 
+# Plugin reconciliation (D-12 / PLUG-04): plugin.json out-of-sync with .claude/ harness → advisory note (exit 0)
+# Advisory only — does not break CI gate. Nudges user to re-run: conjure publish-plugin
+if [ -f ".claude-plugin/plugin.json" ] && command -v jq >/dev/null 2>&1; then
+  PLUG_SKILLS_PATH="$(jq -r '.skills // empty' .claude-plugin/plugin.json 2>/dev/null)"
+  if [ -n "$PLUG_SKILLS_PATH" ]; then
+    if [ -d "$PLUG_SKILLS_PATH" ]; then
+      ON_DISK_SKILL_COUNT="$(find "$PLUG_SKILLS_PATH" -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')"
+      if [ "$ON_DISK_SKILL_COUNT" -eq 0 ]; then
+        note "⚠ [plugin] plugin.json lists skills path '$PLUG_SKILLS_PATH' but no SKILL.md found — re-run: conjure publish-plugin"
+      else
+        ok "[plugin] plugin.json skills path '$PLUG_SKILLS_PATH' matches on-disk skills ($ON_DISK_SKILL_COUNT found)"
+      fi
+    else
+      note "⚠ [plugin] plugin.json lists skills path '$PLUG_SKILLS_PATH' but directory not found — re-run: conjure publish-plugin"
+    fi
+  else
+    if [ -d ".claude/skills" ]; then
+      ON_DISK_SKILL_COUNT="$(find ".claude/skills" -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')"
+      if [ "$ON_DISK_SKILL_COUNT" -gt 0 ]; then
+        note "⚠ [plugin] plugin.json has no skills path but $ON_DISK_SKILL_COUNT skill(s) found in .claude/skills — re-run: conjure publish-plugin"
+      fi
+    fi
+  fi
+fi
+
+# extraKnownMarketplaces ref-without-sha check (D-12 / D-16): advisory note (exit 0)
+# Advisory only — sha pinning ensures reproducible installs. To fix: re-run: conjure publish-plugin --marketplace
+if [ -f ".claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
+  REF_WITHOUT_SHA="$(jq -r '
+    (.extraKnownMarketplaces // {}) | to_entries[] |
+    select((.value.source.ref != null) and (.value.source.sha == null)) |
+    .key' .claude/settings.json 2>/dev/null)" || true
+  if [ -n "$REF_WITHOUT_SHA" ]; then
+    while IFS= read -r mkt_name; do
+      [ -z "$mkt_name" ] && continue
+      note "⚠ [plugin] extraKnownMarketplaces '$mkt_name': has ref but no sha — re-run: conjure publish-plugin --marketplace"
+    done <<MKT_NAMES_EOF
+$REF_WITHOUT_SHA
+MKT_NAMES_EOF
+  fi
+fi
+
 # Summary
 echo
 echo "─────────────────────────────────────"
