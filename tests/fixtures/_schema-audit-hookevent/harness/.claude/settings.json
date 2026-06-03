@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo renamed"
+          }
+        ]
+      }
+    ],
+    "UnknownEvent42": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo unknown"
+          }
+        ]
+      }
+    ]
+  }
+}
