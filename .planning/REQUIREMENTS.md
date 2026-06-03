@@ -32,11 +32,11 @@ Build order (research consensus): **A plugin → B policy → C eval → D schem
 
 ### Eval: promptfoo + Context-Budget Linter (EVAL)
 
-- [ ] **EVAL-01**: `conjure eval init` scaffolds `.conjure/eval/promptfooconfig.yaml` — one `skill-used` assertion per installed skill + `llm-rubric` per CLAUDE.md rule line
-- [ ] **EVAL-02**: `conjure eval run` shells out to pinned `npx --yes promptfoo@<pinned>` (preflight: Node ≥20.20), passes through exit code; never bundled, never invoked from `audit`/`check`
-- [ ] **EVAL-03**: `conjure eval --emit-workflow` generates a `pull_request` PR-gate workflow (`promptfoo/promptfoo-action`, `fail-on-threshold`, path-triggered on `.claude/**`,`CLAUDE.md`)
-- [ ] **EVAL-04**: `conjure audit --budget` — static context linter (chars/4 on CLAUDE.md + always-loaded skills; flag over threshold; list top contributors; `--porcelain`)
-- [ ] **EVAL-05**: `conjure audit` reports installed skills with no `skill-used` coverage in the eval config
+- [x] **EVAL-01**: `conjure eval init` scaffolds `.conjure/eval/promptfooconfig.yaml` — one `skill-used` assertion per installed skill + `llm-rubric` per CLAUDE.md rule line
+- [x] **EVAL-02**: `conjure eval run` shells out to pinned `npx --yes promptfoo@<pinned>` (preflight: Node ≥20.20), passes through exit code; never bundled, never invoked from `audit`/`check`
+- [x] **EVAL-03**: `conjure eval --emit-workflow` generates a `pull_request` PR-gate workflow (`promptfoo/promptfoo-action`, `fail-on-threshold`, path-triggered on `.claude/**`,`CLAUDE.md`)
+- [x] **EVAL-04**: `conjure audit --budget` — static context linter (chars/4 on CLAUDE.md + always-loaded skills; flag over threshold; list top contributors; `--porcelain`)
+- [x] **EVAL-05**: `conjure audit` reports installed skills with no `skill-used` coverage in the eval config
 
 ### Schema-Version-Aware Audit / Check (SCHM)
 
@@ -126,11 +126,11 @@ Which phases cover which requirements. Populated during roadmap creation.
 | SCHM-03 | Phase 27 | Complete |
 | SCHM-04 | Phase 27 | Complete |
 | SCHM-05 | Phase 27 | Complete |
-| EVAL-01 | Phase 28 | Pending |
-| EVAL-02 | Phase 28 | Pending |
-| EVAL-03 | Phase 28 | Pending |
-| EVAL-04 | Phase 28 | Pending |
-| EVAL-05 | Phase 28 | Pending |
+| EVAL-01 | Phase 28 | Complete |
+| EVAL-02 | Phase 28 | Complete |
+| EVAL-03 | Phase 28 | Complete |
+| EVAL-04 | Phase 28 | Complete |
+| EVAL-05 | Phase 28 | Complete |
 | WS-01 | Phase 29 | Pending |
 | WS-02 | Phase 29 | Pending |
 | WS-03 | Phase 29 | Pending |

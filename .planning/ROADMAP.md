@@ -149,7 +149,7 @@ Plans:
 
 **Wave 0**
 
-- [ ] 28-00-PLAN.md — Wave 0: eval fixture harnesses + golden promptfooconfig.yaml + A1/A2/A3 probe README + Phase 28 graceful-red EVAL test block (EVAL-01..05 Nyquist)
+- [x] 28-00-PLAN.md — Wave 0: eval fixture harnesses + golden promptfooconfig.yaml + A1/A2/A3 probe README + Phase 28 graceful-red EVAL test block (EVAL-01..05 Nyquist)
 
 **Wave 1** *(blocked on Wave 0 completion)*
 
@@ -207,6 +207,6 @@ Plans:
 | 25. Plugin + Marketplace Emission | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 0/? | Not started | - |
+| 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 1/4 | In Progress|  |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/? | Not started | - |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |

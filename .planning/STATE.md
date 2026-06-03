@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
-status: ready_to_plan
-last_updated: 2026-06-03T13:59:42.835Z
+status: executing
+last_updated: "2026-06-03T15:23:17.159Z"
 last_activity: 2026-06-03
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 12
-  completed_plans: 12
+  total_plans: 16
+  completed_plans: 13
   percent: 50
-stopped_at: Phase 27 complete (4/4) — ready to discuss Phase 28
 ---
 
 # Project State
@@ -21,13 +20,13 @@ stopped_at: Phase 27 complete (4/4) — ready to discuss Phase 28
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** A developer can turn any repo into a production-grade, eval-backed Claude Code harness with one trustworthy command — and keep it healthy over time.
-**Current focus:** Phase 28 — promptfoo eval + context budget linter
+**Current focus:** Phase 28 — promptfoo-eval-context-budget-linter
 
 ## Current Position
 
-Phase: 28
-Plan: Not started
-Status: Ready to plan
+Phase: 28 (promptfoo-eval-context-budget-linter) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
 Last activity: 2026-06-03
 
 ## Performance Metrics
@@ -70,6 +69,7 @@ Last activity: 2026-06-03
 | Phase 26 P03 | 10 | 1 tasks | 1 files |
 | Phase 27 P01 | 20 | 2 tasks | 1 files |
 | Phase 27 P02 | 20 | 2 tasks | 2 files |
+| Phase 28 P00 | 23 | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -128,7 +128,7 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T13:12:37.743Z
+Last session: 2026-06-03T15:23:17.153Z
 Stopped at: Completed Phase 27 Plan 01: SCHM-01 + SCHM-02 implemented in audit-setup.sh
 Resume file: None
 
