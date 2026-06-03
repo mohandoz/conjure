@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
 status: executing
-last_updated: "2026-06-03T12:24:49.515Z"
+last_updated: "2026-06-03T12:43:17.655Z"
 last_activity: 2026-06-03
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 33
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 27 (schema-version-aware-audit) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-06-03
 
@@ -66,6 +66,7 @@ Last activity: 2026-06-03
 | Phase 24 P24-02 | 8 | 2 tasks | 1 files |
 | Phase 26 P02 | 20 | 2 tasks | 2 files |
 | Phase 26 P03 | 10 | 1 tasks | 1 files |
+| Phase 27 P01 | 20 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,9 @@ v0.7.0 design decisions (from research + roadmap):
 - **bundled cc-schema.json, NOT runtime-fetched**: zero-egress-in-CI constraint wins; staleness handled by >90-day advisory warn; live-fetch is the anti-pattern for this codebase
 - **promptfoo as opt-in subcommand**: never invoked from `conjure audit`/`check`; `conjure eval` with promptfoo absent exits 2 human-readable; `conjure audit` with promptfoo absent exits 0
 - **Zero new runtime deps**: promptfoo via `npx --yes promptfoo@<pinned>`; plist via `python3 plistlib` or `plutil` (macOS system); everything else jq + bash already in envelope
+- [Phase ?]: SCHM-02 subsumed POL-05c: deliberate refactor covering both permissions. and top-level disableBypassPermissionsMode paths; Phase 26 exit-2 behavior preserved
+- [Phase ?]: awk two-line lookahead for YAML object detection in SCHM-01 (T-27-01 mitigate)
+- [Phase ?]: SCHM-01 reads lib/cc-schema.json at runtime via jq — schema file is single source of truth
 
 ### Pending Todos
 
@@ -121,8 +125,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T12:24:49.509Z
-Stopped at: Phase 25 context gathered
+Last session: 2026-06-03T12:43:17.649Z
+Stopped at: Completed Phase 27 Plan 01: SCHM-01 + SCHM-02 implemented in audit-setup.sh
 Resume file: None
 
 ## Operator Next Steps
