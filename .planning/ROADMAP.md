@@ -31,7 +31,7 @@ Build order: Plugin → Policy/MDM → Schema-audit → Eval → Workspace (read
 - [x] **Phase 25: Plugin + Marketplace Emission** — `lib/plugin-helpers.sh` + `scripts/emit-plugin.sh` + `conjure publish-plugin` (plugin.json, marketplace.json, `extraKnownMarketplaces` wiring, `--validate` gate, version-fallback SHA) (completed 2026-06-03)
 - [x] **Phase 26: Sandbox + Managed-Settings / MDM** — `lib/policy-helpers.sh` + all 4 compliance overlays gain `--emit-policy`; sandbox block + `permissions.deny` mirror; `managed-settings.json`; MDM plist + Windows PS1; `conjure audit` policy flags (completed 2026-06-03)
 - [x] **Phase 27: Schema-Version-Aware Audit** — `lib/cc-schema.json` (bundled); `audit` validates SKILL.md frontmatter + hook event names + `disableBypassPermissionsMode` type; `conjure check --schema` version-gates; `conjure audit --json` machine-readable output (completed 2026-06-03)
-- [ ] **Phase 28: promptfoo Eval + Context-Budget Linter** — `scripts/eval.sh` + `conjure eval init/run/--emit-workflow`; `templates/evals/`; `conjure audit --budget` static context linter; `conjure audit` eval-coverage gap report
+- [x] **Phase 28: promptfoo Eval + Context-Budget Linter** — `scripts/eval.sh` + `conjure eval init/run/--emit-workflow`; `templates/evals/`; `conjure audit --budget` static context linter; `conjure audit` eval-coverage gap report (completed 2026-06-03)
 - [ ] **Phase 29: Workspace Orchestration — Read-Only** — `.conjure-workspace.json` manifest + schema; `conjure workspace init` (TTY discovery); `conjure workspace check` (per-repo porcelain aggregation); `conjure workspace audit` (per-repo --json aggregation + global summary)
 - [ ] **Phase 30: Workspace Orchestration — Mutating + Rollback Saga** — `lib/workspace.sh` + `scripts/workspace.sh` saga pipeline (preflight-all → snapshot-all → ops-serial → aggregate-report); `conjure workspace update`; `conjure workspace adopt`; `--rollback` saga + SIGKILL durability CI fixture
 
@@ -161,7 +161,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 0 completion; runs parallel to Waves 1+2)*
 
-- [ ] 28-03-PLAN.md — Wave 3: scripts/audit-setup.sh --budget linter + EVAL-05 coverage gap + cli/conjure --budget/--porcelain wiring (EVAL-04, EVAL-05)
+- [x] 28-03-PLAN.md — Wave 3: scripts/audit-setup.sh --budget linter + EVAL-05 coverage gap + cli/conjure --budget/--porcelain wiring (EVAL-04, EVAL-05)
 
 **UI hint**: no
 
@@ -207,6 +207,6 @@ Plans:
 | 25. Plugin + Marketplace Emission | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 26. Sandbox + Managed-Settings / MDM | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
-| 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 3/4 | In Progress|  |
+| 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete   | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 0/? | Not started | - |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 0/? | Not started | - |
