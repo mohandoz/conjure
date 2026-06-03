@@ -574,7 +574,10 @@ cmd_workspace() {
   local subcmd="" dryrun=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      init|check|audit) subcmd="$1"; shift ;;
+      # WR-02: once the subcommand is captured, stop interpreting flags in the wrapper and
+      # forward the remainder verbatim, so `workspace <sub> --help` reaches the worker's
+      # per-subcommand usage instead of being swallowed by the wrapper's own --help arm.
+      init|check|audit) subcmd="$1"; shift; break ;;
       --dry-run)        dryrun=1; shift ;;
       --help|-h)        echo "Usage: conjure workspace init|check|audit [args]"; return 0 ;;
       *)                break ;;

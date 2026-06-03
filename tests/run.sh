@@ -6149,6 +6149,15 @@ fi
 trap - EXIT
 rm -rf "$P29_SLW_ROOT"
 
+# WS-CLI-subhelp: `conjure workspace check --help` reaches the worker's check-specific
+# usage instead of the wrapper swallowing --help with generic usage. WR-02.
+P29_HELP_OUT="$(bash "$CONJURE_HOME/cli/conjure" workspace check --help 2>&1)"
+if printf '%s\n' "$P29_HELP_OUT" | grep -q "workspace check <manifest_path>"; then
+  pass "workspace <sub> --help forwards to subcommand-specific usage (WS-CLI-subhelp)"
+else
+  fail "workspace check --help returned generic usage, not check-specific (WS-CLI-subhelp)"
+fi
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
