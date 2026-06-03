@@ -2,6 +2,7 @@
 phase: 25-plugin-marketplace-emission
 reviewed: 2026-06-03T00:00:00Z
 depth: standard
+iteration: 2
 files_reviewed: 7
 files_reviewed_list:
   - lib/plugin-helpers.sh
@@ -12,271 +13,160 @@ files_reviewed_list:
   - .claude-plugin/SCHEMAS/plugin.schema.json
   - .claude-plugin/SCHEMAS/marketplace.schema.json
 findings:
-  critical: 2
-  warning: 7
-  info: 4
-  total: 13
+  critical: 0
+  warning: 3
+  info: 3
+  total: 6
 status: issues_found
 ---
 
-# Phase 25: Code Review Report
+# Phase 25: Code Review Report (Iteration 2)
 
-**Reviewed:** 2026-06-03
+**Reviewed:** 2026-06-03T00:00:00Z
 **Depth:** standard
 **Files Reviewed:** 7
 **Status:** issues_found
 
 ## Summary
 
-Reviewed the plugin/marketplace emission feature: shared helpers (`lib/plugin-helpers.sh`),
-the target-repo emitter (`scripts/emit-plugin.sh`), the self-publish path
-(`scripts/publish-plugin.sh`), the audit reconciliation additions
-(`scripts/audit-setup.sh`), CLI dispatch (`cli/conjure`), and two JSON schemas.
+Re-review after the fixer applied 8 findings from iteration 1. All 8 prior fixes
+were verified as correctly applied:
 
-Two BLOCKERs stand out: (1) `scripts/publish-plugin.sh` violates the project-wide
-`exit 2 never exit 1` convention in six code paths, and (2) the emission paths
-overwrite `plugin.json` / `marketplace.json` / `settings.json` with **no
-backup-before-mutate** snapshot, breaking a core CLAUDE.md safety invariant. Several
-validation-consistency gaps (bash validator vs. JSON schema) and a `sed` path-stripping
-fragility round out the warnings.
+- **CR-01** — `publish-plugin.sh` now `exit 2` on all failure paths (no `exit 1`). Confirmed.
+- **CR-02** — `snapshot_create` runs before the first overwriting write in both
+  `emit-plugin.sh` (lines 90–95, gated on a pre-existing manifest/settings file) and
+  `publish-plugin.sh` (lines 108–111). Ordering verified: secret-scan + schema validation
+  precede snapshot, which precedes `mutate_write`. Correct.
+- **WR-01** — emit-plugin marketplace-name regex `^[a-z][a-z0-9-]{0,63}$` matches the
+  schema pattern. Verified it rejects digit-leading and all-hyphen derivations.
+- **WR-02** — `validate_marketplace_json` enforces name pattern, `owner.name`, and per-plugin
+  `name`/`source` typing. Confirmed.
+- **WR-03** — agent-path stripping uses bash parameter expansion (`${f#"$target/"}`), no `sed`.
+  Confirmed safe for paths with metacharacters; empty dir yields `[]` cleanly under `set -e`.
+- **WR-04** — jq merge base is `.` (preserves all existing fields). Documented and correct.
+- **WR-05** — `resolve_version` strips whitespace from `.conjure-version`. **Fix introduced a
+  regression** (see WR-01 below).
+- **WR-06** — secret-scan ERE uses `[[:space:]]` not `\s`. Verified the key-prefix and
+  bare-`password=` patterns fire under macOS/BSD `grep -E`.
+- **WR-07** — intentionally left as `note()` in audit-setup.sh; not re-flagged (per instructions,
+  switching to `warn()` would flip the audit exit code).
 
-The known `note()`-vs-`warn()` deviation in `audit-setup.sh` is assessed below
-(WR-07) and judged **correct** — using `warn()` would have flipped the audit exit code
-and broken the advisory-only contract documented in the code.
+shellcheck passes clean at the project gate (`-S error -e SC2164,SC2044,SC2034,SC2155`) on all
+four scripts.
 
-## Critical Issues
-
-### CR-01: publish-plugin.sh violates `exit 2 never exit 1` convention (data-path divergence)
-
-**File:** `scripts/publish-plugin.sh:40`, `:77`, `:82`, `:93`, `:101`, `:131`
-**Issue:** CLAUDE.md is explicit and non-negotiable: "Hooks/CLI/scripts `exit 2`,
-never `exit 1`." This worker exits `1` in six places:
-- `:40` unknown argument → `exit 1`
-- `:77` / `:82` invalid existing JSON → `exit 1`
-- `:93` / `:101` jq produced invalid JSON → `exit 1`
-- `:131` invalid submit-entry JSON → `exit 1`
-
-The header comment even codifies the deviation ("1 = validation error"), but that
-directly contradicts the project constraint. Downstream callers and CI gates that
-branch on exit codes treat `1` and `2` differently; a `1` here is interpreted as an
-unexpected/uncontrolled failure rather than a controlled hard failure. The sibling
-worker `scripts/emit-plugin.sh` correctly uses `exit 2` everywhere (`:41`, `:51`, etc.),
-making this an inconsistency within the same feature.
-
-**Fix:** Replace every `exit 1` with `exit 2` and update the header comment block:
-```bash
-# Exit codes:
-#   0 = success
-#   2 = hard failure (bad arg, JSON parse failure, missing file, dirty tree, missing dep/VERSION)
-```
-```bash
-# :40
-*) echo "Unknown argument: $1" >&2; exit 2 ;;
-# :77, :82, :93, :101, :131 — all `exit 1` → `exit 2`
-```
-
-### CR-02: Emission overwrites manifests with no backup-before-mutate (safety invariant breach)
-
-**File:** `scripts/emit-plugin.sh:84-86`, `:128`, `:134`; `scripts/publish-plugin.sh:106`, `:108`, `:135`
-**Issue:** CLAUDE.md mandates "backup-before-mutate on every change" and the blessed
-backup mechanism is `snapshot_create` (see `scripts/adopt.sh:202`/`:214`). Neither
-emission worker sources `lib/snapshot.sh` nor calls `snapshot_create` before
-overwriting pre-existing files:
-- `emit-plugin.sh:86` overwrites `.claude-plugin/plugin.json` (which may contain
-  user-authored fields; the jq merge in `plugin_build_plugin_json` re-asserts only an
-  allowlist, and any field outside it is at risk under future refactors — see WR-04).
-- `emit-plugin.sh:128` overwrites `.claude-plugin/marketplace.json`.
-- `plugin_wire_settings` → `mutate_write` (`:366`, called from `emit-plugin.sh:134`)
-  overwrites the live `.claude/settings.json`.
-- `publish-plugin.sh:106`/`:108` overwrite the repo's own committed manifests.
-
-`mutate_write` does a bare `> "$dest"` (`lib/mutate.sh:65`) with no `.bak`. A bad jq
-merge, an unexpected schema, or user error therefore destroys prior content with no
-restore path. This is a data-loss risk on every re-run.
-
-**Fix:** Source `lib/snapshot.sh` and snapshot `.claude-plugin/` (and
-`.claude/settings.json`) before the first write, mirroring `adopt.sh`:
-```bash
-source "$CONJURE_HOME/lib/snapshot.sh"
-# before the first mutate_write that can overwrite existing files (live mode only):
-if [ "${DRY_RUN:-0}" != "1" ] && { [ -f "$TARGET/.claude-plugin/plugin.json" ] || [ -f "$TARGET/.claude/settings.json" ]; }; then
-  snapshot_create "$TARGET" "$TARGET/.conjure-backups"
-fi
-```
-Document the backup location in the success report (`:142-156`). If a deliberate
-exception was intended, it must be justified the way `snapshot_create` is blessed in
-CLAUDE.md — currently it is not.
+No Critical findings remain. Three new/residual Warnings surfaced — the most important is a
+regression introduced by the WR-05 fix.
 
 ## Warnings
 
-### WR-01: Bash marketplace-name validator inconsistent with JSON schema (leading digit + length)
+### WR-01: WR-05 whitespace-strip regression — blank `.conjure-version` emits `"version": ""`
 
-**File:** `scripts/emit-plugin.sh:104`; `.claude-plugin/SCHEMAS/marketplace.schema.json:9`
-**Issue:** The emitter's gate is `^[a-z0-9][a-z0-9-]*$` — it permits a **leading digit**
-and imposes **no length cap**. The authoritative schema requires
-`^[a-z][a-z0-9-]{0,63}$` — leading **letter only**, max 64 chars. A repo/dir named
-`9tools` yields `MKT_NAME=9tools`, which passes the emitter, gets written and wired into
-`settings.json`, then fails `claude plugin validate` / schema validation downstream.
-Same for any name >64 chars. The user only discovers the breakage after mutation.
+**File:** `lib/plugin-helpers.sh:180-183`
+**Issue:** The WR-05 fix replaced the raw read with
+`head -1 "$target/.conjure-version" | tr -d '[:space:]'`. When the file exists but is empty or
+whitespace-only (blank line, stray newline, file touched but not filled), `tr -d '[:space:]'`
+collapses it to the **empty string**, and `resolve_version` returns `""` with exit 0 — it never
+falls through to the git-SHA (Tier 2) or `0.0.0` (Tier 3) fallbacks.
 
-**Fix:** Align the emitter regex with the schema and reject early:
-```bash
-if ! printf '%s' "$MKT_NAME" | grep -qE '^[a-z][a-z0-9-]{0,63}$'; then
-  echo "✗ Marketplace name '$MKT_NAME' must start with a letter and be ≤64 chars (a-z, 0-9, hyphens)" >&2
-  exit 2
-fi
-```
+That empty string is then passed as `--arg version ""` into `plugin_build_plugin_json` and
+`plugin_build_marketplace_json`, producing `"version": ""` in the emitted manifests. Verified:
+`printf '\n' > .conjure-version; head -1 ... | tr -d '[:space:]'` yields an empty result, and the
+downstream validator accepts it (see WR-02). The user gets a silently version-less plugin instead
+of the intended git-SHA or `0.0.0` fallback. Pre-fix behavior (raw read) would at least have
+emitted a non-empty token.
 
-### WR-02: Bash validators skip schema-required constraints (owner.name, name pattern, source type)
-
-**File:** `lib/plugin-helpers.sh:103-135`
-**Issue:** `validate_marketplace_json` is the pre-write gate, but it is weaker than the
-shipped schema:
-- It checks `owner` is an object but never checks the schema-required `owner.name`
-  (schema `:14`). An owner object missing `name` passes the bash gate.
-- It never enforces the `name` kebab pattern (schema `:9`).
-- Per-plugin it checks `source != null` but not that `source` is an **object**
-  (schema `:28` requires object); a string `source` would pass.
-
-Because emission only runs `claude plugin validate` when `--validate` is explicitly
-passed (`emit-plugin.sh:138`), without that flag the weak bash gate is the only
-validation — so malformed manifests can be written and committed.
-
-**Fix:** Tighten `validate_marketplace_json` to mirror schema requirements:
-```bash
-# owner.name present + string
-jq -e '(.owner.name | type) == "string"' ...
-# name kebab pattern
-jq -e '.name | test("^[a-z][a-z0-9-]{0,63}$")' ...
-# each plugin.source is an object
-jq -e '[.plugins[] | select((.source | type) != "object")] | length == 0' ...
-```
-
-### WR-03: Unescaped `$target` in `sed` substitution breaks on special characters
-
-**File:** `lib/plugin-helpers.sh:209-210`
-**Issue:** `find "$target/.claude/agents" ... | sed "s|$target/||"` interpolates
-`$target` directly into the `sed` substitution pattern. `TARGET` defaults to `$(pwd)`
-(`emit-plugin.sh:20`), an absolute path that can contain `sed` metacharacters or the `|`
-delimiter (e.g. a directory whose path contains `|`, or `.`/`*` which are regex-active
-in the LHS). When that happens, the path is stripped incorrectly or `sed` errors, and
-the resulting `agents` array contains wrong/absolute paths — a silently wrong manifest.
-
-**Fix:** Strip the prefix with bash parameter expansion (no regex) instead of `sed`:
-```bash
-while IFS= read -r f; do
-  printf '%s\n' "${f#"$target/"}"
-done < <(find "$target/.claude/agents" -maxdepth 1 -name '*.md' 2>/dev/null) \
-  | jq -R . | jq -sc .
-```
-
-### WR-04: `plugin_build_plugin_json` allowlist intent diverges from passthrough behavior
-
-**File:** `lib/plugin-helpers.sh:238-256`
-**Issue:** The merge preserves only `description`, `keywords`, `author`, `license`,
-`homepage`, `repository`. The plugin schema also defines `displayName`, `commands`,
-`defaultEnabled` (schema `:10`, `:20`, `:18`). Because the merge base is `.` (the
-original object), those three are in fact retained today — but the explicit allowlist of
-`($orig.x // null) as $...` lines plus the "merge-preserve of user metadata fields"
-comment imply allowlist semantics that do NOT match the passthrough reality. The risk: a
-future refactor switching the base from `.` to `{}` (a natural-looking change) would
-silently drop every un-allowlisted field with no test catching it.
-
-**Fix:** Either document on `:245` that `.` is the merge base and all existing fields
-pass through verbatim (the allowlist lines only re-assert specific fields), or
-explicitly preserve all schema-known optional fields so intent and behavior match.
-
-### WR-05: `resolve_version` emits raw `.conjure-version` content with no validation/trim
-
-**File:** `lib/plugin-helpers.sh:169-172`
-**Issue:** Tier 1 does `cat "$target/.conjure-version"` and returns it verbatim as the
-version string written into `plugin.json` / `marketplace.json`. A file with a trailing
-newline, leading/trailing whitespace, multiple lines, or non-semver junk flows straight
-into the manifest. While any string satisfies the schema `version` type, multi-line or
-whitespace-laden content corrupts the embedded value and `claude plugin validate` /
-consumers expect a clean single-line version.
-
-**Fix:** Trim and take the first line:
+**Fix:** Guard for the empty result and fall through to the existing Tier 2/3 logic:
 ```bash
 if [ -f "$target/.conjure-version" ]; then
-  head -1 "$target/.conjure-version" | tr -d '[:space:]'
-  return 0
+  _ver="$(head -1 "$target/.conjure-version" | tr -d '[:space:]')"
+  if [ -n "$_ver" ]; then
+    printf '%s' "$_ver"
+    return 0
+  fi
+  echo "WARN: .conjure-version is empty — falling back to git SHA / 0.0.0" >&2
 fi
+# ... continue to Tier 2 (git) and Tier 3 (0.0.0)
 ```
 
-### WR-06: Secret-scan regex relies on `\s` under POSIX `grep -E` (security control weakened on macOS)
+### WR-02: `validate_plugin_json` accepts empty `name` and empty `version` — last gate before write is too permissive
 
-**File:** `lib/plugin-helpers.sh:45-46`
-**Issue:** The secret-scan pattern uses `\s` (e.g. the credential-assignment branch
-matching whitespace around `=`/`:`). `\s` is a GNU/PCRE extension and is **not** part of
-POSIX ERE. On BSD/macOS `grep -E` (the platform this project explicitly targets), `\s`
-matches a literal `s`, not whitespace — so a credential assignment written with spaces
-around the operator would NOT be detected, defeating the credential gate on exactly the
-platform it ships on. This silently weakens a security control.
+**File:** `lib/plugin-helpers.sh:64-67,70-73`
+**Issue:** The required-`name` check only asserts `(.name | type) == "string"`. An empty string
+`""` is a string, so a manifest with `"name": ""` passes the validator (verified). Because the
+jq merge base is `.` (WR-04), an existing `plugin.json` carrying a blank or whitespace `name`
+flows through unchanged and is written out. The schema marks `name` as required but the bundled
+validator — the actual gate that runs before `mutate_write` — does not enforce non-blank. The same
+applies to `version`: jq treats `""` as truthy, so the `if .version then ...` branch is taken and
+`""` passes the string check, compounding WR-01.
 
-**Fix:** Replace `\s` with the POSIX class `[[:space:]]` throughout the pattern so it
-matches whitespace on both GNU and BSD `grep -E`.
+**Fix:** Tighten the required-field checks to reject blank values:
+```bash
+if ! printf '%s' "$content" | jq -e '(.name | type) == "string" and (.name | length > 0)' >/dev/null 2>&1; then
+  echo "✗ plugin.json: 'name' is required and must be a non-empty string" >&2
+  errors=$((errors + 1))
+fi
+```
+Optionally reject `""` for `version` the same way (`(.version | length > 0)`) so an empty
+`.conjure-version` is caught even if WR-01 is not fixed.
 
-### WR-07: `note()` substituted for `warn()` in audit advisories — assessed CORRECT (keep)
+### WR-03: Marketplace `--name` override is plumbed end-to-end but unreachable from the CLI
 
-**File:** `scripts/audit-setup.sh:177-217`
-**Issue (assessment requested):** Plan 25-03 specified `warn()` for the two plugin
-advisory sections; the executor used `note()` instead. `warn()` increments `WARN`
-(`:20`), and the audit exit logic does `[ "$WARN" -gt 0 ] && exit 1` (`:339`). Using
-`warn()` would therefore flip the audit from exit 0 to exit 1 purely because a plugin
-manifest is stale — and the code comments explicitly state these checks are "advisory
-note (exit 0)" / "does not break CI gate" (`:177-178`, `:202-203`). The intended
-semantics are informational, not gate-breaking. `note()` (plain echo, no counter) is the
-correct choice; using `warn()` would have been a BLOCKER-class regression (CI
-false-failure on stale plugin metadata). **No change required.**
+**File:** `cli/conjure:481-504`, `scripts/emit-plugin.sh:26`
+**Issue:** `CONJURE_PLUGIN_MKT_NAME` is threaded from `cmd_publish_plugin` (line 503) into
+`emit-plugin.sh` (line 26, `MKT_NAME="${CONJURE_PLUGIN_MKT_NAME:-}"`), and the marketplace path
+honours a non-empty `MKT_NAME` instead of auto-deriving. But `cmd_publish_plugin` initialises
+`mkt_name=""` and its arg loop has **no flag that ever sets it** — there is no `--name`/`--mkt-name`
+case. Neither does `emit-plugin.sh`'s own arg loop (lines 29-47). The result: the only way to reach
+the override is to set the env var by hand; via the documented CLI the marketplace name is *always*
+auto-derived from the repo basename.
 
-Secondary nit: the `note()` calls prefix the message with a warning glyph (`:185`,
-`:190`, `:196`, `:212`), which visually reads as a warning while deliberately not
-counting as one. Consider a distinct informational prefix so the exit-code contract is
-legible to readers.
+This matters because auto-derivation can produce a name the user cannot fix: a repo whose basename
+starts with a digit (e.g. `123-tools` → `123-tools`) or normalises to all hyphens (`_._` → `---`)
+fails the WR-01 regex and hard-`exit 2`s the command, with no documented escape hatch. Dead
+plumbing also misleads maintainers into thinking the override works.
+
+**Fix:** Add the flag to both arg loops, or remove the dead env plumbing. Preferred — wire the flag:
+```bash
+# in cmd_publish_plugin and emit-plugin.sh arg loops:
+--name)    shift; mkt_name="${1:-}" ;;
+--name=*)  mkt_name="${1#--name=}" ;;
+```
+and surface `[--name <kebab-name>]` in the usage strings.
 
 ## Info
 
-### IN-01: `set -uo pipefail` in audit-setup.sh omits `-e` while siblings use `set -euo`
+### IN-01: secret-scan JSON field allowlist omits `password`
 
-**File:** `scripts/audit-setup.sh:6`
-**Issue:** `audit-setup.sh` uses `set -uo pipefail` (no `-e`), whereas the emission
-workers use `set -euo pipefail`. For an audit script this is arguably intentional (it
-must run all checks even if one fails), but the divergence is undocumented.
-**Fix:** Add a one-line comment explaining `-e` is intentionally omitted so audit
-continues past individual check failures.
+**File:** `lib/plugin-helpers.sh:48`
+**Issue:** The quoted-JSON-field branch lists `api_key|api_secret|auth_token|access_token|secret_key|private_key`
+but not `password`. A manifest field literally `"password": "<value>"` (e.g. an MCP server `env`
+entry merged from `.mcp.json`) does not match that branch, and the bare-`password=` branch requires
+a non-JSON `=`/`:` form, so it slips through. Raw key prefixes (`sk-ant-`, `ghp_`, …) still catch
+most real leaks, so impact is limited.
 
-### IN-02: Owner-name derivation falls back to literal `unknown` silently
+**Fix:** Add `password` to the JSON-field alternation:
+`"(api_key|api_secret|auth_token|access_token|secret_key|private_key|password)"`.
 
-**File:** `scripts/emit-plugin.sh:114-118`
-**Issue:** When `git config user.name` is empty and the repo basename can't supply an
-owner, `OWNER_NAME` becomes the literal string `unknown`, written into
-`marketplace.json` `owner.name`. This passes validation but produces a low-quality
-public manifest with no warning.
-**Fix:** Emit a `WARN:` to stderr when falling back to `unknown` so the user sets a real
-owner before publishing.
+### IN-02: Redundant `command -v git` re-check in emit-plugin.sh
 
-### IN-03: `reserved_name_check` iterates an unquoted space-list
+**File:** `scripts/emit-plugin.sh:68`
+**Issue:** git availability is already a hard prerequisite (`exit 2`) at lines 55-58, so the
+`if command -v git` guard at line 68 is always true and adds noise.
+**Fix:** Drop the inner `command -v git` test and run the dirty-tree check unconditionally.
 
-**File:** `lib/plugin-helpers.sh:21`
-**Issue:** `for reserved in $CONJURE_RESERVED_MARKETPLACE_NAMES` relies on unquoted
-word-splitting. It works because the list contains only single-token values, but it is
-fragile to IFS changes or to overrides containing quoted multi-word entries.
-**Fix:** Acceptable as-is under the POSIX-3.2 no-arrays constraint; add a comment noting
-the list must remain whitespace-delimited single tokens.
+### IN-03: `publish-plugin.sh` reads `plugin.json` for validation without existence check
 
-### IN-04: `--enable` without `--marketplace` silently no-ops
-
-**File:** `scripts/emit-plugin.sh:88-135`; `cli/conjure:487-488`
-**Issue:** `--enable` only takes effect inside the `if [ "$DO_MARKETPLACE" = "1" ]`
-block. `conjure publish-plugin --enable` (without `--marketplace`) parses fine, mutates
-`plugin.json`, and silently ignores `--enable`. Users will reasonably expect it to do
-something.
-**Fix:** If `DO_ENABLE=1` and `DO_MARKETPLACE=0`, print a `WARN:` that `--enable`
-requires `--marketplace`, or auto-imply `--marketplace`.
+**File:** `scripts/publish-plugin.sh:81-84,96-98`
+**Issue:** The script checks that `marketplace.json` exists (line 59) but `jq empty "$PLUGIN_DIR/plugin.json"`
+(line 81) and the later `jq ... "$PLUGIN_DIR/plugin.json"` (line 96) assume `plugin.json` is present.
+If only `marketplace.json` exists, `jq` errors on the missing file and the `2>/dev/null || exit 2`
+branch fires with the misleading message "is not valid JSON" rather than "not found". Low impact
+(still exits 2) but the diagnostic is wrong.
+**Fix:** Add an explicit `[ -f "$PLUGIN_DIR/plugin.json" ]` guard mirroring lines 59-62 before the
+jq validation.
 
 ---
 
-_Reviewed: 2026-06-03_
+_Reviewed: 2026-06-03T00:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
-_Depth: standard_
+_Depth: standard (iteration 2)_
