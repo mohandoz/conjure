@@ -5305,7 +5305,7 @@ if [ "$P28_EVAL_OK" -eq 1 ]; then
   CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" init "$P28_NOSK_DIR" >/dev/null 2>&1 || P28_NOSK_RC=$?
   P28_NOSK_COUNT=0
   [ -f "$P28_NOSK_DIR/.conjure/eval/promptfooconfig.yaml" ] && \
-    P28_NOSK_COUNT="$(grep -c "type: skill-used" "$P28_NOSK_DIR/.conjure/eval/promptfooconfig.yaml" 2>/dev/null || printf '0')"
+    P28_NOSK_COUNT="$(grep -c "type: skill-used" "$P28_NOSK_DIR/.conjure/eval/promptfooconfig.yaml" 2>/dev/null || true)"
   if [ "$P28_NOSK_RC" -eq 0 ] && \
      [ -f "$P28_NOSK_DIR/.conjure/eval/promptfooconfig.yaml" ] && \
      [ "$P28_NOSK_COUNT" -eq 0 ]; then
