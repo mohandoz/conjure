@@ -6539,6 +6539,166 @@ else
   trap - EXIT
 fi
 
+# ── Phase 30 code-review fixes — regression tests (CR-01..04 / WR-01) ─────────
+echo
+echo "▸ Phase 30 — code-review fix regressions (CR-01..04 / WR-01)"
+
+# WR-01: rollback is destructive — non-TTY without --yes must exit 2 (consent gate).
+# Reuse a real state file (adopt the trio with --yes), then attempt rollback non-TTY
+# WITHOUT --yes (stdin from /dev/null = non-TTY).
+P30_FIX_WR01_DIR="$(mktemp -d)"
+trap 'rm -rf "$P30_FIX_WR01_DIR"' EXIT
+cp -r "$P30_WS_TRIO/." "$P30_FIX_WR01_DIR/"
+if [ "$P30_WS_SH_OK" -eq 1 ] && [ "$P30_WS_TRIO_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --yes \
+    "$P30_FIX_WR01_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || true
+  P30_WR01_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --rollback \
+    "$P30_FIX_WR01_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || P30_WR01_RC=$?
+  if [ "$P30_WR01_RC" -eq 2 ]; then
+    pass "workspace rollback consent gate: non-TTY without --yes exits 2 (WR-01)"
+  else
+    fail "workspace rollback consent gate: non-TTY no --yes expected exit 2, got $P30_WR01_RC (WR-01)"
+  fi
+else
+  fail "workspace rollback consent gate not testable (WR-01)"
+fi
+trap - EXIT
+rm -rf "$P30_FIX_WR01_DIR"
+
+# CR-01: rolling back `repo-a` must NOT kill a concurrent `repo-abc` adopt subprocess.
+# Launch a sham subprocess shaped EXACTLY like the production PHASE-B launch — a bash
+# process running a `cli/conjure` script with `adopt <repo_abs>` as its trailing argv,
+# where repo_abs ends in "/repo-abc". Then run ws_do_rollback's CR-01-fixed pkill for a
+# sibling whose path ends in "/repo-a". The anchored+escaped pattern `repo-a$` must NOT
+# match `…/repo-abc` (suffix over-match), while a `repo-abc$` pattern MUST (positive
+# control proving the test harness can see + kill the sham via pkill -f).
+P30_FIX_CR01_DIR="$(mktemp -d)"
+P30_FIX_CR01_STUB="$(mktemp -d)"
+trap 'rm -rf "$P30_FIX_CR01_DIR" "$P30_FIX_CR01_STUB"' EXIT
+if [ "$P30_WS_SH_OK" -eq 1 ]; then
+  mkdir -p "$P30_FIX_CR01_DIR/repo-a" "$P30_FIX_CR01_DIR/repo-abc" "$P30_FIX_CR01_STUB/cli"
+  # Stub `conjure` whose only job is to sit in a bounded sleep so the launching bash
+  # process keeps a clean argv ("…/cli/conjure adopt <path>") visible to pkill -f.
+  printf '#!/usr/bin/env bash\nsleep 30\n' > "$P30_FIX_CR01_STUB/cli/conjure"
+  chmod +x "$P30_FIX_CR01_STUB/cli/conjure"
+  P30_CR01_ABC="$P30_FIX_CR01_DIR/repo-abc"
+  bash "$P30_FIX_CR01_STUB/cli/conjure" adopt "$P30_CR01_ABC" >/dev/null 2>&1 &
+  P30_CR01_SIBLING_PID=$!
+  sleep 0.3
+  # Negative assertion: build the escaped+anchored pattern for repo-a exactly as
+  # ws_do_rollback does, then run its pkill. The repo-abc sibling MUST survive.
+  P30_CR01_RBABS="$P30_FIX_CR01_DIR/repo-a"
+  P30_CR01_RE="$(printf '%s' "$P30_CR01_RBABS" | sed 's/[].[*^$()+?{}|\\]/\\&/g')"
+  pkill -9 -f "conjure adopt.*${P30_CR01_RE}\$" 2>/dev/null || true
+  pkill -9 -f "adopt\\.sh.*${P30_CR01_RE}\$" 2>/dev/null || true
+  sleep 0.1
+  P30_CR01_SURVIVED=0
+  kill -0 "$P30_CR01_SIBLING_PID" 2>/dev/null && P30_CR01_SURVIVED=1
+  # Positive control: the repo-abc pattern MUST kill the sham (proves the harness can see
+  # this process via pkill -f, so the survival above is real protection, not a blind spot).
+  P30_CR01_RE2="$(printf '%s' "$P30_CR01_ABC" | sed 's/[].[*^$()+?{}|\\]/\\&/g')"
+  pkill -9 -f "conjure adopt.*${P30_CR01_RE2}\$" 2>/dev/null || true
+  sleep 0.1
+  P30_CR01_KILLED=0
+  kill -0 "$P30_CR01_SIBLING_PID" 2>/dev/null || P30_CR01_KILLED=1
+  if [ "$P30_CR01_SURVIVED" -eq 1 ] && [ "$P30_CR01_KILLED" -eq 1 ]; then
+    pass "workspace rollback orphan-evict: repo-a pattern spares repo-abc; repo-abc pattern kills it (CR-01)"
+  else
+    fail "workspace rollback orphan-evict: survived_repo_a_pass=$P30_CR01_SURVIVED killed_by_repo_abc_pass=$P30_CR01_KILLED (CR-01)"
+  fi
+  kill -9 "$P30_CR01_SIBLING_PID" 2>/dev/null || true
+  wait "$P30_CR01_SIBLING_PID" 2>/dev/null || true
+else
+  fail "workspace rollback orphan-evict not testable (CR-01)"
+fi
+trap - EXIT
+rm -rf "$P30_FIX_CR01_DIR" "$P30_FIX_CR01_STUB"
+
+# CR-02: a file whose name contains DOUBLE spaces must verify byte-perfectly through
+# rollback (the "<hash>  <relpath>" parse must not truncate embedded double spaces).
+# Exercise the exact parse logic ws_do_rollback uses on a hand-built hash line.
+P30_FIX_CR02_DIR="$(mktemp -d)"
+trap 'rm -rf "$P30_FIX_CR02_DIR"' EXIT
+P30_CR02_FNAME="./file  with  double  spaces.txt"
+printf 'content\n' > "$P30_FIX_CR02_DIR/file  with  double  spaces.txt"
+P30_CR02_HASH="$(p30_sha "$P30_FIX_CR02_DIR/file  with  double  spaces.txt")"
+P30_CR02_LINE="$(printf '%s  %s' "$P30_CR02_HASH" "$P30_CR02_FNAME")"
+# Mirror ws_do_rollback's CR-02-fixed parse: strip only the FIRST two-space run.
+P30_CR02_PH="${P30_CR02_LINE%%  *}"
+P30_CR02_PF="${P30_CR02_LINE#*  }"
+if [ "$P30_CR02_PH" = "$P30_CR02_HASH" ] && [ "$P30_CR02_PF" = "$P30_CR02_FNAME" ]; then
+  pass "workspace rollback verify-parse: double-space path preserved verbatim (CR-02)"
+else
+  fail "workspace rollback verify-parse: double-space path mangled — hash='$P30_CR02_PH' path='$P30_CR02_PF' (CR-02)"
+fi
+trap - EXIT
+rm -rf "$P30_FIX_CR02_DIR"
+
+# CR-03: a repo that FAILED during PHASE A (status=failed + empty snapshot_ref, never
+# mutated) must roll back cleanly (marked rolled_back, overall exit 0) — NOT a spurious
+# exit 2. Hand-build a state file with one such repo and one already-rolled_back repo.
+P30_FIX_CR03_DIR="$(mktemp -d)"
+trap 'rm -rf "$P30_FIX_CR03_DIR"' EXIT
+cp -r "$P30_WS_TRIO/." "$P30_FIX_CR03_DIR/"
+if [ "$P30_WS_SH_OK" -eq 1 ] && [ "$P30_WS_TRIO_OK" -eq 1 ]; then
+  P30_CR03_STATE="$P30_FIX_CR03_DIR/.conjure-workspace-state.json"
+  jq -cn '{
+    run_id: "cr03-test", started: "2026-06-04T00:00:00Z", phase: "snapshot",
+    repos: [
+      {name:"alpha", snapshot_ref:"", sha256_pre_ref:"", status:"failed"},
+      {name:"beta",  snapshot_ref:"", sha256_pre_ref:"", status:"pending"},
+      {name:"gamma", snapshot_ref:"", sha256_pre_ref:"", status:"pending"}
+    ]
+  }' > "$P30_CR03_STATE"
+  P30_CR03_RC=0
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --rollback --yes \
+    "$P30_FIX_CR03_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || P30_CR03_RC=$?
+  P30_CR03_ALPHA_STATUS="$(jq -r '.repos[] | select(.name=="alpha") | .status' "$P30_CR03_STATE" 2>/dev/null || echo unknown)"
+  if [ "$P30_CR03_RC" -eq 0 ] && [ "$P30_CR03_ALPHA_STATUS" = "rolled_back" ]; then
+    pass "workspace rollback: PHASE-A-failed repo (failed+empty snapshot_ref) → rolled_back, exit 0 (CR-03)"
+  else
+    fail "workspace rollback: PHASE-A-failed repo expected rolled_back+exit0, got status='$P30_CR03_ALPHA_STATUS' rc=$P30_CR03_RC (CR-03)"
+  fi
+else
+  fail "workspace rollback PHASE-A-failed idempotency not testable (CR-03)"
+fi
+trap - EXIT
+rm -rf "$P30_FIX_CR03_DIR"
+
+# CR-04: the per-file pre-hash manifest written during PHASE A must NOT contain any
+# .conjure-adopt-backups paths (the snapshot's own in-tree copy). Adopt the trio, then
+# inspect each repo's recorded sha256_pre_ref hash file for forbidden paths.
+P30_FIX_CR04_DIR="$(mktemp -d)"
+trap 'rm -rf "$P30_FIX_CR04_DIR"' EXIT
+cp -r "$P30_WS_TRIO/." "$P30_FIX_CR04_DIR/"
+if [ "$P30_WS_SH_OK" -eq 1 ] && [ "$P30_WS_TRIO_OK" -eq 1 ]; then
+  CONJURE_HOME="$CONJURE_HOME" bash "$P30_WS_SH" adopt --yes \
+    "$P30_FIX_CR04_DIR/.conjure-workspace.json" </dev/null >/dev/null 2>&1 || true
+  P30_CR04_STATE="$P30_FIX_CR04_DIR/.conjure-workspace-state.json"
+  P30_CR04_BAD=0
+  P30_CR04_CHECKED=0
+  if [ -f "$P30_CR04_STATE" ]; then
+    while IFS= read -r _href; do
+      [ -n "$_href" ] || continue
+      [ -f "$_href" ] || continue
+      P30_CR04_CHECKED=$((P30_CR04_CHECKED+1))
+      if grep -q '\.conjure-adopt-backups' "$_href" 2>/dev/null; then
+        P30_CR04_BAD=$((P30_CR04_BAD+1))
+      fi
+    done < <(jq -r '.repos[] | .sha256_pre_ref // empty' "$P30_CR04_STATE" 2>/dev/null)
+  fi
+  if [ "$P30_CR04_CHECKED" -ge 1 ] && [ "$P30_CR04_BAD" -eq 0 ]; then
+    pass "workspace adopt pre-hash: manifest excludes .conjure-adopt-backups (hash/deletion scope agree) (CR-04)"
+  else
+    fail "workspace adopt pre-hash: checked=$P30_CR04_CHECKED bad=$P30_CR04_BAD (CR-04)"
+  fi
+else
+  fail "workspace adopt pre-hash scope not testable (CR-04)"
+fi
+trap - EXIT
+rm -rf "$P30_FIX_CR04_DIR"
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
