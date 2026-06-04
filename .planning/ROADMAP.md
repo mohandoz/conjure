@@ -33,7 +33,7 @@ Build order: Plugin → Policy/MDM → Schema-audit → Eval → Workspace (read
 - [x] **Phase 27: Schema-Version-Aware Audit** — `lib/cc-schema.json` (bundled); `audit` validates SKILL.md frontmatter + hook event names + `disableBypassPermissionsMode` type; `conjure check --schema` version-gates; `conjure audit --json` machine-readable output (completed 2026-06-03)
 - [x] **Phase 28: promptfoo Eval + Context-Budget Linter** — `scripts/eval.sh` + `conjure eval init/run/--emit-workflow`; `templates/evals/`; `conjure audit --budget` static context linter; `conjure audit` eval-coverage gap report (completed 2026-06-03)
 - [x] **Phase 29: Workspace Orchestration — Read-Only** — `.conjure-workspace.json` manifest + schema; `conjure workspace init` (TTY discovery); `conjure workspace check` (per-repo porcelain aggregation); `conjure workspace audit` (per-repo --json aggregation + global summary) (completed 2026-06-03)
-- [ ] **Phase 30: Workspace Orchestration — Mutating + Rollback Saga** — `lib/workspace.sh` + `scripts/workspace.sh` saga pipeline (preflight-all → snapshot-all → ops-serial → aggregate-report); `conjure workspace update`; `conjure workspace adopt`; `--rollback` saga + SIGKILL durability CI fixture
+- [x] **Phase 30: Workspace Orchestration — Mutating + Rollback Saga** — `lib/workspace.sh` + `scripts/workspace.sh` saga pipeline (preflight-all → snapshot-all → ops-serial → aggregate-report); `conjure workspace update`; `conjure workspace adopt`; `--rollback` saga + SIGKILL durability CI fixture (completed 2026-06-04)
 
 ## Phase Details
 
@@ -226,7 +226,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 30-04-PLAN.md — Wave 4: ws_do_rollback in scripts/workspace.sh — per-repo independent restore from snapshot_ref, sha256 zero-diff verify loop, idempotent skip (rolled_back), rollback-time CR-02 re-check, state archived timestamped; adopt --rollback dispatch wired; SIGKILL saga test turns green (WS-07)
+- [x] 30-04-PLAN.md — Wave 4: ws_do_rollback in scripts/workspace.sh — per-repo independent restore from snapshot_ref, sha256 zero-diff verify loop, idempotent skip (rolled_back), rollback-time CR-02 re-check, state archived timestamped; adopt --rollback dispatch wired; SIGKILL saga test turns green (WS-07)
 
 **UI hint**: no
 
@@ -243,4 +243,4 @@ Plans:
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 3/3 | Complete    | 2026-06-03 |
-| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 4/5 | In Progress|  |
+| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 5/5 | Complete   | 2026-06-04 |
