@@ -286,11 +286,17 @@ ws_do_audit() {
 # CONTINUE_ON_ERROR=0 (default): stop after first per-repo non-zero exit.
 # CONTINUE_ON_ERROR=1 (--continue-on-error): process all repos, aggregate results.
 # Traversal re-check (CR-02) runs per repo before invoking conjure update.
+#
+# WR-05: this op is READ-ONLY. It invokes `conjure update <repo>` with NO `--apply`
+# flag (line below), i.e. drift-check mode — it never mutates a repo. The <yes> param is
+# therefore intentionally UNUSED (accepted only to keep a uniform 4-arg call signature
+# with the mutating workers); there is no consent gate because nothing is mutated.
 # ---------------------------------------------------------------------------
 ws_do_update() {
   local manifest_path="$1"
   local manifest_dir="$2"
   local continue_on_error="$3"
+  # shellcheck disable=SC2034  # WR-05: read-only op — <yes> accepted for signature parity, unused.
   local yes="$4"
   local overall_rc=0
   local clean_count=0 conflict_count=0 error_count=0 skip_count=0
@@ -376,7 +382,11 @@ ws_do_update() {
 
     printf '%-30s %-15s %s\n' "$repo_name" "$repo_status" "$repo_rc"
 
-    # Surface conflict sidecars: scan TMPERR for paths matching .conjure-conflict- pattern
+    # Surface conflict sidecars: scan TMPERR for paths matching .conjure-conflict- pattern.
+    # WR-05: TMPERR is a single shared tempfile, truncated (`>"$TMPERR"`) at the start of
+    # each iteration. This scan reads it IMMEDIATELY after the current repo's invocation,
+    # so it only ever sees THIS repo's output (iteration-local). Do NOT move this scan
+    # outside the loop or defer it — a later read would see the last repo's output.
     if [ "$repo_rc" -eq 1 ]; then
       while IFS= read -r sidecar_line; do
         case "$sidecar_line" in
