@@ -59,7 +59,12 @@
   3. User can run `ANTHROPIC_API_KEY=<key> tests/run.sh` and the live promptfoo eval executes (skips without the key)
   4. `tests/MANUAL-UAT.md` exists with checklists for MDM hardware and managed-settings deploy scenarios
   5. `scripts/preflight.sh` exits 2 in all error paths; no caller breaks from the change
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 31-01-PLAN.md — DEBT-04 (preflight exit 2), DEBT-03 (mk_tmpd helper), DEBT-05 (skip counter + strict mode)
+- [ ] 31-02-PLAN.md — UAT-03 (tests/MANUAL-UAT.md checklists)
+- [ ] 31-03-PLAN.md — DEBT-03 sweep (mktemp → mk_tmpd in run.sh), DEBT-06 (SCHM-STALE env override + audit-setup.sh + FAILURE-MODES.md)
+- [ ] 31-04-PLAN.md — UAT-01 + UAT-02 (live-system tests section in run.sh)
 
 ### Phase 32: `conjure doctor`
 **Goal**: Users can diagnose the health of their Conjure installation and harness with a single command
