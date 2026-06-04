@@ -802,6 +802,23 @@ ws_do_rollback() {
       continue
     fi
 
+    # CR-03: "failed" + empty snapshot_ref = failed DURING PHASE A (bad path,
+    # out-of-bounds, or snapshot_create returned non-zero) BEFORE any mutation. This repo
+    # was never adopted — there is nothing to restore. Treat it identically to the
+    # snapshotting/pending never-mutated branches: mark rolled_back and continue. WITHOUT
+    # this, a PHASE-A failure (the most common partial-failure case) falls through to the
+    # snapshot_ref guard below, sets any_rb_failed=1, and rollback returns a SPURIOUS
+    # exit 2 that never clears on re-run — breaking the idempotency contract.
+    # NOTE: a "failed" repo WITH a snapshot_ref (failed during PHASE B apply, after it was
+    # snapshotted) is NOT skipped here — it falls through and gets restored below.
+    if [ "$rb_status" = "failed" ] && [ -z "$rb_snap_ref" ]; then
+      printf '  rollback: %s status=failed + no snapshot_ref — never mutated, skip\n' "$rb_name"
+      workspace_state_write "$state_path" \
+        '.repos = [.repos[] | if .name == $n then .status = "rolled_back" else . end]' \
+        --arg n "$rb_name" || true
+      continue
+    fi
+
     # CR-02 rollback-time traversal re-check: confirm repo still within workspace root.
     local rb_real
     rb_real="$(cd "$rb_abs" 2>/dev/null && pwd -P)" || {
