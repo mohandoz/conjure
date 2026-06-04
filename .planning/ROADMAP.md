@@ -70,7 +70,7 @@
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 31-03-PLAN.md — DEBT-03 sweep (mktemp → mk_tmpd in run.sh), DEBT-06 (SCHM-STALE env override + audit-setup.sh + FAILURE-MODES.md)
+- [x] 31-03-PLAN.md — DEBT-03 sweep (mktemp → mk_tmpd in run.sh), DEBT-06 (SCHM-STALE env override + audit-setup.sh + FAILURE-MODES.md)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -160,7 +160,7 @@
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 3/3 | Complete | 2026-06-03 |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 5/5 | Complete | 2026-06-04 |
-| 31. Deferred Debt + Test-Harness Hardening | v0.8.0 | 2/4 | In Progress|  |
+| 31. Deferred Debt + Test-Harness Hardening | v0.8.0 | 3/4 | In Progress|  |
 | 32. `conjure doctor` | v0.8.0 | 0/? | Not started | - |
 | 33. `conjure stats` | v0.8.0 | 0/? | Not started | - |
 | 34. Eval Suite Expansion | v0.8.0 | 0/? | Not started | - |
