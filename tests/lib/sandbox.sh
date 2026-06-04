@@ -41,14 +41,31 @@ _sandbox_tool_dir() {
   [ -n "$_p" ] && dirname "$_p"
 }
 
+# Captured once at source time: the PID of the test-runner process. mk_tmpd uses
+# this to fail CLOSED from inside a command substitution (see below). $$ is the
+# parent shell's PID even when expanded inside $(...), so it is the script we want
+# to abort. Recorded at source time so it is stable regardless of where mk_tmpd
+# is later invoked.
+MK_TMPD_MAIN_PID="$$"
+
 # mk_tmpd — create a temp directory, validate the result, and return its path.
-# Exits 2 if mktemp fails or returns a non-existent directory (DEBT-03/T-31-01).
+# Fails CLOSED on mktemp failure or a non-existent result (DEBT-03/T-31-01).
 # Prints the path via printf (no trailing newline), suitable for $(...) capture.
+#
+# Fail-closed mechanism: every caller invokes this as VAR="$(mk_tmpd)", so a bare
+# `exit 2` would only terminate the $(...) subshell and let the parent continue
+# with VAR="" (the original DEBT-03 footgun — WR-01). To actually abort the run we
+# signal the recorded main PID with SIGTERM, then `exit 2` to tear down the
+# subshell immediately. The SIGTERM propagates to the parent script (which runs
+# under `set -uo pipefail`, no trap on TERM), terminating the whole suite with a
+# non-zero status. This keeps the single-helper design without touching ~180 call
+# sites, while honoring the documented fail-closed contract.
 mk_tmpd() {
   local _d
   _d="$(mktemp -d)"
   if [ -z "$_d" ] || [ ! -d "$_d" ]; then
     printf 'FATAL: mk_tmpd: mktemp -d failed or returned non-existent path\n' >&2
+    kill -TERM "$MK_TMPD_MAIN_PID" 2>/dev/null
     exit 2
   fi
   printf '%s' "$_d"
