@@ -22,6 +22,18 @@ harness with one trustworthy command — and keep it healthy over time. If
 everything else fails, `conjure init` + `conjure audit` must reliably produce
 and verify a correct, safe harness.
 
+## Current Milestone: v0.8.0 Operability + DX
+
+**Goal:** Close v0.7.0's deferred debt, give operators visibility (`doctor`, `stats`), deepen eval coverage, polish init UX, and ship user-facing docs that match what Conjure actually does.
+
+**Target features:**
+- Deferred debt — automate live-system UAT where possible (real `claude` binary smoke, live promptfoo run gated on key), document manual steps (MDM hardware); test-harness hardening (`git -C "$VAR"` empty-var guard, kill-safe SCHM-STALE swap)
+- `conjure doctor` — preflight diagnostics: `command -v` table + mirrored `.mjs` probe, OS-detected install hints
+- Telemetry insights (`conjure stats`) — read skill-firing JSONL, fire/never-fire report, dead-skill detection, chars/4 cost estimates
+- Eval suite expansion — per-profile adherence suites, regression baselines beyond scaffold
+- Init UX polish — wizard improvements, better profile selection, smarter defaults detection
+- README + docs refresh — rewrite README covering v0.3–v0.7 (quick start, command reference, feature tour); sync MIGRATION-GUIDE + FAILURE-MODES
+
 ## Requirements
 
 ### Validated
@@ -66,7 +78,7 @@ and verify a correct, safe harness.
 
 <!-- Requirements for the next milestone — defined fresh via /gsd-new-milestone. -->
 
-_v0.7.0 shipped 2026-06-04. Next milestone requirements TBD — define via `/gsd-new-milestone`._
+_v0.8.0 "Operability + DX" in definition — requirements being scoped via `/gsd-new-milestone`._
 
 ### Out of Scope
 
@@ -139,4 +151,4 @@ _v0.7.0 shipped 2026-06-04. Next milestone requirements TBD — define via `/gsd
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-06-04 after v0.7.0 "Plugin-native + Policy-grade" milestone*
+*Last updated: 2026-06-04 — v0.8.0 "Operability + DX" milestone started*

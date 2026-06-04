@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.7.0
-milestone_name: Plugin-native + Policy-grade
-status: Awaiting next milestone
-last_updated: "2026-06-04T12:19:15.202Z"
-last_activity: 2026-06-04 — Milestone v0.7.0 completed and archived
+milestone: v0.8.0
+milestone_name: Operability + DX
+status: planning
+last_updated: "2026-06-04T12:45:00.864Z"
+last_activity: 2026-06-04
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 24
-  completed_plans: 24
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 
 ## Current Position
 
-Phase: Milestone v0.7.0 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-04 — Milestone v0.7.0 completed and archived
+Status: Defining requirements
+Last activity: 2026-06-04 — Milestone v0.8.0 started
 
 ## Performance Metrics
 
