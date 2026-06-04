@@ -534,17 +534,19 @@ None — all test infrastructure exists. Changes land in existing files. No new 
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **UAT-02 promptfoo probe: fixture structure**
    - What we know: The probe is a 1-test eval in a temp sandbox (D-09); `scripts/eval.sh:277` advisory references `ANTHROPIC_API_KEY`.
    - What's unclear: Does the probe reuse the existing `tests/fixtures/_eval-probe/` scaffold (which only contains a `README.md`) or build a minimal `promptfooconfig.yaml` inline in `run.sh`?
    - Recommendation: Build inline in `run.sh` using a heredoc — keeps the probe self-contained and avoids a new fixture that needs its own maintenance.
+   - RESOLVED: Plan 04 builds the promptfooconfig.yaml inline via heredoc in tests/run.sh — no external fixture required.
 
 2. **DEBT-03 sweep: `$(mktemp)` (file, not dir) calls**
    - What we know: The decision (D-12) scopes to `$(mktemp -d)` (directory form). There are also `$(mktemp)` (file) calls that feed into operations other than `git -C`.
    - What's unclear: Should file-form `mktemp` also be wrapped?
    - Recommendation: No — the sandbox-escape vector is specific to `git -C "$VAR"` where `$VAR` was set from `mktemp -d`. File-form mktemp goes to different callers (cp, mv, cat). The convention gate grep targets `$(mktemp -d)` only, matching D-12's scope.
+   - RESOLVED: Plan 03 sweeps directory-form `$(mktemp -d)` only per D-12; file-form `$(mktemp)` calls are out of scope and left unchanged.
 
 ---
 
