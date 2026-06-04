@@ -832,6 +832,19 @@ ws_do_rollback() {
       continue
     fi
 
+    # ── Pre-restore: evict orphaned adopt subprocesses ──────────────────────────
+    # When workspace.sh is killed with SIGKILL, bash child processes (the per-repo
+    # `conjure adopt` subprocess launched in PHASE B) are NOT killed — they become
+    # orphans and continue writing files to the repo. ws_do_rollback must evict them
+    # before (and after) the snapshot restore to avoid a TOCTOU race where the orphan
+    # creates new files after the snapshot-based orphan-file deletion pass.
+    # pkill -9 -f is a best-effort kill (race-free alternatives require setsid/cgroup;
+    # the double-delete-pass below closes the residual window).
+    pkill -9 -f "conjure adopt.*$rb_abs" 2>/dev/null || true
+    pkill -9 -f "adopt\\.sh.*$rb_abs" 2>/dev/null || true
+    # Brief wait: let the OS process the SIGKILLs before we inspect the tree.
+    sleep 0.05
+
     printf '  rollback: restoring %s from %s ...\n' "$rb_name" "$rb_snap_ref"
     rb_rc=0
     snapshot_rollback "$rb_snap_ref" "$rb_abs" || rb_rc=$?
@@ -854,24 +867,30 @@ ws_do_rollback() {
     # Walk the live repo tree; any file without a counterpart in rb_snap_ref was
     # created by adopt and must be removed so the post-rollback tree is byte-identical.
     # Exception: .snapshot-meta.json was already removed above (D-03).
-    local _f _rel
-    while IFS= read -r _f; do
-      [ -n "$_f" ] || continue
-      _rel="${_f#"$rb_abs"/}"
-      # Skip conjure's own internal dirs — they persist across rollback by convention
-      # (mirrors adopt.sh rollback_path diff -r exclusion list).
-      case "$_rel" in
-        .conjure-adopt-backups/*|.conjure-archive-*/*|.conjure-adopt-state/*) continue ;;
-      esac
-      # If this file has no counterpart in the snapshot, adopt created it.
-      if [ ! -e "$rb_snap_ref/$_rel" ]; then
-        rm -f "$_f" 2>/dev/null || true
-      fi
-    done < <(find "$rb_abs" -type f \
-                -not -path "$rb_abs/.conjure-adopt-backups/*" \
-                -not -path "$rb_abs/.conjure-archive-*" \
-                -not -path "$rb_abs/.conjure-adopt-state/*" \
-                2>/dev/null)
+    # Run TWO passes: the first pass deletes files visible at snapshot_rollback time;
+    # the second pass catches files written by any orphaned adopt subprocess between
+    # the first pass completing and now (closes the TOCTOU window from the pre-restore
+    # pkill above — the orphan may have written a last burst of files before dying).
+    local _f _rel _pass
+    for _pass in 1 2; do
+      while IFS= read -r _f; do
+        [ -n "$_f" ] || continue
+        _rel="${_f#"$rb_abs"/}"
+        # Skip conjure's own internal dirs — they persist across rollback by convention
+        # (mirrors adopt.sh rollback_path diff -r exclusion list).
+        case "$_rel" in
+          .conjure-adopt-backups/*|.conjure-archive-*/*|.conjure-adopt-state/*) continue ;;
+        esac
+        # If this file has no counterpart in the snapshot, adopt created it.
+        if [ ! -e "$rb_snap_ref/$_rel" ]; then
+          rm -f "$_f" 2>/dev/null || true
+        fi
+      done < <(find "$rb_abs" -type f \
+                  -not -path "$rb_abs/.conjure-adopt-backups/*" \
+                  -not -path "$rb_abs/.conjure-archive-*" \
+                  -not -path "$rb_abs/.conjure-adopt-state/*" \
+                  2>/dev/null)
+    done
 
     # Bottom-up empty-dir prune: remove dirs absent from snapshot (adopt-created dirs
     # that are now empty after file deletion). rmdir is a no-op on non-empty dirs.
