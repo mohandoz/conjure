@@ -65,8 +65,8 @@
 **Plans**: 4 plansPlans:
 **Wave 1**
 
-- [ ] 31-01-PLAN.md — DEBT-04 (preflight exit 2), DEBT-03 (mk_tmpd helper), DEBT-05 (skip counter + strict mode)
-- [ ] 31-02-PLAN.md — UAT-03 (tests/MANUAL-UAT.md checklists)
+- [x] 31-01-PLAN.md — DEBT-04 (preflight exit 2), DEBT-03 (mk_tmpd helper), DEBT-05 (skip counter + strict mode)
+- [x] 31-02-PLAN.md — UAT-03 (tests/MANUAL-UAT.md checklists)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -160,7 +160,7 @@
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 3/3 | Complete | 2026-06-03 |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 5/5 | Complete | 2026-06-04 |
-| 31. Deferred Debt + Test-Harness Hardening | v0.8.0 | 0/? | Not started | - |
+| 31. Deferred Debt + Test-Harness Hardening | v0.8.0 | 2/4 | In Progress|  |
 | 32. `conjure doctor` | v0.8.0 | 0/? | Not started | - |
 | 33. `conjure stats` | v0.8.0 | 0/? | Not started | - |
 | 34. Eval Suite Expansion | v0.8.0 | 0/? | Not started | - |
