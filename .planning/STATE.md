@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v0.8.0
 milestone_name: Operability + DX
 status: planning
-last_updated: "2026-06-04"
-last_activity: 2026-06-04
+last_updated: "2026-06-04T16:05:44.633Z"
+last_activity: 2026-06-04 — v0.8.0 roadmap created (6 phases, 31 requirements mapped)
 progress:
   total_phases: 6
   completed_phases: 0
@@ -34,6 +34,7 @@ Progress: [░░░░░░░░░░] 0%
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 103 across v0.3.0–v0.7.0
 - Average duration: — min
 - Total execution time: —
@@ -54,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 ### Decisions
 
 Key decisions from v0.7.0 carried forward:
+
 - Advisory checks use `note()` (exit 0), never `warn()` — `warn()` flips audit exit to 1 in CI
 - Every filesystem write routes through `lib/mutate.sh`; `snapshot_create` is the sole exception
 - `scripts/doctor.sh` + `scripts/stats.sh` are read-only workers; must NOT source `lib/mutate.sh`
@@ -83,6 +85,6 @@ Items carried from v0.7.0 close (2026-06-04):
 
 ## Session Continuity
 
-Last session: 2026-06-04
-Stopped at: Roadmap created for v0.8.0 — 6 phases (31–36), 31/31 requirements mapped
-Resume file: None
+Last session: 2026-06-04T16:05:44.628Z
+Stopped at: Phase 31 context gathered
+Resume file: .planning/phases/31-deferred-debt-test-harness-hardening/31-CONTEXT.md
