@@ -744,6 +744,15 @@ ws_do_rollback() {
   local manifest_dir="$2"
   local yes="$3"
 
+  # WR-01: rollback is DESTRUCTIVE (deletes adopt-created files, prunes dirs, overwrites
+  # the working tree via snapshot_rollback). Mirror the ws_do_adopt mutating-op consent
+  # gate: in a non-interactive (non-TTY) environment, require --yes; otherwise refuse and
+  # exit 2 (never auto-mutate many repos with zero confirmation — CLAUDE.md convention).
+  if [ "$yes" -eq 0 ] && ! [ -t 0 ]; then
+    echo "✗ Not a TTY. Use --yes for non-interactive rollback." >&2
+    return 2
+  fi
+
   local state_path="$manifest_dir/.conjure-workspace-state.json"
 
   if [ ! -f "$state_path" ]; then
