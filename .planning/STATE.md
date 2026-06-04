@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v0.8.0
 milestone_name: Operability + DX
 status: executing
-last_updated: "2026-06-04T16:55:00.797Z"
-last_activity: 2026-06-04 -- Phase 31 planning complete
+last_updated: "2026-06-04T16:57:55.156Z"
+last_activity: 2026-06-04 -- Phase 31 execution started
 progress:
   total_phases: 6
   completed_phases: 0
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-04)
 
 **Core value:** A developer can turn any repo into a production-grade, eval-backed Claude Code harness with one trustworthy command — and keep it healthy over time.
-**Current focus:** Phase 31 — Deferred Debt + Test-Harness Hardening (ready to plan)
+**Current focus:** Phase 31 — deferred-debt-test-harness-hardening
 
 ## Current Position
 
-Phase: 31 of 36 (Deferred Debt + Test-Harness Hardening)
-Plan: — of — in current phase
-Status: Ready to execute
-Last activity: 2026-06-04 -- Phase 31 planning complete
+Phase: 31 (deferred-debt-test-harness-hardening) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 31
+Last activity: 2026-06-04 -- Phase 31 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
