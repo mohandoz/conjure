@@ -114,7 +114,11 @@ fi
 # Phase 27 — Schema checks (SCHM-01: SKILL.md frontmatter type validation)
 # ─────────────────────────────────────────────────────────────────────────────
 
-SCHEMA_FILE="${CONJURE_HOME}/lib/cc-schema.json"
+# SAFETY: Never write directly to cc-schema.json. Any future write path MUST use:
+#   jq ... > "$_tmp" && mv "$_tmp" "$SCHEMA_FILE"   (POSIX mv is atomic same-fs)
+# CONJURE_SCHEMA_FILE allows tests to point at a fixture without touching the
+# production file — kill-safe by construction (DEBT-06).
+SCHEMA_FILE="${CONJURE_SCHEMA_FILE:-${CONJURE_HOME}/lib/cc-schema.json}"
 if [ ! -f "$SCHEMA_FILE" ] || ! command -v jq >/dev/null 2>&1; then
   note "[schema] cc-schema.json not found at $SCHEMA_FILE — SCHM-01 skipped"
 else
