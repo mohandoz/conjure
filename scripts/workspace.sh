@@ -5,6 +5,7 @@
 #              check <manifest_path>
 #              audit [--fail-fast] <manifest_path>
 #              update [--continue-on-error] [--yes] <manifest_path>
+#              adopt [--tag <tag>] [--allow-large-snapshots] [--dry-run] [--yes] [--rollback] <manifest_path>
 # Exit codes: 0 = success, 1 = partial-success (check/audit/update aggregate), 2 = hard error.
 # NOTE: exit 1 is the SC-MANDATED aggregate partial-success for workspace check/audit/update —
 # documented exception to the project's exit-2-never-exit-1 rule (mirrors audit WARN→exit-1).
@@ -12,11 +13,16 @@ set -uo pipefail
 
 CONJURE_HOME="${CONJURE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
 
-# Source helpers
+# Source helpers — lib/log.sh and lib/mutate.sh MUST be sourced before lib/snapshot.sh
+# (snapshot_create calls log_step and mutate_write; sourcing order is load-order dependency).
 # shellcheck source=/dev/null
 source "$CONJURE_HOME/lib/workspace.sh" || { echo "✗ cannot source lib/workspace.sh" >&2; exit 2; }
 # shellcheck source=/dev/null
+source "$CONJURE_HOME/lib/log.sh"       || { echo "✗ cannot source lib/log.sh" >&2; exit 2; }
+# shellcheck source=/dev/null
 source "$CONJURE_HOME/lib/mutate.sh"    || { echo "✗ cannot source lib/mutate.sh" >&2; exit 2; }
+# shellcheck source=/dev/null
+source "$CONJURE_HOME/lib/snapshot.sh"  || { echo "✗ cannot source lib/snapshot.sh" >&2; exit 2; }
 
 # DRY_RUN propagated from cmd_workspace (default 0)
 DRY_RUN="${DRY_RUN:-0}"
@@ -25,9 +31,10 @@ DRY_RUN="${DRY_RUN:-0}"
 # script, registered once at startup; individual functions do NOT add their own traps).
 TMPJSON=""
 TMPERR=""
+WS_STATE_TMP=""
 
 _ws_cleanup() {
-  rm -f "${TMPJSON:-}" "${TMPERR:-}"
+  rm -f "${TMPJSON:-}" "${TMPERR:-}" "${WS_STATE_TMP:-}"
 }
 trap _ws_cleanup EXIT
 
@@ -401,6 +408,432 @@ ws_do_update() {
   return "$overall_rc"
 }
 
+# ---------------------------------------------------------------------------
+# ws_do_adopt <manifest_path> <manifest_dir> <tag_filter> <allow_large> <dry_run> <yes>
+# Two-phase saga orchestrator for workspace adopt (WS-06).
+#
+# SAGA INVARIANT: ALL repos are snapshotted (PHASE A) before ANY repo is applied
+# (PHASE B). The state file records every per-repo status transition atomically
+# (workspace_state_write) so that a SIGKILL between transitions leaves a durable
+# breadcrumb (status="snapshotting" + empty snapshot_ref = never mutated, ws_do_rollback
+# treats it as safe to skip).
+#
+# State machine: pending → snapshotting → snapshotted → applied|failed
+#
+# Exit codes: 0 = all repos applied; 2 = any failure (exit-2-never-exit-1 rule).
+#   --dry-run: prints plan + disk estimate; exits 0; writes ZERO files.
+# ---------------------------------------------------------------------------
+ws_do_adopt() {
+  local manifest_path="$1"
+  local manifest_dir="$2"
+  local tag_filter="$3"
+  local allow_large="$4"
+  local dry_run="$5"
+  local yes="$6"
+
+  # Non-TTY consent gate (mutating op): if no --yes and not a TTY and not --dry-run → exit 2.
+  if [ "$yes" -eq 0 ] && [ "$dry_run" -eq 0 ]; then
+    if ! [ -t 0 ]; then
+      echo "✗ Not a TTY. Use --yes for non-interactive environments." >&2
+      return 2
+    fi
+  fi
+
+  # Resolve manifest root once (pwd -P) for CR-02 boundary re-checks.
+  local manifest_root
+  manifest_root="$(cd "$manifest_dir" 2>/dev/null && pwd -P)" || {
+    echo "✗ ws_do_adopt: cannot resolve workspace root: $manifest_dir" >&2
+    return 2
+  }
+
+  local state_path="$manifest_dir/.conjure-workspace-state.json"
+
+  # ── Build filtered repo list ─────────────────────────────────────────────────
+  # POSIX 3.2+: no associative arrays; build a newline-delimited list of jq objects.
+  local repos_json
+  if [ -n "$tag_filter" ]; then
+    # Select only repos whose tags[] contains the given tag.
+    # shellcheck disable=SC2016
+    repos_json="$(jq -c --arg tag "$tag_filter" \
+      '.repos[] | select(.tags != null and (.tags | index($tag) != null))' \
+      "$manifest_path" 2>/dev/null)" || repos_json=""
+  else
+    repos_json="$(jq -c '.repos[]' "$manifest_path" 2>/dev/null)" || repos_json=""
+  fi
+
+  if [ -z "$repos_json" ]; then
+    echo "ws_do_adopt: no repos to process (tag_filter='$tag_filter')" >&2
+    return 2
+  fi
+
+  # ── Disk estimate (du gate) ──────────────────────────────────────────────────
+  # Sum du -sk across all filtered repos; >2097152 KiB (2 GiB) → warn + exit 2
+  # unless --allow-large-snapshots is set. Gate runs BEFORE any snapshot is taken.
+  local total_kib=0
+  local du_name du_relpath du_abs du_kib
+  while IFS= read -r repo_json; do
+    du_name="$(printf '%s' "$repo_json" | jq -r '.name')"
+    du_relpath="$(printf '%s' "$repo_json" | jq -r '.path')"
+    du_abs="$manifest_dir/$du_relpath"
+    if [ -d "$du_abs" ]; then
+      # Real `du -sk` emits one line: "KiB\tpath". awk sums $1 across all lines so that
+      # test stubs that emit multiple lines (one per argv) still produce a correct total.
+      du_kib="$(du -sk "$du_abs" 2>/dev/null | awk '{sum+=$1} END{print sum+0}')"
+      du_kib="${du_kib:-0}"
+      total_kib=$((total_kib + du_kib))
+    fi
+  done <<EOF
+$repos_json
+EOF
+
+  if [ "$total_kib" -gt 2097152 ]; then
+    printf '⚠ snapshot estimate: %d KiB (%d MiB) across all repos\n' \
+      "$total_kib" "$((total_kib / 1024))" >&2
+    if [ "$allow_large" -eq 0 ]; then
+      printf '✗ snapshot too large (>2 GiB); use --allow-large-snapshots to proceed\n' >&2
+      return 2
+    else
+      printf '⚠ --allow-large-snapshots set; proceeding despite large snapshot estimate\n' >&2
+    fi
+  fi
+
+  # ── DRY_RUN path: print plan, zero writes, exit 0 ───────────────────────────
+  if [ "$dry_run" -eq 1 ]; then
+    echo "[dry-run] workspace adopt plan:"
+    while IFS= read -r repo_json; do
+      local dr_name dr_relpath
+      dr_name="$(printf '%s' "$repo_json" | jq -r '.name')"
+      dr_relpath="$(printf '%s' "$repo_json" | jq -r '.path')"
+      printf '  [dry-run] would snapshot+adopt: %s (%s)\n' "$dr_name" "$dr_relpath"
+    done <<EOF
+$repos_json
+EOF
+    printf '[dry-run] estimated snapshot size: %d KiB\n' "$total_kib"
+    local dr_count=0
+    while IFS= read -r _line; do
+      [ -n "$_line" ] && dr_count=$((dr_count + 1))
+    done <<EOF
+$repos_json
+EOF
+    printf '[dry-run] would snapshot %d repo(s) then adopt each\n' "$dr_count"
+    return 0
+  fi
+
+  # ── Build initial repos array for state init ─────────────────────────────────
+  local repos_init_json
+  repos_init_json="$(printf '%s' "$repos_json" | jq -cs \
+    '[.[] | {name: .name, snapshot_ref: "", sha256_pre_ref: "", status: "pending"}]' \
+    2>/dev/null)" || {
+    echo "✗ ws_do_adopt: failed to build repos init JSON" >&2
+    return 2
+  }
+
+  # ── STATE INIT ──────────────────────────────────────────────────────────────
+  local run_id
+  run_id="$(printf '%s-%s' "$(date -u '+%Y%m%dT%H%M%SZ')" "$$")"
+  local started_at
+  started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+  workspace_state_write "$state_path" \
+    '{run_id: $rid, started: $ts, phase: "snapshot", repos: $repos}' \
+    --arg rid "$run_id" --arg ts "$started_at" --argjson repos "$repos_init_json" || return 2
+
+  # ── PHASE A: snapshot ALL repos before applying ANY ─────────────────────────
+  local phase_a_failed=0
+  local repo_json repo_name repo_relpath repo_abs repo_real
+  local snap_ref hash_file snap_rc
+
+  while IFS= read -r repo_json; do
+    repo_name="$(printf '%s' "$repo_json" | jq -r '.name')"
+    repo_relpath="$(printf '%s' "$repo_json" | jq -r '.path')"
+    repo_abs="$manifest_dir/$repo_relpath"
+
+    # Bad-path guard
+    if [ ! -d "$repo_abs" ]; then
+      printf '✗ PHASE A: repo not found, cannot snapshot: %s (%s)\n' "$repo_name" "$repo_abs" >&2
+      workspace_state_write "$state_path" \
+        '.repos = [.repos[] | if .name == $n then .status = "failed" else . end]' \
+        --arg n "$repo_name" || true
+      phase_a_failed=1
+      break
+    fi
+
+    # CR-02 traversal re-check before snapshot
+    repo_real="$(cd "$repo_abs" 2>/dev/null && pwd -P)" || {
+      printf '✗ PHASE A: cannot resolve path for repo: %s\n' "$repo_name" >&2
+      workspace_state_write "$state_path" \
+        '.repos = [.repos[] | if .name == $n then .status = "failed" else . end]' \
+        --arg n "$repo_name" || true
+      phase_a_failed=1
+      break
+    }
+    case "$repo_real" in
+      "$manifest_root"|"$manifest_root/"*) ;;
+      *)
+        printf '✗ PHASE A SECURITY: repo escapes workspace root, aborting: %s (%s)\n' \
+          "$repo_name" "$repo_real" >&2
+        workspace_state_write "$state_path" \
+          '.repos = [.repos[] | if .name == $n then .status = "failed" else . end]' \
+          --arg n "$repo_name" || true
+        phase_a_failed=1
+        break
+        ;;
+    esac
+
+    # PRE-WRITE: set status="snapshotting" BEFORE calling snapshot_create.
+    # SIGKILL durability: if killed here, state shows "snapshotting" + empty snapshot_ref.
+    # ws_do_rollback treats "snapshotting" + empty snapshot_ref as never-mutated → skip.
+    workspace_state_write "$state_path" \
+      '.repos = [.repos[] | if .name == $n then .status = "snapshotting" else . end]' \
+      --arg n "$repo_name" || return 2
+
+    printf '  PHASE A: snapshotting %s ...\n' "$repo_name"
+
+    # Call snapshot_create with two positional args: target + backup_root.
+    # snapshot_create sets CONJURE_SNAPSHOT_PATH in the current shell; do NOT capture stdout.
+    local backup_root="$repo_abs/.conjure-adopt-backups"
+    snap_rc=0
+    snapshot_create "$repo_abs" "$backup_root" || snap_rc=$?
+    snap_ref="$CONJURE_SNAPSHOT_PATH"
+
+    if [ "$snap_rc" -ne 0 ] || [ -z "$snap_ref" ]; then
+      printf '✗ PHASE A: snapshot failed for repo: %s\n' "$repo_name" >&2
+      workspace_state_write "$state_path" \
+        '.repos = [.repos[] | if .name == $n then .status = "failed" else . end]' \
+        --arg n "$repo_name" || true
+      phase_a_failed=1
+      break
+    fi
+
+    # Compute per-file sha256 hash file (mktemp OUTSIDE the repo tree, per PATTERNS.md).
+    # Store the path as sha256_pre_ref in state. ws_do_rollback needs it for zero-diff verify.
+    hash_file="$(mktemp)"
+    # Subshell: cd to repo_abs and enumerate all non-.git files; write hash  path pairs.
+    ( cd "$repo_abs" && find . -type f -not -path './.git/*' | sort | while IFS= read -r f; do
+        printf '%s  %s\n' "$(ws_sha_of "$f")" "$f"
+      done ) > "$hash_file" 2>/dev/null || true
+
+    # POST-WRITE: upgrade status from "snapshotting" to "snapshotted" ONLY after
+    # snapshot_create returns 0. Record snapshot_ref and sha256_pre_ref.
+    workspace_state_write "$state_path" \
+      '.repos = [.repos[] | if .name == $n then (.status = "snapshotted" | .snapshot_ref = $sr | .sha256_pre_ref = $hf) else . end]' \
+      --arg n "$repo_name" --arg sr "$snap_ref" --arg hf "$hash_file" || return 2
+
+    printf '  PHASE A: snapshotted %s → %s\n' "$repo_name" "$snap_ref"
+
+  done <<EOF
+$repos_json
+EOF
+
+  if [ "$phase_a_failed" -eq 1 ]; then
+    echo "✗ snapshot phase failed — not applying any repo" >&2
+    return 2
+  fi
+
+  # ── PHASE B: apply (conjure adopt) per repo ──────────────────────────────────
+  # Update top-level phase to "apply" before starting PHASE B.
+  workspace_state_write "$state_path" '.phase = "apply"' || return 2
+
+  local apply_rc
+  # PHASE B iterates over the original filtered manifest repos (which have the .path field).
+  # For each, check state to confirm status == "snapshotted" before applying.
+  # (snapshotted_repos from state file lacks .path — use manifest as the source of truth.)
+
+  while IFS= read -r repo_json; do
+    repo_name="$(printf '%s' "$repo_json" | jq -r '.name')"
+    repo_relpath="$(printf '%s' "$repo_json" | jq -r '.path')"
+    repo_abs="$manifest_dir/$repo_relpath"
+
+    # Only apply repos that successfully completed PHASE A (status == snapshotted in state).
+    local repo_state_status
+    repo_state_status="$(jq -r --arg n "$repo_name" \
+      '.repos[] | select(.name == $n) | .status // "unknown"' "$state_path" 2>/dev/null || echo "unknown")"
+    if [ "$repo_state_status" != "snapshotted" ]; then
+      printf '  PHASE B: skipping %s (state=%s, expected snapshotted)\n' "$repo_name" "$repo_state_status"
+      continue
+    fi
+
+    # CR-02 traversal re-check before apply
+    repo_real="$(cd "$repo_abs" 2>/dev/null && pwd -P)" || {
+      printf '✗ PHASE B: cannot resolve path for repo: %s\n' "$repo_name" >&2
+      workspace_state_write "$state_path" \
+        '.repos = [.repos[] | if .name == $n then .status = "failed" else . end]' \
+        --arg n "$repo_name" || true
+      echo "✗ stop-on-fail: halting adopt (repo=$repo_name)" >&2
+      return 2
+    }
+    case "$repo_real" in
+      "$manifest_root"|"$manifest_root/"*) ;;
+      *)
+        printf '✗ PHASE B SECURITY: repo escapes workspace root: %s (%s)\n' \
+          "$repo_name" "$repo_real" >&2
+        workspace_state_write "$state_path" \
+          '.repos = [.repos[] | if .name == $n then .status = "failed" else . end]' \
+          --arg n "$repo_name" || true
+        echo "✗ stop-on-fail: halting adopt (repo=$repo_name)" >&2
+        return 2
+        ;;
+    esac
+
+    printf '  PHASE B: applying %s ...\n' "$repo_name"
+
+    # Pass CONJURE_ADOPT_REUSE_SNAPSHOT=1 in the subprocess env so adopt.sh skips its
+    # internal snapshot_guarded (workspace already snapshotted this repo in PHASE A —
+    # prevents double-snapshot disk overhead).
+    apply_rc=0
+    CONJURE_ADOPT_REUSE_SNAPSHOT=1 bash "$CONJURE_HOME/cli/conjure" adopt "$repo_abs" \
+      >/dev/null 2>&1 || apply_rc=$?
+
+    if [ "$apply_rc" -eq 0 ]; then
+      workspace_state_write "$state_path" \
+        '.repos = [.repos[] | if .name == $n then .status = "applied" else . end]' \
+        --arg n "$repo_name" || return 2
+      printf '  PHASE B: applied %s ✓\n' "$repo_name"
+    else
+      workspace_state_write "$state_path" \
+        '.repos = [.repos[] | if .name == $n then .status = "failed" else . end]' \
+        --arg n "$repo_name" || true
+      printf '✗ PHASE B: apply failed for repo: %s (rc=%d)\n' "$repo_name" "$apply_rc" >&2
+      echo "✗ stop-on-fail: halting adopt (repo=$repo_name)" >&2
+      return 2
+    fi
+
+  done <<EOF
+$repos_json
+EOF
+
+  # PHASE DONE
+  workspace_state_write "$state_path" '.phase = "done"' || return 2
+
+  local applied_count snapshotted_count
+  applied_count="$(jq '[.repos[] | select(.status == "applied")] | length' "$state_path" 2>/dev/null || echo 0)"
+  snapshotted_count="$(jq '[.repos[] | select(.status == "snapshotted")] | length' "$state_path" 2>/dev/null || echo 0)"
+
+  printf '\n── Workspace Adopt Summary ──\n'
+  printf '  Applied:     %s\n' "$applied_count"
+  printf '  Snapshotted: %s\n' "$snapshotted_count"
+  echo "✓ Workspace adopt complete."
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# ws_do_rollback <manifest_path> <manifest_dir> <yes>
+# Reads .conjure-workspace-state.json, restores each snapshotted/applied repo
+# from its snapshot_ref. Skips "snapshotting" + empty snapshot_ref (never-mutated).
+# Skips already "rolled_back" repos (idempotent). Updates state atomically.
+# On success: archives the state file with a timestamp (keeps audit trail).
+# Exit codes: 0 = all successful or all already rolled_back; 2 = any failure.
+# ---------------------------------------------------------------------------
+ws_do_rollback() {
+  local manifest_path="$1"
+  local manifest_dir="$2"
+  local yes="$3"
+
+  local state_path="$manifest_dir/.conjure-workspace-state.json"
+
+  if [ ! -f "$state_path" ]; then
+    echo "✗ ws_do_rollback: no .conjure-workspace-state.json found — nothing to roll back" >&2
+    return 2
+  fi
+
+  # Read state; capture repos list before any rollback modifies the file.
+  local repos_captured
+  repos_captured="$(jq -c '.repos[]' "$state_path" 2>/dev/null)" || repos_captured=""
+  if [ -z "$repos_captured" ]; then
+    echo "✗ ws_do_rollback: state file has no repos" >&2
+    return 2
+  fi
+
+  local all_rolled_back
+  all_rolled_back="$(jq 'if (.repos | map(select(.status != "rolled_back")) | length) == 0 then "yes" else "no" end' "$state_path" 2>/dev/null || echo "no")"
+  if [ "$all_rolled_back" = '"yes"' ]; then
+    echo "ws_do_rollback: all repos already rolled_back — no-op" >&2
+    return 0
+  fi
+
+  local any_rb_failed=0
+  local rb_json rb_name rb_snap_ref rb_status rb_abs rb_relpath rb_rc
+
+  while IFS= read -r rb_json; do
+    rb_name="$(printf '%s' "$rb_json" | jq -r '.name')"
+    rb_snap_ref="$(printf '%s' "$rb_json" | jq -r '.snapshot_ref // ""')"
+    rb_status="$(printf '%s' "$rb_json" | jq -r '.status')"
+    rb_relpath="$(printf '%s' "$rb_json" | jq -r '.path // ""')"
+
+    # Get abs path from manifest
+    rb_abs="$manifest_dir/$(jq -r --arg n "$rb_name" '.repos[] | select(.name == $n) | .path' "$manifest_path" 2>/dev/null)"
+
+    # Already rolled back: skip idempotently.
+    if [ "$rb_status" = "rolled_back" ]; then
+      printf '  rollback: %s already rolled_back — skip\n' "$rb_name"
+      continue
+    fi
+
+    # "snapshotting" + empty snapshot_ref = never mutated (SIGKILL during PHASE A pre-write).
+    # Safe to skip with a note.
+    if [ "$rb_status" = "snapshotting" ] && [ -z "$rb_snap_ref" ]; then
+      printf '  rollback: %s status=snapshotting + no snapshot_ref — never mutated, skip\n' "$rb_name"
+      workspace_state_write "$state_path" \
+        '.repos = [.repos[] | if .name == $n then .status = "rolled_back" else . end]' \
+        --arg n "$rb_name" || true
+      continue
+    fi
+
+    # "pending" = was never reached; skip.
+    if [ "$rb_status" = "pending" ]; then
+      printf '  rollback: %s status=pending — never snapshotted, skip\n' "$rb_name"
+      workspace_state_write "$state_path" \
+        '.repos = [.repos[] | if .name == $n then .status = "rolled_back" else . end]' \
+        --arg n "$rb_name" || true
+      continue
+    fi
+
+    # Validate snapshot_ref exists before attempting restore.
+    if [ -z "$rb_snap_ref" ] || [ ! -d "$rb_snap_ref" ]; then
+      printf '✗ rollback: %s — snapshot_ref missing or not a dir: %s\n' "$rb_name" "$rb_snap_ref" >&2
+      any_rb_failed=1
+      continue
+    fi
+
+    if [ ! -d "$rb_abs" ]; then
+      printf '✗ rollback: %s — target dir not found: %s\n' "$rb_name" "$rb_abs" >&2
+      any_rb_failed=1
+      continue
+    fi
+
+    printf '  rollback: restoring %s from %s ...\n' "$rb_name" "$rb_snap_ref"
+    rb_rc=0
+    snapshot_rollback "$rb_snap_ref" "$rb_abs" || rb_rc=$?
+
+    if [ "$rb_rc" -eq 0 ]; then
+      workspace_state_write "$state_path" \
+        '.repos = [.repos[] | if .name == $n then .status = "rolled_back" else . end]' \
+        --arg n "$rb_name" || true
+      printf '  rollback: %s restored ✓\n' "$rb_name"
+    else
+      printf '✗ rollback: restore failed for repo: %s (rc=%d)\n' "$rb_name" "$rb_rc" >&2
+      any_rb_failed=1
+    fi
+
+  done <<EOF
+$repos_captured
+EOF
+
+  # Archive the state file (preserve audit trail — do NOT rm -f).
+  local archive_ts
+  archive_ts="$(date -u '+%Y%m%dT%H%M%SZ')"
+  local archive_name="$manifest_dir/.conjure-workspace-state-${archive_ts}.json"
+  cp "$state_path" "$archive_name" 2>/dev/null || true
+
+  if [ "$any_rb_failed" -eq 1 ]; then
+    echo "✗ Rollback encountered failures — state archived to $archive_name" >&2
+    return 2
+  fi
+
+  echo "✓ Workspace rollback complete — state archived to $archive_name"
+  return 0
+}
+
 case "$SUBCMD" in
 
   init)
@@ -554,6 +987,35 @@ EOF
     MANIFEST_PATH="$(workspace_manifest_load "$MANIFEST_PATH")" || exit 2
     MANIFEST_DIR="$(dirname "$MANIFEST_PATH")"
     ws_do_update "$MANIFEST_PATH" "$MANIFEST_DIR" "$CONTINUE_ON_ERROR" "$YES"
+    ;;
+
+  adopt)
+    MANIFEST_PATH="" TAG_FILTER="" ALLOW_LARGE=0 ADOPT_DRY_RUN=0 YES=0 ROLLBACK=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --tag)
+          TAG_FILTER="${2:-}"
+          shift 2
+          ;;
+        --allow-large-snapshots) ALLOW_LARGE=1; shift ;;
+        --dry-run)               ADOPT_DRY_RUN=1; shift ;;
+        --yes|-y)                YES=1; shift ;;
+        --rollback)              ROLLBACK=1; shift ;;
+        --help|-h)
+          echo "Usage: conjure workspace adopt [--tag <tag>] [--allow-large-snapshots] [--dry-run] [--yes] [--rollback] <manifest_path>"
+          exit 0
+          ;;
+        *) MANIFEST_PATH="$1"; shift ;;
+      esac
+    done
+    [ -z "$MANIFEST_PATH" ] && MANIFEST_PATH="$(pwd)"
+    MANIFEST_PATH="$(workspace_manifest_load "$MANIFEST_PATH")" || exit 2
+    MANIFEST_DIR="$(dirname "$MANIFEST_PATH")"
+    if [ "$ROLLBACK" -eq 1 ]; then
+      ws_do_rollback "$MANIFEST_PATH" "$MANIFEST_DIR" "$YES"
+    else
+      ws_do_adopt "$MANIFEST_PATH" "$MANIFEST_DIR" "$TAG_FILTER" "$ALLOW_LARGE" "$ADOPT_DRY_RUN" "$YES"
+    fi
     ;;
 
   *)

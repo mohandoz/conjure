@@ -199,6 +199,20 @@ workspace_state_read() {
   jq -r "${jq_expr} // empty" "$state_path" 2>/dev/null || true
 }
 
+# ws_sha_of <file>
+# Cross-platform sha256 of a single file. Returns empty string if the file is missing
+# (not an error exit — callers handle absence gracefully).
+# tr -d '\r': on Windows Git Bash (MSYS) sha256sum can emit a CR before the line
+# terminator; unstripped \r poisons string comparisons (fabricates rollback mismatch).
+# No-op on macOS/Linux.
+ws_sha_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" 2>/dev/null | cut -d' ' -f1 | tr -d '\r'
+  else
+    shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1 | tr -d '\r'
+  fi
+}
+
 # workspace_state_validate <state_path>
 # Validates that a workspace state file is present, is valid JSON, and contains
 # the required top-level fields: run_id, phase, repos (array).
