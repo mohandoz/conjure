@@ -608,8 +608,20 @@ EOF
     # Compute per-file sha256 hash file (mktemp OUTSIDE the repo tree, per PATTERNS.md).
     # Store the path as sha256_pre_ref in state. ws_do_rollback needs it for zero-diff verify.
     hash_file="$(mktemp)"
-    # Subshell: cd to repo_abs and enumerate all non-.git files; write hash  path pairs.
-    ( cd "$repo_abs" && find . -type f -not -path './.git/*' | sort | while IFS= read -r f; do
+    # Subshell: cd to repo_abs and enumerate the user's tree; write "hash  path" pairs.
+    # CR-04: snapshot_create ran ABOVE and placed its copy of the repo INSIDE the tree at
+    # .conjure-adopt-backups/conjure-adopt-<ts>/. Excluding only ./.git would hash that
+    # in-tree snapshot copy too — doubling the verify set and coupling rollback
+    # verification to snapshot internals. The rollback DELETION passes already exclude
+    # .conjure-adopt-backups / .conjure-archive-* / .conjure-adopt-state (lines ~889/906),
+    # so the hash set MUST exclude the exact same conjure-owned dirs for the two passes to
+    # agree on scope. Mirror that exclusion list here.
+    ( cd "$repo_abs" && find . -type f \
+        -not -path './.git/*' \
+        -not -path './.conjure-adopt-backups/*' \
+        -not -path './.conjure-archive-*/*' \
+        -not -path './.conjure-adopt-state/*' \
+        | sort | while IFS= read -r f; do
         printf '%s  %s\n' "$(ws_sha_of "$f")" "$f"
       done ) > "$hash_file" 2>/dev/null || true
 

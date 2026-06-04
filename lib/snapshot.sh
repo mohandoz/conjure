@@ -44,7 +44,7 @@ snapshot_create() {
   mkdir -p "${snap_dir}"
   local _snap_tar
   _snap_tar="$(mktemp)"
-  if ! { ( cd "${target}" && tar -cf "${_snap_tar}" --exclude='./.git' --exclude='./node_modules' . ) \
+  if ! { ( cd "${target}" && tar -cf "${_snap_tar}" --exclude='./.git' --exclude='./node_modules' --exclude='./.conjure-adopt-backups' . ) \
          && ( cd "${snap_dir}" && tar -xpf "${_snap_tar}" ); }; then
     rm -f "${_snap_tar}"
     if ! cp -a "${target}/." "${snap_dir}/"; then
