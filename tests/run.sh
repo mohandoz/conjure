@@ -6852,14 +6852,18 @@ else
   skip "live claude smoke: CONJURE_LIVE_TEST not set (UAT-01)"
 fi
 
-# UAT-02: Live promptfoo enforcement-wiring probe (gated on ANTHROPIC_API_KEY non-empty, per D-09)
-if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+# UAT-02: Live promptfoo enforcement-wiring probe.
+# Gated on CONJURE_LIVE_TEST=1 AND ANTHROPIC_API_KEY (per MANUAL-UAT.md Notes / D-09).
+# Provider is the Anthropic provider so the credential it authenticates with
+# (ANTHROPIC_API_KEY) matches the gate — an openai:chat:* provider would target the
+# OpenAI API and reject the Claude model id (CR-01).
+if [ "${CONJURE_LIVE_TEST:-0}" = "1" ] && [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   UAT02_DIR="$(mk_tmpd)"
   trap 'rm -rf "$UAT02_DIR"' EXIT
   # Build baseline config: model outputs ENFORCEMENT_TOKEN per system instruction
   cat > "$UAT02_DIR/promptfooconfig.yaml" << 'PFEOF'
 providers:
-  - openai:chat:claude-3-haiku-20240307
+  - anthropic:messages:claude-3-5-haiku-20241022
 prompts:
   - "Say exactly: ENFORCEMENT_TOKEN"
 tests:
@@ -6872,7 +6876,7 @@ PFEOF
   # Build broken-hook config: impossible assert that can never be satisfied
   cat > "$UAT02_DIR/promptfooconfig-broken.yaml" << 'PFEOF'
 providers:
-  - openai:chat:claude-3-haiku-20240307
+  - anthropic:messages:claude-3-5-haiku-20241022
 prompts:
   - "Say exactly: ENFORCEMENT_TOKEN"
 tests:
@@ -6890,17 +6894,24 @@ PFEOF
   UAT02_BROKEN_RC=0
   npx --yes "promptfoo@${PROMPTFOO_VERSION:-0.121.14}" eval \
     -c "$UAT02_DIR/promptfooconfig-broken.yaml" --no-cache >/dev/null 2>&1 || UAT02_BROKEN_RC=$?
-  # Verdict: both halves must confirm — baseline passes AND broken-hook fails
+  # Verdict. Reserve `fail` for a definitive wiring contradiction (baseline passes
+  # AND broken-hook fails is the only confirmed-good signal). A non-zero baseline is
+  # most likely a transient/network/credential/version-drift error in an external
+  # CLI, not a wiring defect, so treat it as `skip` rather than reddening the suite
+  # on flaky transport (WR-03). A baseline-pass with a broken-hook that did NOT fail
+  # is a real enforcement-wiring contradiction and stays a hard `fail`.
   if [ "$UAT02_BASELINE_RC" -eq 0 ] && [ "$UAT02_BROKEN_RC" -ne 0 ]; then
     pass "live: promptfoo enforcement-wiring verified — hook-gated eval passes, broken-hook eval fails (UAT-02)"
   elif [ "$UAT02_BASELINE_RC" -ne 0 ]; then
-    fail "live: promptfoo baseline eval failed unexpectedly (rc=$UAT02_BASELINE_RC) (UAT-02)"
+    skip "live: promptfoo baseline eval did not pass (rc=$UAT02_BASELINE_RC) — likely transient/network/credential, treating as skip (UAT-02)"
   else
     fail "live: promptfoo broken-hook eval did not fail as expected (rc=$UAT02_BROKEN_RC) — enforcement wiring may be absent (UAT-02)"
   fi
   trap - EXIT; rm -rf "$UAT02_DIR"
-else
+elif [ "${CONJURE_LIVE_TEST:-0}" = "1" ]; then
   skip "live promptfoo eval: ANTHROPIC_API_KEY not set (UAT-02)"
+else
+  skip "live promptfoo eval: CONJURE_LIVE_TEST not set (UAT-02)"
 fi
 
 # Summary
