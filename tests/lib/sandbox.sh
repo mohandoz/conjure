@@ -62,7 +62,11 @@ MK_TMPD_MAIN_PID="$$"
 # sites, while honoring the documented fail-closed contract.
 mk_tmpd() {
   local _d
-  _d="$(mktemp -d)"
+  # Explicit template: macOS /usr/bin/mktemp without a template IGNORES $TMPDIR
+  # and uses the Darwin per-user temp dir (/var/folders/...), which sandboxed or
+  # managed environments may deny. A template rooted at ${TMPDIR:-/tmp} honors
+  # the caller's temp dir on both BSD and GNU mktemp.
+  _d="$(mktemp -d "${TMPDIR:-/tmp}/conjure-test.XXXXXXXX")"
   if [ -z "$_d" ] || [ ! -d "$_d" ]; then
     printf 'FATAL: mk_tmpd: mktemp -d failed or returned non-existent path\n' >&2
     kill -TERM "$MK_TMPD_MAIN_PID" 2>/dev/null
