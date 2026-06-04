@@ -927,8 +927,24 @@ ws_do_rollback() {
       local _h _frel _now
       while IFS= read -r line; do
         [ -n "$line" ] || continue
-        _h="${line%%  *}"; _frel="${line##*  }"
-        _now="$(ws_sha_of "$rb_abs/$_frel" 2>/dev/null || echo MISSING)"
+        # CR-02: each line is "<hash>  <relpath>" (two-space sep). The hash is exactly
+        # 64 lowercase-hex chars, so split deterministically: hash = first 64 chars,
+        # relpath = everything after the 64-char hash + its two-space separator.
+        # Using `${line##*  }` (longest trailing match) TRUNCATED any relpath that itself
+        # contained two consecutive spaces to its last segment, fabricating a mismatch on
+        # a byte-perfect tree. `${line#*  }` strips only the FIRST two-space run, keeping
+        # embedded double spaces verbatim.
+        _h="${line%%  *}"
+        _frel="${line#*  }"
+        # WR-03: make the missing-file sentinel explicit and independent of ws_sha_of's
+        # exit status — ws_sha_of returns "" (exit 0) for an absent file, so the
+        # `|| echo MISSING` fallback never fired and an empty pre-hash could false-match
+        # an empty current hash. Probe existence directly.
+        if [ ! -e "$rb_abs/$_frel" ]; then
+          _now="MISSING"
+        else
+          _now="$(ws_sha_of "$rb_abs/$_frel")"
+        fi
         [ "$_h" = "$_now" ] || rb_mismatch=$((rb_mismatch+1))
       done < "$rb_sha256_pre_ref"
       if [ "$rb_mismatch" -gt 0 ]; then
