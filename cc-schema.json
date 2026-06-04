@@ -1,8 +1,8 @@
 {
-  "_comment": "Conjure-maintained Claude Code schema snapshot. Source: https://code.claude.com/docs/en/hooks + /en/settings + /en/skills. Reflects CC v2.1.161 (2026-06-03). Update this file when Anthropic releases a new CC version with schema changes.",
+  "_comment": "STALE FIXTURE — generated date is intentionally >90 days old to exercise the staleness advisory check in SCHM-STALE. Do not update the generated field.",
   "schema_version": "1",
-  "generated": "2026-06-03",
-  "cc_version": "2.1.161",
+  "generated": "2025-01-01",
+  "cc_version": "2.1.100",
   "hook_events": [
     "PreToolUse",
     "PostToolUse",
