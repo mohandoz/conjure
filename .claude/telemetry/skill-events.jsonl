@@ -6,3 +6,5 @@
 {"ts":"2026-06-04T02:46:32.213Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
 {"ts":"2026-06-04T02:46:58.061Z","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
 {"ts":"2026-06-04T02:46:58.088Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-04T02:47:25.842Z","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-04T02:47:25.865Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
