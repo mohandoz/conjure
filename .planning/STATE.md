@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.7.0
 milestone_name: Plugin-native + Policy-grade
-status: milestone_complete
-last_updated: 2026-06-04T02:35:26.016Z
-last_activity: 2026-06-04
+status: Awaiting next milestone
+last_updated: "2026-06-04T12:19:15.202Z"
+last_activity: 2026-06-04 — Milestone v0.7.0 completed and archived
 progress:
   total_phases: 6
   completed_phases: 6
   total_plans: 24
   completed_plans: 24
   percent: 100
-stopped_at: Milestone complete (Phase 30 was final phase)
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 
 ## Current Position
 
-Phase: 30
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-06-04
+Phase: Milestone v0.7.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-04 — Milestone v0.7.0 completed and archived
 
 ## Performance Metrics
 
@@ -146,6 +145,16 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Begin Phase 25: `/gsd-plan-phase 25`
-- Before planning Phase 28 (eval): run `--research-phase 3` (promptfoo + Conjure harness integration)
-- Before planning Phase 30 (workspace saga): run `--research-phase 5` (aggregate rollback state machine)
+- Start the next milestone with /gsd-new-milestone
+
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-06-04:
+
+| Category | Item | Status |
+|----------|------|--------|
+| quick_task | 260603-302-v0-6-1-hardening-patch-fix-dead-hooks-st | missing (stale record) |
+| uat_gap | Phase 25 HUMAN-UAT (1 scenario: live claude --validate) | partial |
+| uat_gap | Phase 26 HUMAN-UAT (2 scenarios: managed-settings deploy, MDM hardware) | partial |
+| uat_gap | Phase 28 HUMAN-UAT (1 scenario: live promptfoo enforcement) | partial |
+| verification | 25/26/28 VERIFICATION.md status human_needed (same live-system items) | deferred |

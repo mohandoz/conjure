@@ -127,6 +127,44 @@
 
 ---
 
+## Milestone: v0.7.0 — Plugin-native + Policy-grade
+
+**Shipped:** 2026-06-04
+**Phases:** 6 (25–30) | **Plans:** 24 | **Requirements:** 27/27
+
+### What Was Built
+Conjure now rides Claude Code's native rails end-to-end: `conjure publish-plugin` (plugin.json + marketplace.json with merge-preserve, validation gates, secret-scan), `conjure emit-policy` (per-regime sandbox + 1:1 `Read()` deny mirror + managed-settings.json + macOS/Windows MDM bundle), schema-version-aware audit/check on a bundled `lib/cc-schema.json` with `audit --json` machine output, `conjure eval` (promptfoo via the claude-agent-sdk provider, pinned, with PR-gate emission and an `audit --budget` context linter), and `conjure workspace` (read-only manifest aggregation plus a mutating saga: snapshot-all-before-any-apply, SIGKILL-durable atomic state, per-repo sha256 zero-diff rollback). Suite 562→579/0 at close.
+
+### What Worked
+- **Wave-0-test-infrastructure-first held for all 6 phases** — every feature wave turned a planned graceful-red block green; zero silent regressions across 96 new assertions.
+- **The review→fix→re-review loop converged to clean every phase** and caught genuinely dangerous bugs the suite missed: exit-1 convention breaks + missing backup-before-mutate (25), YAML injection via apostrophes in CLAUDE.md rules (28), a path-traversal boundary anchored one level too high accepting `../sibling` escapes (29), pkill regex over-match + the orphaned-subprocess SIGKILL root cause (30).
+- **Plan-checker as a pre-execution gate paid off heavily** — it caught the snapshot_create API misuse, the env-var-vs-argv flag override (CONJURE_JSON/PORCELAIN), the idempotent-vs-archive design contradiction, and a cross-wave cli/conjure write race before any executor ran.
+- **Research with live doc fetches corrected training-data assumptions**: 30 hook events not 34, 16 SKILL.md fields not 14, claude-agent-sdk as the only viable promptfoo provider, fail-on-threshold integer semantics, repeat/minPassCount placement.
+- **Prior-phase lessons compounded**: the warn()-flips-exit-code rule (25), single-EXIT-trap rule (27), and execution-time boundary re-checks (29) were each enforced in every subsequent phase's plans.
+
+### What Was Inefficient
+- **Worktree-isolation merge friction in Phase 25** (FF failures from tracking-commit divergence, a stray SUMMARY recreation, an mktemp template collision) — switched to sequential non-worktree execution for phases 26-30; far smoother for single-plan waves.
+- **Transient API socket errors killed two subagents mid-run** (28-01 executor, 29 planner) — both recovered cleanly by spot-check + fresh dispatch, but cost ~30 min.
+- **The environment degraded at the OS level mid-Phase-30** (mktemp + `.env.example` reads denied): failed mktemp left test dir vars empty and `git -C ""` escaped sandboxes, committing junk to the real repo twice. Recovery required reflog surgery (soft reset after an auto-checkpoint commit luckily captured the repaired tree).
+
+### Patterns Established
+- Audit severity contract: `note()` for advisory (exit 0), `err()` for real bugs (exit 2) — `warn()` reserved for the legacy WARN→exit-1 gate only.
+- Emit workers: validate-before-write, snapshot-before-mutate, exit 2, idempotent jq merges with explicit `(a//[])+(b//[])|unique` for arrays.
+- Machine outputs (`--json`, `--porcelain`): stdout purity via a `human()` stderr router; flags passed as argv to subprocesses, never env-only.
+- Security boundaries checked at validate-time AND execution-time, including rollback-restore time.
+
+### Key Lessons
+- A SIGKILL test that kills the orchestrator does not kill its children — orphaned subprocesses kept mutating repos during rollback; eviction must be explicit (anchored pkill / PID tracking).
+- Test sandboxes built on `mktemp` + `git -C "$VAR"` have a catastrophic failure mode when mktemp fails: the empty var silently retargets the REAL repo. Guard every `-C` var (tracked as tech debt).
+- In-place swaps of production files during tests (SCHM-STALE) need trap-based restore — an interrupted run shipped the fixture into production.
+
+### Cost Observations
+- Model mix: Opus 4.8 (1M) orchestrator; all subagents (researcher/pattern-mapper/planner/checker/executor/reviewer/fixer/verifier/debugger/integration-checker) on Sonnet.
+- ~50 subagent dispatches across the milestone; ~181 commits in ~36 hours.
+- Notable: the highest-value spend was adversarial verification — plan-checker blockers (5 phases), review-fix convergence loops (4 phases to clean), and the 2.8M-token SIGKILL-flake debug session that found a real production bug.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -136,6 +174,8 @@
 | v0.3.0 | 7 | 22 | First GSD milestone; established plan→execute→verify loop |
 | v0.4.0 | 9 | 23 | Added decimal phases; integration checker subagent; audit-before-close discipline |
 | v0.5.0 | 5 | 10 | Autonomous milestone run; post-close CI hardening exposed cross-platform test gaps |
+| v0.6.0 | 4 | 12 | Pre-write safety gates; split-responsibility CLI/skill architecture; live E2E smoke in milestone audit |
+| v0.7.0 | 6 | 24 | Full autonomous run (discuss→plan→execute per phase); plan-checker revision loops; review→fix convergence to clean every phase |
 
 ### Cumulative Quality
 
@@ -144,3 +184,5 @@
 | v0.3.0 | 203 | All green |
 | v0.4.0 | 261+ | All green |
 | v0.5.0 | 302 | All green (after post-close cross-platform fixes) |
+| v0.6.0 | 449 | All green |
+| v0.7.0 | 579 | All green at close |
