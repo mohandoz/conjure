@@ -170,6 +170,19 @@ workspace_state_write() {
   local state_path="$1"; shift
   local filter="$1"; shift
   local tmp="${state_path}.tmp.$$"
+  # WR-02: sweep stale "${state_path}.tmp.*" orphans on entry. A SIGKILL between the
+  # `jq > tmp` and the `mv` below (the documented durability window) leaves an orphan
+  # tmp in the workspace root indefinitely — state is never corrupted (mv is atomic) but
+  # orphans accumulate. A glob sweep is more complete than a single-slot tracker: with
+  # concurrent runs each process has a distinct $$, so any single global var can only
+  # track the last write. The sweep is best-effort and never aborts the write. The
+  # current run's own tmp (`$$`) is recreated immediately below, so reclaiming it here is
+  # harmless. Guard the nullglob case: if the glob does not expand, skip.
+  local _orphan
+  for _orphan in "${state_path}".tmp.*; do
+    [ -e "$_orphan" ] || continue
+    rm -f "$_orphan" 2>/dev/null || true
+  done
   if [ -f "$state_path" ]; then
     if jq "$@" "$filter" "$state_path" > "$tmp" 2>/dev/null; then
       mv "$tmp" "$state_path"

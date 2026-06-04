@@ -31,10 +31,13 @@ DRY_RUN="${DRY_RUN:-0}"
 # script, registered once at startup; individual functions do NOT add their own traps).
 TMPJSON=""
 TMPERR=""
-WS_STATE_TMP=""
+# WR-02: WS_STATE_TMP was dead wiring — workspace_state_write uses a LOCAL tmp var and
+# never assigned WS_STATE_TMP, so this trap slot always cleaned nothing. State-tmp orphans
+# are now swept inside workspace_state_write itself (glob sweep on entry), which also
+# handles the SIGKILL-before-mv window across concurrent runs. Slot removed.
 
 _ws_cleanup() {
-  rm -f "${TMPJSON:-}" "${TMPERR:-}" "${WS_STATE_TMP:-}"
+  rm -f "${TMPJSON:-}" "${TMPERR:-}"
 }
 trap _ws_cleanup EXIT
 
