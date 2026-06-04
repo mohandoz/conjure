@@ -222,7 +222,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 30-03-PLAN.md — Wave 3: ws_do_adopt saga orchestrator in scripts/workspace.sh — preflight du gate (2097152 KiB), --tag filter, PHASE A snapshot-all loop (workspace_state_write before+after each op, sha256_pre_ref hash file), PHASE B apply-serial loop, --dry-run zero-write, stop-on-fail; ws_sha_of in lib/workspace.sh (WS-06)
+- [x] 30-03-PLAN.md — Wave 3: ws_do_adopt saga orchestrator in scripts/workspace.sh — preflight du gate (2097152 KiB), --tag filter, PHASE A snapshot-all loop (workspace_state_write before+after each op, sha256_pre_ref hash file), PHASE B apply-serial loop, --dry-run zero-write, stop-on-fail; ws_sha_of in lib/workspace.sh (WS-06)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -243,4 +243,4 @@ Plans:
 | 27. Schema-Version-Aware Audit | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete    | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 3/3 | Complete    | 2026-06-03 |
-| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 3/5 | In Progress|  |
+| 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 4/5 | In Progress|  |
