@@ -721,7 +721,10 @@ EOF
 # Reads .conjure-workspace-state.json, restores each snapshotted/applied repo
 # from its snapshot_ref. Skips "snapshotting" + empty snapshot_ref (never-mutated).
 # Skips already "rolled_back" repos (idempotent). Updates state atomically.
-# On success: archives the state file with a timestamp (keeps audit trail).
+# After snapshot_rollback: deletes files created by adopt (not in snapshot), prunes
+# empty dirs absent from snapshot, then verifies sha256 zero-diff (per-file hash
+# from sha256_pre_ref). Aggregate exit 2 if any repo fails (never exit mid-loop).
+# On completion: archives the state file with a timestamp (keeps audit trail).
 # Exit codes: 0 = all successful or all already rolled_back; 2 = any failure.
 # ---------------------------------------------------------------------------
 ws_do_rollback() {
@@ -736,7 +739,9 @@ ws_do_rollback() {
     return 2
   fi
 
-  # Read state; capture repos list before any rollback modifies the file.
+  # Read state; capture repos list BEFORE any rollback modifies the file.
+  # (capture-before-restore pattern: state mutations during the loop must not
+  # affect the iteration list; we iterate from this captured snapshot.)
   local repos_captured
   repos_captured="$(jq -c '.repos[]' "$state_path" 2>/dev/null)" || repos_captured=""
   if [ -z "$repos_captured" ]; then
@@ -744,6 +749,7 @@ ws_do_rollback() {
     return 2
   fi
 
+  # Idempotent all-done check: if ALL repos are already rolled_back → exit 0 no-op.
   local all_rolled_back
   all_rolled_back="$(jq 'if (.repos | map(select(.status != "rolled_back")) | length) == 0 then "yes" else "no" end' "$state_path" 2>/dev/null || echo "no")"
   if [ "$all_rolled_back" = '"yes"' ]; then
@@ -751,16 +757,23 @@ ws_do_rollback() {
     return 0
   fi
 
+  # Resolve workspace root once (pwd -P) for CR-02 traversal re-check at restore time.
+  local manifest_root
+  manifest_root="$(cd "$manifest_dir" 2>/dev/null && pwd -P)" || {
+    echo "✗ ws_do_rollback: cannot resolve workspace root: $manifest_dir" >&2
+    return 2
+  }
+
   local any_rb_failed=0
-  local rb_json rb_name rb_snap_ref rb_status rb_abs rb_relpath rb_rc
+  local rb_json rb_name rb_snap_ref rb_sha256_pre_ref rb_status rb_abs rb_rc
 
   while IFS= read -r rb_json; do
     rb_name="$(printf '%s' "$rb_json" | jq -r '.name')"
     rb_snap_ref="$(printf '%s' "$rb_json" | jq -r '.snapshot_ref // ""')"
+    rb_sha256_pre_ref="$(printf '%s' "$rb_json" | jq -r '.sha256_pre_ref // ""')"
     rb_status="$(printf '%s' "$rb_json" | jq -r '.status')"
-    rb_relpath="$(printf '%s' "$rb_json" | jq -r '.path // ""')"
 
-    # Get abs path from manifest
+    # Get abs path from manifest (manifest has .path; state file does not).
     rb_abs="$manifest_dir/$(jq -r --arg n "$rb_name" '.repos[] | select(.name == $n) | .path' "$manifest_path" 2>/dev/null)"
 
     # Already rolled back: skip idempotently.
@@ -769,8 +782,9 @@ ws_do_rollback() {
       continue
     fi
 
-    # "snapshotting" + empty snapshot_ref = never mutated (SIGKILL during PHASE A pre-write).
-    # Safe to skip with a note.
+    # "snapshotting" + empty snapshot_ref = never mutated (SIGKILL during PHASE A
+    # pre-write sentinel). adopt never ran while any repo was snapshotting — safe to
+    # mark rolled_back with a note; nothing to restore.
     if [ "$rb_status" = "snapshotting" ] && [ -z "$rb_snap_ref" ]; then
       printf '  rollback: %s status=snapshotting + no snapshot_ref — never mutated, skip\n' "$rb_name"
       workspace_state_write "$state_path" \
@@ -779,7 +793,7 @@ ws_do_rollback() {
       continue
     fi
 
-    # "pending" = was never reached; skip.
+    # "pending" = was never reached; nothing to restore.
     if [ "$rb_status" = "pending" ]; then
       printf '  rollback: %s status=pending — never snapshotted, skip\n' "$rb_name"
       workspace_state_write "$state_path" \
@@ -787,6 +801,23 @@ ws_do_rollback() {
         --arg n "$rb_name" || true
       continue
     fi
+
+    # CR-02 rollback-time traversal re-check: confirm repo still within workspace root.
+    local rb_real
+    rb_real="$(cd "$rb_abs" 2>/dev/null && pwd -P)" || {
+      printf '✗ rollback: %s — cannot resolve path (CR-02): %s\n' "$rb_name" "$rb_abs" >&2
+      any_rb_failed=1
+      continue
+    }
+    case "$rb_real" in
+      "$manifest_root"|"$manifest_root/"*) ;;
+      *)
+        printf '✗ rollback: SECURITY: %s escapes workspace root (CR-02): %s\n' \
+          "$rb_name" "$rb_real" >&2
+        any_rb_failed=1
+        continue
+        ;;
+    esac
 
     # Validate snapshot_ref exists before attempting restore.
     if [ -z "$rb_snap_ref" ] || [ ! -d "$rb_snap_ref" ]; then
@@ -805,21 +836,99 @@ ws_do_rollback() {
     rb_rc=0
     snapshot_rollback "$rb_snap_ref" "$rb_abs" || rb_rc=$?
 
-    if [ "$rb_rc" -eq 0 ]; then
-      workspace_state_write "$state_path" \
-        '.repos = [.repos[] | if .name == $n then .status = "rolled_back" else . end]' \
-        --arg n "$rb_name" || true
-      printf '  rollback: %s restored ✓\n' "$rb_name"
-    else
+    if [ "$rb_rc" -ne 0 ]; then
       printf '✗ rollback: restore failed for repo: %s (rc=%d)\n' "$rb_name" "$rb_rc" >&2
       any_rb_failed=1
+      # Independence: do NOT exit — continue processing remaining repos.
+      continue
     fi
+
+    # D-03: snapshot_rollback tars snapshot/. into target; the snapshot dir carries
+    # .snapshot-meta.json at its root and tar leaks it into the target root. Remove
+    # it explicitly so the post-rollback tree is clean (mirrors adopt.sh D-03).
+    rm -f "$rb_abs/.snapshot-meta.json" 2>/dev/null || true
+
+    # ── Step 2: delete files created by adopt (absent from snapshot) ──────────
+    # snapshot_rollback (tar -xpf) restores modified files but does NOT delete
+    # files that adopt created fresh (they have no counterpart in the snapshot).
+    # Walk the live repo tree; any file without a counterpart in rb_snap_ref was
+    # created by adopt and must be removed so the post-rollback tree is byte-identical.
+    # Exception: .snapshot-meta.json was already removed above (D-03).
+    local _f _rel
+    while IFS= read -r _f; do
+      [ -n "$_f" ] || continue
+      _rel="${_f#"$rb_abs"/}"
+      # Skip conjure's own internal dirs — they persist across rollback by convention
+      # (mirrors adopt.sh rollback_path diff -r exclusion list).
+      case "$_rel" in
+        .conjure-adopt-backups/*|.conjure-archive-*/*|.conjure-adopt-state/*) continue ;;
+      esac
+      # If this file has no counterpart in the snapshot, adopt created it.
+      if [ ! -e "$rb_snap_ref/$_rel" ]; then
+        rm -f "$_f" 2>/dev/null || true
+      fi
+    done < <(find "$rb_abs" -type f \
+                -not -path "$rb_abs/.conjure-adopt-backups/*" \
+                -not -path "$rb_abs/.conjure-archive-*" \
+                -not -path "$rb_abs/.conjure-adopt-state/*" \
+                2>/dev/null)
+
+    # Bottom-up empty-dir prune: remove dirs absent from snapshot (adopt-created dirs
+    # that are now empty after file deletion). rmdir is a no-op on non-empty dirs.
+    local _d _drel
+    while IFS= read -r _d; do
+      [ -n "$_d" ] || continue
+      [ "$_d" = "$rb_abs" ] && continue
+      _drel="${_d#"$rb_abs"/}"
+      # If the dir existed in the snapshot, leave it alone even if now empty.
+      [ -d "$rb_snap_ref/$_drel" ] && continue
+      rmdir "$_d" 2>/dev/null || true
+    done < <(find "$rb_abs" -type d \
+                -not -path "$rb_abs/.conjure-adopt-backups*" \
+                -not -path "$rb_abs/.conjure-archive-*" \
+                -not -path "$rb_abs/.conjure-adopt-state*" \
+                2>/dev/null | awk '{ print length, $0 }' | sort -rn | cut -d' ' -f2-)
+
+    # ── Step 3: sha256 zero-diff verify (per-file, from sha256_pre_ref) ───────
+    # Mirror the Phase 22 per-file before-hash pattern. sha256_pre_ref is the path
+    # to the mktemp hash file recorded by ws_do_adopt (stored outside repo tree so
+    # rollback cannot clobber it). Each line: "<hash>  <relative-path>".
+    local rb_mismatch=0
+    if [ -n "$rb_sha256_pre_ref" ] && [ -f "$rb_sha256_pre_ref" ]; then
+      local _h _frel _now
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        _h="${line%%  *}"; _frel="${line##*  }"
+        _now="$(ws_sha_of "$rb_abs/$_frel" 2>/dev/null || echo MISSING)"
+        [ "$_h" = "$_now" ] || rb_mismatch=$((rb_mismatch+1))
+      done < "$rb_sha256_pre_ref"
+      if [ "$rb_mismatch" -gt 0 ]; then
+        printf '✗ rollback: %s — sha256 mismatch: %d file(s) differ from pre-adopt hash\n' \
+          "$rb_name" "$rb_mismatch" >&2
+        workspace_state_write "$state_path" \
+          '.repos = [.repos[] | if .name == $n then .status = "failed" else . end]' \
+          --arg n "$rb_name" || true
+        any_rb_failed=1
+        # Independence: continue processing remaining repos.
+        continue
+      fi
+    fi
+
+    # All steps passed for this repo.
+    workspace_state_write "$state_path" \
+      '.repos = [.repos[] | if .name == $n then .status = "rolled_back" else . end]' \
+      --arg n "$rb_name" || true
+    printf '  rollback: %s restored ✓\n' "$rb_name"
 
   done <<EOF
 $repos_captured
 EOF
 
   # Archive the state file (preserve audit trail — do NOT rm -f).
+  # The ORIGINAL state file remains in place with all repos status="rolled_back".
+  # A timestamped COPY is created as the audit trail artifact.
+  # A second --rollback invocation reads the original (still present), sees all
+  # repos are rolled_back, and exits 0 (idempotent no-op).
   local archive_ts
   archive_ts="$(date -u '+%Y%m%dT%H%M%SZ')"
   local archive_name="$manifest_dir/.conjure-workspace-state-${archive_ts}.json"
