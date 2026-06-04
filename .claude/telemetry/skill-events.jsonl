@@ -2,3 +2,5 @@
 {"ts":"2026-06-04T02:45:39.320Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
 {"ts":"2026-06-04T02:46:06.619Z","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
 {"ts":"2026-06-04T02:46:06.642Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-04T02:46:32.187Z","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-04T02:46:32.213Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
