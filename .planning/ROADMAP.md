@@ -40,7 +40,7 @@
 
 **Milestone Goal:** Close v0.7.0 deferred debt, give operators visibility (`doctor`, `stats`), deepen eval coverage, polish init UX, and ship user-facing docs that match what Conjure actually does.
 
-- [ ] **Phase 31: Deferred Debt + Test-Harness Hardening** — `git -C "$VAR"` empty-var guards, `preflight.sh` exit 1 → exit 2, `skip()` counter in `tests/run.sh`, live-smoke gating, `tests/MANUAL-UAT.md`
+- [x] **Phase 31: Deferred Debt + Test-Harness Hardening** — `git -C "$VAR"` empty-var guards, `preflight.sh` exit 1 → exit 2, `skip()` counter in `tests/run.sh`, live-smoke gating, `tests/MANUAL-UAT.md` (completed 2026-06-04)
 - [ ] **Phase 32: `conjure doctor`** — new `scripts/doctor.sh` + `cmd_doctor`; binary/version table, `.mjs` ESM probe, harness validation, `--json` output, `--fix` remediation
 - [ ] **Phase 33: `conjure stats`** — new `scripts/stats.sh` + `cmd_stats`; skill fire counts, dead-skill detection, cost estimates, `--window`/`--json`/`--export-csv`, JSONL try-parse guard
 - [ ] **Phase 34: Eval Suite Expansion** — per-profile assertion templates (4 profiles), `_detect_applied_profiles()`, `eval snapshot`/`eval compare`, fork-PR guard, `repeat: 1` structural cap, tool-trajectory assertions
@@ -74,7 +74,7 @@
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 31-04-PLAN.md — UAT-01 + UAT-02 (live-system tests section in run.sh)
+- [x] 31-04-PLAN.md — UAT-01 + UAT-02 (live-system tests section in run.sh)
 
 ### Phase 32: `conjure doctor`
 
@@ -160,7 +160,7 @@
 | 28. promptfoo Eval + Context-Budget Linter | v0.7.0 | 4/4 | Complete | 2026-06-03 |
 | 29. Workspace Orchestration — Read-Only | v0.7.0 | 3/3 | Complete | 2026-06-03 |
 | 30. Workspace Orchestration — Mutating + Rollback Saga | v0.7.0 | 5/5 | Complete | 2026-06-04 |
-| 31. Deferred Debt + Test-Harness Hardening | v0.8.0 | 3/4 | In Progress|  |
+| 31. Deferred Debt + Test-Harness Hardening | v0.8.0 | 4/4 | Complete   | 2026-06-04 |
 | 32. `conjure doctor` | v0.8.0 | 0/? | Not started | - |
 | 33. `conjure stats` | v0.8.0 | 0/? | Not started | - |
 | 34. Eval Suite Expansion | v0.8.0 | 0/? | Not started | - |
