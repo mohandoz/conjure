@@ -41,11 +41,24 @@ _sandbox_tool_dir() {
   [ -n "$_p" ] && dirname "$_p"
 }
 
+# mk_tmpd — create a temp directory, validate the result, and return its path.
+# Exits 2 if mktemp fails or returns a non-existent directory (DEBT-03/T-31-01).
+# Prints the path via printf (no trailing newline), suitable for $(...) capture.
+mk_tmpd() {
+  local _d
+  _d="$(mktemp -d)"
+  if [ -z "$_d" ] || [ ! -d "$_d" ]; then
+    printf 'FATAL: mk_tmpd: mktemp -d failed or returned non-existent path\n' >&2
+    exit 2
+  fi
+  printf '%s' "$_d"
+}
+
 # sandbox_setup <fixture_dir>
 # Sets SANDBOX_DIR (global), copies fixture contents into it, exports isolation vars.
 sandbox_setup() {
   local fixture_dir="$1"
-  SANDBOX_DIR="$(mktemp -d)"
+  SANDBOX_DIR="$(mk_tmpd)"
   trap 'rm -rf "$SANDBOX_DIR"' EXIT
   cp -r "$fixture_dir/." "$SANDBOX_DIR/"
   export HOME="$SANDBOX_DIR"

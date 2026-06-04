@@ -9,11 +9,19 @@ source "$CONJURE_HOME/tests/lib/sandbox.sh"
 
 PASS=0
 FAIL=0
+SKIP=0
 TESTS=()
 
 t() { TESTS+=("$1"); }
 pass() { echo "  ✓ $1"; PASS=$((PASS+1)); }
 fail() { echo "  ✗ $1"; FAIL=$((FAIL+1)); }
+skip() {
+  if [ "${CONJURE_STRICT:-0}" = "1" ]; then
+    fail "$1 (SKIPPED in strict mode)"
+  else
+    printf "  ○ %s\n" "$1"; SKIP=$((SKIP+1))
+  fi
+}
 
 # Native Windows Git Bash (MSYS/MINGW/Cygwin) can't create real symlinks (git checks
 # them out as plain files; `ln -s` copies), ignores Unix file-mode perms, and forks
@@ -195,6 +203,31 @@ if ! command -v shellcheck >/dev/null 2>&1; then
   fi
 else
   pass "scripts/preflight.sh: shellcheck present — optional-missing test skipped"
+fi
+
+# DEBT-04: preflight.sh must exit 2 (not 1) on required-dep failure — project convention
+if command -v node >/dev/null 2>&1; then
+  _preflight_rc=0
+  PATH="$STRIPPED_PATH" bash scripts/preflight.sh >/dev/null 2>&1 || _preflight_rc=$?
+  if [ "$_preflight_rc" -eq 2 ]; then
+    pass "scripts/preflight.sh: exits 2 on required-dep failure (DEBT-04)"
+  else
+    fail "scripts/preflight.sh: exits $_preflight_rc not 2 on required-dep failure (DEBT-04)"
+  fi
+else
+  pass "scripts/preflight.sh: DEBT-04 exit-code check skipped (node absent in PATH)"
+fi
+
+# DEBT-03: sandbox.sh must define mk_tmpd() and sandbox_setup() must use it
+if grep -q 'mk_tmpd()' "$CONJURE_HOME/tests/lib/sandbox.sh"; then
+  pass "tests/lib/sandbox.sh: mk_tmpd() defined (DEBT-03)"
+else
+  fail "tests/lib/sandbox.sh: mk_tmpd() NOT defined (DEBT-03)"
+fi
+if grep -q 'SANDBOX_DIR="$(mk_tmpd)"' "$CONJURE_HOME/tests/lib/sandbox.sh"; then
+  pass "tests/lib/sandbox.sh: sandbox_setup() uses mk_tmpd() (DEBT-03)"
+else
+  fail "tests/lib/sandbox.sh: sandbox_setup() still uses raw mktemp -d (DEBT-03)"
 fi
 
 # Template lint — catch SAFE-03 regressions (bash hooks back in settings template)
@@ -6703,10 +6736,40 @@ rm -rf "$P30_FIX_CR04_DIR"
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
 
+# DEBT-05: tests/run.sh must define SKIP counter, skip() function with CONJURE_STRICT guard,
+# and show SKIP column in summary line. These are structural gates checked via self-inspection.
+echo
+echo "▸ DEBT-05: skip() / SKIP counter / summary gate"
+DEBT05_SELF="$CONJURE_HOME/tests/run.sh"
+# Checks use head to read only the preamble (lines 1-50) and tail (last 20 lines)
+# to avoid matching test code itself.
+_D05_PREAMBLE="$(head -50 "$DEBT05_SELF")"
+_D05_TAIL="$(tail -20 "$DEBT05_SELF")"
+if printf '%s\n' "$_D05_PREAMBLE" | grep -q '^SKIP=0$'; then
+  pass "tests/run.sh: SKIP=0 initialised (DEBT-05)"
+else
+  fail "tests/run.sh: SKIP=0 NOT initialised (DEBT-05)"
+fi
+if printf '%s\n' "$_D05_PREAMBLE" | grep -q '^skip()'; then
+  pass "tests/run.sh: skip() function defined (DEBT-05)"
+else
+  fail "tests/run.sh: skip() function NOT defined (DEBT-05)"
+fi
+if printf '%s\n' "$_D05_PREAMBLE" | grep -qE '\$\{CONJURE_STRICT:-0\}'; then
+  pass "tests/run.sh: CONJURE_STRICT guard present in skip() (DEBT-05)"
+else
+  fail "tests/run.sh: CONJURE_STRICT guard MISSING from skip() (DEBT-05)"
+fi
+if printf '%s\n' "$_D05_TAIL" | grep -qE '^echo "PASS:.*FAIL:.*SKIP:'; then
+  pass "tests/run.sh: summary line includes SKIP column (DEBT-05)"
+else
+  fail "tests/run.sh: summary line missing SKIP column (DEBT-05)"
+fi
+
 # Summary
 echo
 echo "═══════════════════════════════════════════════════════════════════"
-echo "PASS: $PASS    FAIL: $FAIL"
+echo "PASS: $PASS    FAIL: $FAIL    SKIP: $SKIP"
 echo "═══════════════════════════════════════════════════════════════════"
 
 [ "$FAIL" -eq 0 ]

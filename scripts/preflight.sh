@@ -4,7 +4,7 @@
 #
 # Usage: bash scripts/preflight.sh
 # Exit codes: 0 = all required deps present (optional may be missing)
-#             1 = one or more required deps missing
+#             2 = one or more required deps missing
 #
 # Self-contained: no sourced variables, no $CONJURE_HOME dependency.
 # Compatible: POSIX bash 3.2+ (no associative arrays, no mapfile/readarray).
@@ -106,7 +106,7 @@ for dep in node git; do
   fi
 done
 
-[ "$REQUIRED_FAILED" -eq 1 ] && exit 1
+[ "$REQUIRED_FAILED" -eq 1 ] && exit 2
 
 # Optional deps check (jq, rg, shellcheck)
 printf "\nOptional deps:\n"
