@@ -1,0 +1,74 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": [
+        "**/*.key",
+        "**/*.p12",
+        "**/*.pem",
+        "**/*.pfx",
+        "**/.env",
+        "**/.env.*",
+        "**/credentials",
+        "**/dob*",
+        "**/ehr/**",
+        "**/health-records/**",
+        "**/medical*",
+        "**/mrn*",
+        "**/patient*",
+        "**/phi",
+        "**/phi/**",
+        "**/secrets",
+        "**/ssn*",
+        ".env",
+        "~/.aws",
+        "~/.aws/credentials",
+        "~/.config/gcloud",
+        "~/.gnupg",
+        "~/.ssh"
+      ],
+      "denyWrite": [
+        "**/patient*",
+        "**/phi/**",
+        "~/.aws",
+        "~/.gnupg",
+        "~/.ssh"
+      ],
+      "allowWrite": [],
+      "allowRead": []
+    },
+    "network": {
+      "allowedDomains": []
+    },
+    "excludedCommands": []
+  },
+  "permissions": {
+    "deny": [
+      "Read(**/*.key)",
+      "Read(**/*.p12)",
+      "Read(**/*.pem)",
+      "Read(**/*.pfx)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/credentials)",
+      "Read(**/dob*)",
+      "Read(**/ehr/**)",
+      "Read(**/health-records/**)",
+      "Read(**/medical*)",
+      "Read(**/mrn*)",
+      "Read(**/patient*)",
+      "Read(**/phi)",
+      "Read(**/phi/**)",
+      "Read(**/secrets)",
+      "Read(**/ssn*)",
+      "Read(.env)",
+      "Read(~/.aws)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.config/gcloud)",
+      "Read(~/.gnupg)",
+      "Read(~/.ssh)"
+    ]
+  }
+}
