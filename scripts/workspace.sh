@@ -710,6 +710,12 @@ EOF
         --arg n "$repo_name" || true
       printf '✗ PHASE B: apply failed for repo: %s (rc=%d)\n' "$repo_name" "$apply_rc" >&2
       echo "✗ stop-on-fail: halting adopt (repo=$repo_name)" >&2
+      # WR-04: PHASE B applies serially and stops on first failure, leaving repos before
+      # this one ACTUALLY MUTATED (status="applied"). The saga is recoverable (not
+      # auto-rolled-back) — surface an explicit, machine-greppable instruction so a
+      # non-interactive caller that only checks the exit code still learns the workspace
+      # is partially mutated and how to restore it.
+      echo "✗ PARTIAL ADOPT: repos before $repo_name are applied (mutated). Run: conjure workspace adopt --rollback $manifest_path" >&2
       return 2
     fi
 
