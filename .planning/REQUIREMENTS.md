@@ -92,13 +92,43 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| — | — | Pending roadmap |
+| DEBT-03 | Phase 31 | Pending |
+| DEBT-04 | Phase 31 | Pending |
+| DEBT-05 | Phase 31 | Pending |
+| DEBT-06 | Phase 31 | Pending |
+| UAT-01 | Phase 31 | Pending |
+| UAT-02 | Phase 31 | Pending |
+| UAT-03 | Phase 31 | Pending |
+| DOCT-01 | Phase 32 | Pending |
+| DOCT-02 | Phase 32 | Pending |
+| DOCT-03 | Phase 32 | Pending |
+| DOCT-04 | Phase 32 | Pending |
+| DOCT-05 | Phase 32 | Pending |
+| DOCT-06 | Phase 32 | Pending |
+| STAT-01 | Phase 33 | Pending |
+| STAT-02 | Phase 33 | Pending |
+| STAT-03 | Phase 33 | Pending |
+| STAT-04 | Phase 33 | Pending |
+| STAT-05 | Phase 33 | Pending |
+| STAT-06 | Phase 33 | Pending |
+| STAT-07 | Phase 33 | Pending |
+| EVAL-06 | Phase 34 | Pending |
+| EVAL-07 | Phase 34 | Pending |
+| EVAL-08 | Phase 34 | Pending |
+| EVAL-09 | Phase 34 | Pending |
+| WIZ-01 | Phase 35 | Pending |
+| WIZ-02 | Phase 35 | Pending |
+| WIZ-03 | Phase 35 | Pending |
+| WIZ-04 | Phase 35 | Pending |
+| DOCS-01 | Phase 36 | Pending |
+| DOCS-02 | Phase 36 | Pending |
+| DOCS-03 | Phase 36 | Pending |
 
 **Coverage:**
 - v0.8.0 requirements: 31 total
-- Mapped to phases: 0
-- Unmapped: 31 ⚠️ (roadmap pending)
+- Mapped to phases: 31
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-04*
-*Last updated: 2026-06-04 after initial definition*
+*Last updated: 2026-06-04 — traceability populated after roadmap creation*
