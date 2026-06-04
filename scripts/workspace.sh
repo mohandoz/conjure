@@ -840,8 +840,18 @@ ws_do_rollback() {
     # creates new files after the snapshot-based orphan-file deletion pass.
     # pkill -9 -f is a best-effort kill (race-free alternatives require setsid/cgroup;
     # the double-delete-pass below closes the residual window).
-    pkill -9 -f "conjure adopt.*$rb_abs" 2>/dev/null || true
-    pkill -9 -f "adopt\\.sh.*$rb_abs" 2>/dev/null || true
+    #
+    # CR-01: $rb_abs is interpolated into a `pkill -f` REGEX. Interpolating it raw makes
+    # the path metacharacters (`.`, `+`, `(`, …) match arbitrary chars AND leaves the
+    # match UNANCHORED, so `/…/repo-a` over-matches `/…/repo-abc` (a sibling NOT being
+    # rolled back) and can kill unrelated processes (the test harness, a concurrent adopt).
+    # Fix: regex-escape every metachar in the path, then anchor the pattern to END-OF-LINE
+    # (`$`) so only a command line whose argument is EXACTLY this repo path is matched —
+    # `repo-a$` cannot match `repo-abc`.
+    local rb_abs_re
+    rb_abs_re="$(printf '%s' "$rb_abs" | sed 's/[].[*^$()+?{}|\\]/\\&/g')"
+    pkill -9 -f "conjure adopt.*${rb_abs_re}\$" 2>/dev/null || true
+    pkill -9 -f "adopt\\.sh.*${rb_abs_re}\$" 2>/dev/null || true
     # Brief wait: let the OS process the SIGKILLs before we inspect the tree.
     sleep 0.05
 
