@@ -206,7 +206,7 @@ if grep -q 'bash .claude/hooks/' templates/settings.json.tmpl 2>/dev/null; then
 else pass "settings.json.tmpl: no bash hook commands"
 fi
 
-if grep -q 'node .claude/hooks/' templates/settings.json.tmpl 2>/dev/null; then
+if grep -q 'node "$CLAUDE_PROJECT_DIR"/.claude/hooks/' templates/settings.json.tmpl 2>/dev/null; then
   pass "settings.json.tmpl: node hook commands present"
 else fail "settings.json.tmpl: node hook commands MISSING"
 fi
@@ -652,29 +652,29 @@ if [ -f "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl" ]; then
   fi
 fi
 
-# TLMY-02b: UserPromptExpansion path writes JSONL (skill_typed event)
-UPE_PAYLOAD='{"hook_event_name":"UserPromptExpansion","command_name":"/test-skill","session_id":"sess-002","cwd":"'"$TLMY_CWD"'"}'
+# TLMY-02b: UserPromptSubmit path writes JSONL (skill_typed event)
+UPE_PAYLOAD='{"hook_event_name":"UserPromptSubmit","prompt":"/test-skill foo","session_id":"sess-002","cwd":"'"$TLMY_CWD"'"}'
 UPE_RC=0
 printf '%s' "$UPE_PAYLOAD" | CONJURE_TELEMETRY=1 node "$TLMY_HOOK" >/dev/null 2>&1 || UPE_RC=$?
 if [ "$UPE_RC" -eq 0 ]; then
-  pass "UserPromptExpansion path exits 0 (TLMY-02b)"
+  pass "UserPromptSubmit path exits 0 (TLMY-02b)"
 else
-  fail "UserPromptExpansion path exited $UPE_RC — expected 0 (TLMY-02b)"
+  fail "UserPromptSubmit path exited $UPE_RC — expected 0 (TLMY-02b)"
 fi
 JSONL_COUNT=$(wc -l < "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl" 2>/dev/null | tr -d ' ')
 if [ "${JSONL_COUNT:-0}" -ge 2 ]; then
-  pass "UserPromptExpansion path writes JSONL (TLMY-02b)"
+  pass "UserPromptSubmit path writes JSONL (TLMY-02b)"
 else
-  fail "UserPromptExpansion path did NOT write JSONL — line count: ${JSONL_COUNT:-0} (TLMY-02b)"
+  fail "UserPromptSubmit path did NOT write JSONL — line count: ${JSONL_COUNT:-0} (TLMY-02b)"
 fi
 # Verify the UPE record carries skill_typed event type
 UPE_LINE=$(tail -1 "$SANDBOX_DIR/.claude/telemetry/skill-events.jsonl" 2>/dev/null || true)
 if printf '%s' "$UPE_LINE" | grep -q '"skill_typed"' && \
    printf '%s' "$UPE_LINE" | grep -q '"test-skill"' && \
    printf '%s' "$UPE_LINE" | grep -q '"project_cwd"'; then
-  pass "UserPromptExpansion JSONL record has correct fields (TLMY-02b)"
+  pass "UserPromptSubmit JSONL record has correct fields (TLMY-02b)"
 else
-  fail "UserPromptExpansion JSONL record missing expected fields — got: $UPE_LINE (TLMY-02b)"
+  fail "UserPromptSubmit JSONL record missing expected fields — got: $UPE_LINE (TLMY-02b)"
 fi
 
 # TLMY-04: retire-list section renders when CONJURE_RETIRE=1

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Cross-platform PreToolUse(Skill) + UserPromptExpansion hook — skill-firing telemetry.
+// Cross-platform PreToolUse(Skill) + UserPromptSubmit hook — skill-firing telemetry.
 // Appends one JSONL line per skill invocation to .claude/telemetry/skill-events.jsonl.
 // Opt-in via CONJURE_TELEMETRY=1 in .claude/settings.json env block.
 // Exit 0 always — telemetry NEVER blocks Claude.
@@ -32,10 +32,13 @@ process.stdin.on('end', () => {
     // PreToolUse/Skill: skill name is in tool_input.skill_name (A1: defensive ?.)
     skillName = p.tool_input?.skill_name ?? null;
     eventType = 'skill_invoke';
-  } else if (event === 'UserPromptExpansion') {
-    // UserPromptExpansion: skill name is in command_name (A2: strip leading / defensively)
-    skillName = p.command_name ?? null;
-    if (skillName) skillName = skillName.replace(/^\//, '');
+  } else if (event === 'UserPromptSubmit') {
+    // UserPromptSubmit: skill name is the first token of prompt if it starts with /
+    const prompt = p.prompt ?? '';
+    if (typeof prompt === 'string' && prompt.startsWith('/')) {
+      const token = prompt.split(/\s+/)[0];
+      skillName = token.replace(/^\//, '') || null;
+    }
     eventType = 'skill_typed';
   } else {
     // Not a skill event — silent pass
@@ -45,7 +48,7 @@ process.stdin.on('end', () => {
   // Defensive null guard — exit silently if skill name could not be determined
   if (!skillName) process.exit(0);
 
-  // Derive safe working directory — p.cwd may be absent for UserPromptExpansion events
+  // Derive safe working directory — p.cwd may be absent for UserPromptSubmit events
   const cwd = p.cwd ?? process.cwd();
 
   // Build JSONL record — skill name ONLY, never tool arguments (PII risk, D-05)
