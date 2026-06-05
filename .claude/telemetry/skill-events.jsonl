@@ -6,3 +6,9 @@
 {"ts":"2026-06-05T17:54:18.801Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
 {"ts":"2026-06-05T17:55:23.556Z","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
 {"ts":"2026-06-05T17:55:23.583Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-05T18:38:55.172Z","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-05T18:38:55.198Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-05T18:40:02.376Z","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-05T18:40:02.403Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-05T18:41:46.524Z","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-05T18:41:46.551Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
