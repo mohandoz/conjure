@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 Phase: 30
 Plan: Not started
 Status: Milestone complete
-Last activity: 2026-06-05 - Completed quick task 260605-tlg: Graphify integration upgrade (backend auto-detect, --setup, SessionStart check)
+Last activity: 2026-06-05 - Completed quick task 260605-txz: Fix hook template (CLAUDE_PROJECT_DIR paths, UserPromptSubmit event)
 
 ## Performance Metrics
 
@@ -129,6 +129,7 @@ None.
 | 260605-smk | Fix cli/conjure CONJURE_HOME symlink resolution | 2026-06-05 | 6bafa6d | | [260605-smk-fix-cli-conjure-conjure-home-symlink-res](./quick/260605-smk-fix-cli-conjure-conjure-home-symlink-res/) |
 | 260605-sv6 | Fix settings.json template: schema URL + fork-bomb deny rule | 2026-06-05 | 432409a | | [260605-sv6-fix-invalid-settings-json-template-schem](./quick/260605-sv6-fix-invalid-settings-json-template-schem/) |
 | 260605-tlg | Graphify integration: backend auto-detect, --setup, SessionStart check | 2026-06-05 | 960101a | | [260605-tlg-upgrade-graphify-integration-backend-aut](./quick/260605-tlg-upgrade-graphify-integration-backend-aut/) |
+| 260605-txz | Fix hook template: CLAUDE_PROJECT_DIR paths + UserPromptSubmit event | 2026-06-05 | 58caa39 | | [260605-txz-fix-hook-template-bugs-relative-paths-an](./quick/260605-txz-fix-hook-template-bugs-relative-paths-an/) |
 
 ## Deferred Items
 
