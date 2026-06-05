@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/post-edit-format.mjs"
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit-format.mjs"
           }
         ]
       }
@@ -58,11 +58,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/pre-bash-block-destructive.mjs"
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-bash-block-destructive.mjs"
           },
           {
             "type": "command",
-            "command": "node .claude/hooks/pre-commit-quality-gate.mjs"
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-commit-quality-gate.mjs"
           }
         ]
       },
@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/skill-telemetry.mjs"
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/skill-telemetry.mjs"
           }
         ]
       }
@@ -81,7 +81,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/stop-compound-engineering.mjs"
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-compound-engineering.mjs"
           }
         ]
       }
@@ -91,11 +91,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/session-start-context.mjs"
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start-context.mjs"
           },
           {
             "type": "command",
-            "command": "command -v graphify >/dev/null 2>&1 && graphify check-update . 2>/dev/null || true"
+            "command": "command -v graphify >/dev/null 2>&1 && graphify check-update \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || true"
           }
         ]
       }
@@ -105,7 +105,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/skill-telemetry.mjs"
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/skill-telemetry.mjs"
           }
         ]
       }
