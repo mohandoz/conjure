@@ -21,7 +21,14 @@
 
 set -uo pipefail
 
-CONJURE_HOME="${CONJURE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
+_CONJURE_SOURCE="$0"
+while [ -h "$_CONJURE_SOURCE" ]; do
+  _CONJURE_DIR="$(cd "$(dirname "$_CONJURE_SOURCE")" && pwd)"
+  _CONJURE_SOURCE="$(readlink "$_CONJURE_SOURCE")"
+  case "$_CONJURE_SOURCE" in /*) ;; *) _CONJURE_SOURCE="$_CONJURE_DIR/$_CONJURE_SOURCE" ;; esac
+done
+CONJURE_HOME="${CONJURE_HOME:-$(cd "$(dirname "$_CONJURE_SOURCE")/.." && pwd)}"
+unset _CONJURE_SOURCE _CONJURE_DIR
 CONJURE_VERSION="$(cat "$CONJURE_HOME/VERSION" 2>/dev/null || echo unknown)"
 
 usage() {
