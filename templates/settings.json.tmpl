@@ -1,5 +1,5 @@
 {
-  "$schema": "https://schemastore.org/claude-code-settings.json",
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
 
   "_comment_permissions": "Allowlist common read-only commands so Claude doesn't prompt for every grep/ls. Add stack-specific build/test commands here.",
   "permissions": {
@@ -28,7 +28,7 @@
     ],
     "deny": [
       "Bash(rm -rf /*)",
-      "Bash(:(){:|:&};:)",
+      "Bash(:*)",
       "Bash(curl * | sh*)",
       "Bash(curl * | bash*)",
       "Bash(wget * | sh*)",
