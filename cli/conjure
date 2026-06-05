@@ -10,7 +10,7 @@
 #       Health-check the .claude/ setup.
 #   update [--check|--apply] [target]
 #       Update a project's .claude/ to current kit version (with diff preview).
-#   refresh-graph [target] [--full|--update]
+#   refresh-graph [target] [--full|--update] [--backend <name>] [--ast-only] [--setup]
 #       Rebuild/update graphify knowledge graph.
 #   install-mcp
 #       Install recommended MCP servers.
@@ -45,7 +45,7 @@ Usage:
   conjure check [--porcelain] [--schema] [target]
   conjure resolve [--dry-run] [target]
   conjure adopt [--dry-run] [--force] [--rollback] [--resume] [--start-fresh] [--apply-step <id>] [--update-manifest] [--full-inventory] [target]
-  conjure refresh-graph [target] [--full|--update]
+  conjure refresh-graph [target] [--full|--update] [--backend <name>] [--ast-only] [--setup]
   conjure refresh-overlay [target]
   conjure install-mcp
   conjure preflight

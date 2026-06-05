@@ -24,7 +24,8 @@
       "Bash(gh run view:*)",
       "Bash(graphify query:*)",
       "Bash(graphify path:*)",
-      "Bash(graphify explain:*)"
+      "Bash(graphify explain:*)",
+      "Bash(graphify check-update:*)"
     ],
     "deny": [
       "Bash(rm -rf /*)",
@@ -91,6 +92,10 @@
           {
             "type": "command",
             "command": "node .claude/hooks/session-start-context.mjs"
+          },
+          {
+            "type": "command",
+            "command": "command -v graphify >/dev/null 2>&1 && graphify check-update . 2>/dev/null || true"
           }
         ]
       }
