@@ -6699,6 +6699,26 @@ fi
 trap - EXIT
 rm -rf "$P30_FIX_CR04_DIR"
 
+# CONJURE_HOME symlink resolution: invoking conjure via a symlink must resolve
+# CONJURE_HOME to the repo root, not the symlink's parent dir.
+echo
+echo "▸ CONJURE_HOME symlink resolution"
+if [ "$IS_WINDOWS" = "1" ]; then
+  pass "conjure version via symlink: N/A on Windows (no real symlinks)"
+else
+  _SYM_TMP="$(mktemp -d)"
+  ln -s "$CONJURE_HOME/cli/conjure" "$_SYM_TMP/conjure"
+  _SYM_OUT="$("$_SYM_TMP/conjure" version 2>&1 || true)"
+  rm -rf "$_SYM_TMP"
+  unset _SYM_TMP
+  if printf '%s' "$_SYM_OUT" | grep -qv 'unknown'; then
+    pass "conjure version via symlink: resolved correctly ($_SYM_OUT)"
+  else
+    fail "conjure version via symlink: got '$_SYM_OUT' — CONJURE_HOME not resolved through symlink"
+  fi
+  unset _SYM_OUT
+fi
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Clean up any gh-hiding stub dirs created by mk_path_without_gh
 for _s in $GH_HIDE_STUBS; do rm -rf "$_s"; done
