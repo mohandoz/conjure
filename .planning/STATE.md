@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 Phase: 30
 Plan: Not started
 Status: Milestone complete
-Last activity: 2026-06-05 - Completed quick task 260605-sv6: Fix settings.json template (schema URL + fork-bomb deny rule)
+Last activity: 2026-06-05 - Completed quick task 260605-tlg: Graphify integration upgrade (backend auto-detect, --setup, SessionStart check)
 
 ## Performance Metrics
 
@@ -128,6 +128,7 @@ None.
 | 260605-sdw | Add Makefile with install/uninstall targets for local dev | 2026-06-05 | 5112349 | | [260605-sdw-add-makefile-with-install-uninstall-targ](./quick/260605-sdw-add-makefile-with-install-uninstall-targ/) |
 | 260605-smk | Fix cli/conjure CONJURE_HOME symlink resolution | 2026-06-05 | 6bafa6d | | [260605-smk-fix-cli-conjure-conjure-home-symlink-res](./quick/260605-smk-fix-cli-conjure-conjure-home-symlink-res/) |
 | 260605-sv6 | Fix settings.json template: schema URL + fork-bomb deny rule | 2026-06-05 | 432409a | | [260605-sv6-fix-invalid-settings-json-template-schem](./quick/260605-sv6-fix-invalid-settings-json-template-schem/) |
+| 260605-tlg | Graphify integration: backend auto-detect, --setup, SessionStart check | 2026-06-05 | 960101a | | [260605-tlg-upgrade-graphify-integration-backend-aut](./quick/260605-tlg-upgrade-graphify-integration-backend-aut/) |
 
 ## Deferred Items
 
