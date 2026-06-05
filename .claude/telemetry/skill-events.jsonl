@@ -1,2 +1,4 @@
 {"ts":"2026-06-04T02:45:39.296Z","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
 {"ts":"2026-06-04T02:45:39.320Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-05T17:40:19.448Z","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
+{"ts":"2026-06-05T17:40:19.472Z","session_id":"sess-002","event":"skill_typed","skill":"test-skill","project_cwd":""}
