@@ -254,7 +254,7 @@ if grep -q 'bash .claude/hooks/' templates/settings.json.tmpl 2>/dev/null; then
 else pass "settings.json.tmpl: no bash hook commands"
 fi
 
-if grep -q 'node "$CLAUDE_PROJECT_DIR"/.claude/hooks/' templates/settings.json.tmpl 2>/dev/null; then
+if grep -qF 'node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/' templates/settings.json.tmpl 2>/dev/null; then
   pass "settings.json.tmpl: node hook commands present"
 else fail "settings.json.tmpl: node hook commands MISSING"
 fi
@@ -6751,7 +6751,7 @@ echo "▸ CONJURE_HOME symlink resolution"
 if [ "$IS_WINDOWS" = "1" ]; then
   pass "conjure version via symlink: N/A on Windows (no real symlinks)"
 else
-  _SYM_TMP="$(mktemp -d)"
+  _SYM_TMP="$(mk_tmpd)"
   ln -s "$CONJURE_HOME/cli/conjure" "$_SYM_TMP/conjure"
   _SYM_OUT="$("$_SYM_TMP/conjure" version 2>&1 || true)"
   rm -rf "$_SYM_TMP"
