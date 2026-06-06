@@ -2024,5 +2024,436 @@ Do NOT attempt a global snapshot of all repos — the per-repo snapshot contract
 - [anthropics/claude-code `marketplace.json` (GitHub)](https://github.com/anthropics/claude-code/blob/main/.claude-plugin/marketplace.json) — HIGH. Anthropic's own repo marketplace.json; confirms real-world schema usage. Verified 2026-06-03.
 
 ---
+
+## Stack Additions for v0.8.0: Operability + DX
+
+**Domain:** v0.8.0 "Operability + DX" additions on top of the validated v0.7.0 stack.
+**Researched:** 2026-06-04
+**Confidence:** HIGH for all primitives (each verified against internal code archaeology + official sources where applicable). All five feature areas fit entirely within the existing zero-dep bash + Node stdlib envelope — no new external tools required.
+
+### TL;DR Picks (v0.8.0)
+
+| Feature | Pick | Confidence |
+|---------|------|------------|
+| `conjure doctor` — dependency diagnostics | Promote `scripts/preflight.sh` to a full `cmd_doctor()` with version reporting, `.mjs` probe, and version-range validation | HIGH |
+| `conjure stats` — telemetry insights | `jq` over `.claude/telemetry/skill-events.jsonl`; fire/never-fire table; chars/4 cost estimates reusing `lib/prices.json` | HIGH |
+| Eval suite expansion — per-profile suites | Extend `scripts/eval.sh` with profile-keyed `promptfooconfig.yaml` variants; same `npx promptfoo@0.121.14` invocation | HIGH |
+| Init UX polish — interactive wizard | `read -r` prompts on `/dev/tty` with `[ -t 0 ]` TTY guard; `case`-based auto-detect; `--profile=auto` trigger | HIGH |
+| Live-system UAT automation | `CONJURE_LIVE_TEST=1` gate in `tests/run.sh`; `command -v claude`/`ANTHROPIC_API_KEY` checks before invocation; `promptfoo eval` gated on key + Node version | HIGH |
+| Test-harness hardening — empty-var `git -C` guard | `[ -n "$VAR" ] || { echo "..."; exit 2; }` before every `git -C "$VAR"` call | HIGH |
+| SCHM-STALE atomic swap | `jq ... > "$tmp" && mv "$tmp" "$target"` pattern (already used in `workspace.sh`) applied to schema update path | HIGH |
+
+---
+
+### Detailed Findings by Feature
+
+#### (1) `conjure doctor` — Preflight Diagnostics with Version Reporting
+
+**Pick: Extend `scripts/preflight.sh` into a richer `cmd_doctor()`. Add Node version probe in `.mjs`. No new tools.**
+
+The existing `scripts/preflight.sh` already has OS detection, required/optional tiers, and per-OS fix-it lines — verified by reading the file. What is missing for `conjure doctor`:
+
+1. **Version reporting** — print the actual version of each found tool, not just a checkmark. Pattern: `command -v <tool> && <tool> --version 2>&1 | head -1`.
+2. **Node.js version range validation** — promptfoo requires `^20.20.0 || >=22.22.0`. The existing `_eval_check_node()` in `scripts/eval.sh` already does this with POSIX arithmetic (no node invocation needed, parses `node --version` output with `sed`). Reuse or extract into `lib/` if `cmd_doctor` also needs it.
+3. **`.mjs` probe** — the mirrored Node.js probe verifies that hooks can actually execute on this machine. A minimal `.mjs` that imports `node:fs` and `node:path`, prints `ok`, and exits 0 is sufficient. If `node` is present but `.mjs` ESM modules fail (old Node.js, system Node.js with wrong config), this catches it.
+4. **Claude Code version check** — `command -v claude && claude --version 2>&1 | head -1`. Extract the semver and compare against the minimum `2.1.117`. Parse with `awk`/`cut` (POSIX, already used).
+5. **Tiered exit codes**: exit 0 only if ALL required deps present. Exit 2 if any required dep missing (matches kit convention — never exit 1 from a command).
+
+**The `.mjs` probe pattern:**
+
+```javascript
+// conjure-doctor-probe.mjs (generated inline at runtime, not a shipped file)
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+const ok = existsSync(path.resolve('.'));
+process.stdout.write(ok ? 'ok
+' : 'fail
+');
+process.exit(ok ? 0 : 2);
+```
+
+Written to a `mktemp`-created `.mjs` file, run with `node "$tmpfile"`, then `rm "$tmpfile"`. This avoids shipping a separate probe file and keeps the test inline. If `node "$tmpfile"` exits non-zero or prints `fail`, the doctor reports Node.js ESM is non-functional.
+
+**Version comparison in POSIX bash 3.2+:**
+
+```bash
+# _ver_gte <actual_semver> <min_semver>
+# Returns 0 if actual >= min (major.minor comparison only — sufficient for min checks)
+_ver_gte() {
+  local actual="$1" min="$2"
+  local amaj amin bmaj bmin
+  amaj="${actual%%.*}"; amin="${actual#*.}"; amin="${amin%%.*}"
+  bmaj="${min%%.*}"; bmin="${min#*.}"; bmin="${bmin%%.*}"
+  # Integer comparison (no associative arrays, no [[ ]])
+  [ "$amaj" -gt "$bmaj" ] && return 0
+  [ "$amaj" -eq "$bmaj" ] && [ "$amin" -ge "$bmin" ] && return 0
+  return 1
+}
+```
+
+No external tools, no `bc`, no `sort -V` (not POSIX). Arithmetic comparison only.
+
+**No new tools needed for `conjure doctor`.** All operations are: `command -v`, `<tool> --version`, `node <tmpfile>`, `mktemp`, `rm`. All preflight-stack tools.
+
+#### (2) `conjure stats` — Telemetry Insights from JSONL
+
+**Pick: `jq` queries over `.claude/telemetry/skill-events.jsonl`; reuse `lib/prices.json` for cost estimates; pure bash + jq output. No new tools.**
+
+The telemetry JSONL schema is confirmed (read from live file):
+```json
+{"ts":"2026-06-04T...","session_id":"sess-001","event":"skill_invoke","skill":"test-skill","project_cwd":""}
+```
+
+Fields: `ts`, `session_id`, `event` (`skill_invoke` | `skill_typed`), `skill`, `project_cwd`.
+
+**Core jq queries for `conjure stats`:**
+
+```bash
+# 1. Total invocations per skill (fire count)
+jq -r '
+  [.skill] | @csv
+' "$JSONL" | sort | uniq -c | sort -rn
+
+# Better — pure jq for portability (no sort/uniq dep for the structured output):
+jq -rs '
+  group_by(.skill)
+  | map({skill: .[0].skill, count: length})
+  | sort_by(.count) | reverse[]
+  | "\(.count)	\(.skill)"
+' "$JSONL"
+
+# 2. Sessions seen (unique session_ids)
+jq -rs '[.[].session_id] | unique | length' "$JSONL"
+
+# 3. Never-fired skills (installed but not in JSONL)
+# Requires: list of installed skills from .claude/skills/*/SKILL.md
+find "$target/.claude/skills" -name 'SKILL.md' -maxdepth 3   | awk -F'/' '{print $(NF-1)}'   | sort > "$_installed"
+jq -rs '[.[].skill] | unique | sort[]' "$JSONL" > "$_fired"
+comm -23 "$_installed" "$_fired"   # skills in installed but not in fired
+
+# 4. Cost estimate: total chars in skill bodies × 1/4 × input price
+# (reuse lib/prices.json for model pricing)
+```
+
+**Cost estimate approach:** Count total bytes of eager-loaded harness surface per session (CLAUDE.md + SKILL.md frontmatter lines for each installed skill, since full body loads on match). Divide by 4 for token estimate. Multiply by `lib/prices.json` `input_per_mtok` for the default model. Present as "≈ $X per session (±20%)". This reuses the price table already in `lib/prices.json` and the existing chars/4 heuristic from `reference/SIZING.md`.
+
+**`comm -23` for dead-skill detection:** `comm` is POSIX (on every Linux/macOS/git-bash). The three-column output is sorted-merge-based: `-23` suppresses columns 2 and 3, showing only lines unique to file 1 (installed but not fired). Both inputs must be `sort`ed first.
+
+**Output format:** table to stdout; `--json` flag for machine-readable output via `jq -cn`. Honor `--porcelain` for scripting (already a pattern in `conjure audit`).
+
+**JSONL absence is not an error:** If `.claude/telemetry/skill-events.jsonl` does not exist (telemetry not enabled or never fired), `conjure stats` prints a friendly message and exits 0. Never exit 2 on missing JSONL — it is not an error state.
+
+**No new tools needed for `conjure stats`.** All operations: `jq`, `find`, `awk`, `sort`, `comm`. All in the preflight/POSIX stack.
+
+#### (3) Eval Suite Expansion — Per-Profile Adherence Suites
+
+**Pick: Extend `scripts/eval.sh` with profile-keyed promptfooconfig variants. Reuse `npx promptfoo@0.121.14`. No new tools, no promptfoo version bump.**
+
+Current state (verified from `scripts/eval.sh`): `conjure eval init` scaffolds a single `promptfooconfig.yaml` with one `llm-rubric` block per CLAUDE.md rule line and one `skill-used` block per installed skill. `conjure eval run` invokes `npx --yes promptfoo@0.121.14 eval`.
+
+**v0.8.0 expansions:**
+
+1. **Per-profile config generation:** Add a `conjure eval init --profile <name>` path that reads from `profiles/<name>/` to build profile-specific test cases (e.g., the `python-fastapi` profile expects a `pytest` skill; `ts-next` expects `vitest`). The output is `$target/.conjure/eval/promptfooconfig-<profile>.yaml`. Same `_build_promptfooconfig()` pattern, parameterized with profile-specific assertions.
+
+2. **Regression baselines:** Add `conjure eval baseline --record` to store the current pass/fail state to `.conjure/eval/baseline.json` after a run. `conjure eval run --compare-baseline` compares against it and exits non-zero if any previously-passing test regresses. Use `jq` to read promptfoo's `--output json` results (promptfoo emits JSON with `--output /tmp/results.json`).
+
+3. **Live UAT gating:** `conjure eval run --live` gate: check `ANTHROPIC_API_KEY` is set + Node.js version is in range before invoking promptfoo. If not set, print instructions and exit 0 (not 2 — missing key is not an error in local dev). Only exit 2 if invoked in `--ci` mode and key is absent.
+
+**promptfoo version status (HIGH confidence):** `0.121.14` released 2026-06-02 is confirmed as the current latest (fetched from GitHub releases). The pinned version in `scripts/eval.sh` matches current latest — NO version bump needed for v0.8.0. The `claude-agent-sdk` provider is documented to require `@anthropic-ai/claude-agent-sdk` as an optional dep (not bundled), consistent with the existing `dependencies: {}` constraint.
+
+**promptfoo `--output` JSON for baseline comparison:**
+
+```bash
+npx --yes "promptfoo@${PROMPTFOO_VERSION}" eval   -c "$config_file"   --output "$results_json"   --no-share
+```
+
+`jq` then reads `$results_json` to count `pass` vs `fail` entries and compare to baseline. No new dep — `jq` already required.
+
+#### (4) Init UX Polish — Interactive Wizard
+
+**Pick: `read -r` prompts on `/dev/tty` with `[ -t 0 ]` guard; `case`-based stack auto-detection; `--profile=auto` trigger. No new tools.**
+
+Current state: `conjure init [new|existing|migrate] [--profile=<stack>]` — profile is opt-in and must be spelled out exactly. No auto-detection.
+
+**v0.8.0 wizard flow:**
+
+1. **Auto-detection of stack profile:** Scan the target directory for fingerprints before prompting.
+
+```bash
+_detect_profile() {
+  local target="$1"
+  # Check for project fingerprints (all POSIX test -f / -d)
+  [ -f "$target/package.json" ] && grep -q '"next"' "$target/package.json" 2>/dev/null && echo "ts-next" && return
+  [ -f "$target/package.json" ] && grep -q '"@nestjs/core"' "$target/package.json" 2>/dev/null && echo "node-nest" && return
+  [ -f "$target/go.mod" ] && echo "go-gin" && return
+  [ -f "$target/Cargo.toml" ] && echo "rust-axum" && return
+  [ -f "$target/pom.xml" ] || [ -f "$target/build.gradle" ] && echo "java-spring" && return
+  [ -f "$target/requirements.txt" ] || [ -f "$target/pyproject.toml" ] && echo "python-fastapi" && return
+  [ -f "$target/Pipfile" ] || [ -d "$target/notebooks" ] && echo "data-science" && return
+  [ -f "$target/.conjure-workspace" ] && echo "monorepo" && return
+  echo ""   # unknown — prompt user
+}
+```
+
+No external tools — all `[ -f ]` tests + `grep -q`. POSIX bash 3.2+, no associative arrays.
+
+2. **Interactive prompt on TTY:**
+
+```bash
+_wizard_profile() {
+  local detected="$1"
+  [ \! -t 0 ] && echo "$detected" && return   # non-interactive: return detected (or empty)
+  if [ -n "$detected" ]; then
+    printf "Detected stack profile: %s. Use it? [Y/n] " "$detected" > /dev/tty
+    read -r ans < /dev/tty
+    case "$ans" in n|N) detected="" ;; esac
+  fi
+  if [ -z "$detected" ]; then
+    printf "Select profile [ts-next|node-nest|python-fastapi|go-gin|rust-axum|java-spring|data-science|monorepo|polyglot] (Enter for polyglot): " > /dev/tty
+    read -r detected < /dev/tty
+    [ -z "$detected" ] && detected="polyglot"
+  fi
+  echo "$detected"
+}
+```
+
+`/dev/tty` for both prompt and read — this is the existing kit pattern (verified in `scripts/adopt.sh` and the resolve walker). TTY guard with `[ -t 0 ]` is the existing pattern from `scripts/resolve.sh`. Never `read` from stdin in non-interactive context.
+
+3. **`--profile=auto` flag:** `conjure init --profile=auto` triggers auto-detect + wizard. `--profile=<explicit>` bypasses the wizard and applies directly (existing behavior preserved).
+
+4. **Smarter defaults:** Detect `.claude/` already present → suggest `migrate` mode. Detect `--dry-run` in env/history → remind user dry-run is available.
+
+**No new tools needed.** `[ -f ]`, `grep -q`, `read -r`, `/dev/tty`. All existing patterns from the kit.
+
+#### (5) Live-System UAT Automation
+
+**Pick: `CONJURE_LIVE_TEST=1` env gate in `tests/run.sh`; `command -v claude` + `ANTHROPIC_API_KEY` guards before any live invocation; `promptfoo eval` gated on both key + Node version. No new tools.**
+
+Current state (verified from `tests/run.sh`): Live system tests are marked as manual HUMAN-UAT items. The deferred items from v0.7.0 audit are:
+- Real `claude` binary smoke test
+- Live promptfoo run gated on API key
+- MDM hardware deploy (stays manual — hardware dependency)
+- Managed-settings deploy (stays manual — requires admin privileges)
+
+**Automatable items (v0.8.0 scope):**
+
+1. **`conjure doctor` smoke test** — invoke `conjure doctor` and assert exit 0. This is automated in the normal test suite (no live key needed).
+
+2. **Real `claude` binary smoke test:**
+
+```bash
+_skip_unless_live() {
+  [ "${CONJURE_LIVE_TEST:-0}" = "1" ] || { skip "$1 (set CONJURE_LIVE_TEST=1 to run)"; return 1; }
+  command -v claude >/dev/null 2>&1 || { skip "$1 (claude binary not in PATH)"; return 1; }
+  return 0
+}
+
+# In test suite:
+if _skip_unless_live "LIVE-01 claude binary smoke"; then
+  out="$(claude --version 2>&1)"
+  [ $? -eq 0 ] && pass "LIVE-01 claude binary smoke (version: $out)"
+fi
+```
+
+3. **Live promptfoo eval (gated on key + binary):**
+
+```bash
+_skip_unless_eval_ready() {
+  [ "${CONJURE_LIVE_TEST:-0}" = "1" ] || { skip "$1 (CONJURE_LIVE_TEST not set)"; return 1; }
+  [ -n "${ANTHROPIC_API_KEY:-}" ] || { skip "$1 (ANTHROPIC_API_KEY not set)"; return 1; }
+  command -v node >/dev/null 2>&1 || { skip "$1 (node not in PATH)"; return 1; }
+  _eval_check_node 2>/dev/null || { skip "$1 (Node.js version out of range)"; return 1; }
+  return 0
+}
+```
+
+4. **`git -C "$VAR"` empty-var guard (debt hardening):** Add a guard helper before every `git -C "$VAR"` call where `$VAR` comes from `mktemp` or an external source:
+
+```bash
+_require_dir() {
+  local var_name="$1" var_val="$2"
+  [ -n "$var_val" ] || { echo "✗ $var_name is empty (mktemp failed?)" >&2; exit 2; }
+  [ -d "$var_val" ] || { echo "✗ $var_name does not exist: $var_val" >&2; exit 2; }
+}
+# Usage: _require_dir "SANDBOX" "$SANDBOX_DIR" before git -C "$SANDBOX_DIR" ...
+```
+
+This closes the proven sandbox-escape vector (confirmed in PROJECT.md: "a failed mktemp leaves the var empty; `git -C ""` operates on the REAL repo").
+
+5. **SCHM-STALE atomic swap:** The schema staleness advisory in `scripts/audit-setup.sh` currently does not modify the schema file. However, the schema update path (when `conjure update` refreshes `lib/cc-schema.json`) should use the atomic swap pattern already used in `scripts/workspace.sh`:
+
+```bash
+# Atomic write: never leave a partial file visible
+_atomic_write() {
+  local dest="$1" src="$2"
+  mv "$src" "$dest"   # mv is atomic on same-filesystem (POSIX guarantee)
+}
+# Pattern: jq ... > "$tmp" && _atomic_write "$dest" "$tmp"
+```
+
+This prevents a SIGKILL between write and close from leaving a corrupt schema file.
+
+**`skip` helper for test harness:** The existing `tests/run.sh` uses `pass`/`fail`/`t` helpers. Add a `skip` helper alongside:
+
+```bash
+skip() {
+  SKIP_COUNT=$((SKIP_COUNT + 1))
+  printf "  SKIP  %s
+" "$1"
+}
+```
+
+This is the standard TAP convention and matches bats-core's `skip` semantics. No framework needed — a 3-line function.
+
+#### (6) `git -C "$VAR"` Empty-Var Guard — Technical Detail
+
+The existing debt (PROJECT.md, v0.7.0 audit): `git -C ""` operates on the current working directory (the real repo), not the sandbox. This is a proven sandbox-escape vector.
+
+All occurrences that need the guard (found via grep):
+- `scripts/emit-plugin.sh:137` — `git -C "$TARGET" config user.name`
+- `scripts/refresh-overlay.sh:62` — `git -C "$CLONE_TMP" rev-parse HEAD`
+- `scripts/init-overlay.sh:48` — `git -C "$CLONE_TMP" rev-parse HEAD`
+- `scripts/publish-skill.sh:86,155,156,160` — `git -C "$TARGET" status/rev-parse/branch`
+- `scripts/publish-plugin.sh:73` — `git -C "$CONJURE_HOME" rev-parse HEAD`
+
+The pattern: wrap with `[ -n "$VAR" ] || { echo "..."; exit 2; }` before the `git -C` call, or use the `_require_dir` helper. In test sandboxes: add the guard after every `mktemp -d`.
+
+---
+
+### v0.8.0 Stack Summary Table
+
+| Tool / Pattern | Version / Source | Feature | New to stack? |
+|----------------|-----------------|---------|---------------|
+| `cmd_doctor()` with version-range check | bash (extend `scripts/preflight.sh`) | `conjure doctor` | New function; no new tools |
+| `node <tmpfile.mjs>` + `mktemp` inline probe | Node.js stdlib (existing) | `conjure doctor` `.mjs` ESM validation | New usage pattern; no new tool |
+| `_ver_gte` semver comparator | POSIX bash arithmetic | `conjure doctor` version-range validation | New helper function; no new tool |
+| `jq -rs 'group_by(.skill) \| ...'` | jq (system dep) | `conjure stats` fire/count report | New query pattern; jq is existing dep |
+| `comm -23 <(sort) <(sort)` | POSIX `comm` | `conjure stats` dead-skill detection | New usage; `comm` is POSIX standard tool |
+| `lib/prices.json` (existing) | JSON baked into kit | `conjure stats` cost estimate | Reuse existing file; no change |
+| `chars/4` heuristic (existing) | Documented in `reference/SIZING.md` | `conjure stats` session cost estimate | Reuse existing pattern |
+| `promptfoo@0.121.14` (pinned, existing) | promptfoo 0.121.14 (2026-06-02) | Eval suite expansion | NO version bump needed; existing pin is current |
+| `promptfoo --output <file.json>` | promptfoo 0.121.14 | Eval baseline recording | New flag usage; same npx invocation |
+| `_detect_profile()` fingerprint detection | POSIX `[ -f ]` + `grep -q` | Init wizard auto-detect | New helper; no new tool |
+| `read -r < /dev/tty` wizard prompts | POSIX bash | Init UX interactive wizard | New usage; existing kit pattern from resolve.sh |
+| `CONJURE_LIVE_TEST=1` gate | bash env var convention | Live UAT gating | New env var; no new tool |
+| `skip()` test helper | bash (3-line function) | UAT skip reporting | New 3-line helper in tests/run.sh |
+| `_require_dir()` guard | POSIX bash | `git -C` empty-var guard | New helper; closes debt sandbox-escape vector |
+| `_atomic_write()` + `mv` | POSIX `mv` (atomic same-fs) | SCHM-STALE atomic swap | New helper; `mv` is existing tool |
+
+**Net new runtime dependencies: zero.** `dependencies: {}` stays empty. Every v0.8.0 feature uses tools already in the preflight stack (bash, node, jq, git, find, comm, sort, awk, mv). No new npm packages. No new system tools. `comm` is the only tool worth noting — it is POSIX and present on all supported platforms (Linux, macOS, git-bash on Windows).
+
+---
+
+### What NOT to Add (v0.8.0)
+
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| **`node-pty` or `expect` for wizard testing** | `node-pty` is a native module (requires node-gyp/build tools); `expect` is a Tcl tool (not in preflight); both are heavy for a 3-prompt wizard. | Test wizard non-interactively: `echo "polyglot" \| bash init-project.sh` or `CONJURE_LIVE_TEST=0` path. TTY path verified manually + `expect` UAT stays manual. |
+| **`sort -V` for semver comparison** | `-V` (version sort) is a GNU coreutils extension — not POSIX, not available on macOS or git-bash by default. | `_ver_gte` with POSIX arithmetic (integer major/minor comparison). |
+| **`promptfoo@latest` or version bump** | 0.121.14 is confirmed current as of 2026-06-04. Unpinned `@latest` or an untested upgrade can break CI silently. Upgrade deliberately in a separate PR when needed. | Keep `PROMPTFOO_VERSION="0.121.14"` pin; update only when v0.9.0 research verifies a newer version. |
+| **Bundling a second `promptfooconfig.yaml` template file** for every profile | 9 profiles × per-profile template = 9 new files to maintain in sync. Profile-specific assertions should be generated dynamically from the profile's own `apply.sh` metadata. | `_build_promptfooconfig()` parameterized with profile name + profile-specific test lines; no separate template files. |
+| **`sqlite3` or any DB for telemetry aggregation** | JSONL + jq is sufficient for `conjure stats`; sqlite adds a native dep; violates zero-dep constraint. | `jq -rs 'group_by(.skill) \| ...'` over the JSONL file. |
+| **Shipping the `.mjs` probe as a file in `lib/`** | A permanent `lib/doctor-probe.mjs` would be flagged by `conjure audit --json` as a non-template `.mjs` and confuse users. Write it to a `mktemp` file at runtime and delete after. | `node "$(mktemp --suffix=.mjs)"` inline probe; deleted after use. |
+| **`select` menu for wizard** | bash 4+ only; macOS ships bash 3.2. | `read -r < /dev/tty` with `case` dispatch (existing kit pattern). |
+| **`promptfoo --output xml` or `--output csv`** for baseline | JSON is the only machine-parseable format that jq can query for pass/fail counts without a secondary parser. XML requires an XML parser (not in the kit). | `promptfoo --output "$results_json"` (JSON) + `jq` for pass/fail count. |
+| **Auto-running `conjure doctor` on every `conjure init`** | `doctor` is a diagnostic command; running it silently on init adds latency and may confuse users who see dependency warnings mid-init. | `conjure init` prints "Run `conjure doctor` to verify your setup." at the end. |
+| **`ANTHROPIC_API_KEY` in test fixtures or committed files** | Secret leak risk; CI would expose the key in logs. | Gate on env var presence; skip the live test if key absent; never commit. |
+
+---
+
+### v0.8.0 Integration Points
+
+| New Capability | Integrates With | Integration Approach |
+|----------------|----------------|---------------------|
+| `conjure doctor` | `scripts/preflight.sh` (extend) + `cli/conjure` (new `cmd_doctor()`) | Extract `cmd_preflight` body into `scripts/doctor.sh` with version reporting; add `doctor` dispatch in `cli/conjure`; existing `preflight` command remains as alias |
+| `conjure stats` | `skill-telemetry.mjs` (data source) + `lib/prices.json` (cost) + `cli/conjure` (new `cmd_stats()`) | New `scripts/stats.sh` worker; reads `.claude/telemetry/skill-events.jsonl`; outputs table or JSON |
+| Eval baseline | `scripts/eval.sh` + `cli/conjure eval baseline` subcommand | Add `cmd_eval_baseline()` and `cmd_eval_baseline_compare()` in `eval.sh`; reads promptfoo `--output json` results; `jq` diff against stored baseline |
+| Per-profile eval | `scripts/eval.sh` `_build_promptfooconfig()` + `profiles/*/` | Add `--profile` flag to `conjure eval init`; extend `_build_promptfooconfig()` with profile-keyed test block generator |
+| Init wizard | `scripts/init-project.sh` + `cli/conjure` `cmd_init()` | New `_detect_profile()` + `_wizard_profile()` helpers in `scripts/init-project.sh`; triggered by `--profile=auto` or when `--profile` is absent in interactive TTY context |
+| Live UAT gate | `tests/run.sh` | New `CONJURE_LIVE_TEST=1` section; `_skip_unless_live()` + `_skip_unless_eval_ready()` helpers; `skip()` reporting function |
+| `git -C` guard | All scripts with `git -C "$VAR"` calls (emit-plugin, refresh-overlay, init-overlay, publish-skill, publish-plugin) | Add `[ -n "$VAR" ]` guard or `_require_dir` call before each `git -C "$VAR"` usage; propagate to test sandboxes |
+| SCHM-STALE atomic swap | `scripts/audit-setup.sh` schema update path (when invoked from `conjure update`) | Replace any direct `>` write to `lib/cc-schema.json` with `jq ... > "$tmp" && mv "$tmp" "$dest"` pattern |
+
+---
+
+### v0.8.0 Bash Patterns Reference
+
+All POSIX bash 3.2+ compatible:
+
+```bash
+# Doctor: version-range check (no sort -V, no bc, no external tool)
+_ver_gte() {
+  local actual="$1" min="$2"
+  local amaj amin bmaj bmin
+  amaj="${actual%%.*}"; amin="${actual#*.}"; amin="${amin%%.*}"
+  bmaj="${min%%.*}"; bmin="${min#*.}"; bmin="${bmin%%.*}"
+  [ "$amaj" -gt "$bmaj" ] && return 0
+  [ "$amaj" -eq "$bmaj" ] && [ "$amin" -ge "$bmin" ] && return 0
+  return 1
+}
+ver=$(node --version 2>/dev/null | tr -d 'v')
+_ver_gte "$ver" "20.20" && pass "node version ok ($ver)" || fail "node $ver < 20.20"
+
+# Doctor: .mjs ESM probe (inline mktemp)
+_probe=$(mktemp /tmp/conjure-probe-XXXXXX.mjs)
+printf "import { existsSync } from 'node:fs';
+process.exit(existsSync('.') ? 0 : 2);
+" > "$_probe"
+node "$_probe" 2>/dev/null && pass "node ESM (.mjs) ok" || fail "node ESM probe failed"
+rm -f "$_probe"
+
+# Stats: skill fire count (pure jq, no sort | uniq -c)
+jq -rs '
+  group_by(.skill)
+  | map({skill: .[0].skill, count: length})
+  | sort_by(-.count)[]
+  | "\(.count)	\(.skill)"
+' .claude/telemetry/skill-events.jsonl
+
+# Stats: dead-skill detection (comm requires sorted inputs)
+find .claude/skills -name 'SKILL.md' -maxdepth 3   | awk -F'/' '{print $(NF-1)}' | sort > /tmp/_installed.txt
+jq -rs '[.[].skill] | unique | sort[]' .claude/telemetry/skill-events.jsonl   > /tmp/_fired.txt
+comm -23 /tmp/_installed.txt /tmp/_fired.txt   # never-fired skills
+
+# Wizard: auto-detect + TTY prompt (POSIX 3.2+)
+detected="$(_detect_profile "$target")"
+if [ -t 0 ] && [ -z "$detected" ]; then
+  printf "Profile [polyglot]: " > /dev/tty
+  read -r detected < /dev/tty
+  detected="${detected:-polyglot}"
+fi
+
+# Live UAT gate
+_skip_unless_live() {
+  [ "${CONJURE_LIVE_TEST:-0}" = "1" ] || return 1
+  command -v claude >/dev/null 2>&1 || return 1
+  return 0
+}
+
+# Atomic write (SIGKILL-safe)
+jq '...' "$src" > "$_tmp" && mv "$_tmp" "$dest"
+
+# git -C guard (empty-var sandbox-escape prevention)
+[ -n "$SANDBOX" ] || { echo "SANDBOX empty — mktemp failed?" >&2; exit 2; }
+git -C "$SANDBOX" init
+```
+
+---
+
+### v0.8.0 Sources
+
+- [Conjure `scripts/preflight.sh`](scripts/preflight.sh) — HIGH (internal). OS detection, `command -v` table, tier structure, per-OS fix-it lines fully confirmed by file read. v0.8.0 extends this; no new tools. Verified 2026-06-04.
+- [Conjure `templates/hooks-nodejs/skill-telemetry.mjs`](templates/hooks-nodejs/skill-telemetry.mjs) — HIGH (internal). Confirmed JSONL schema: `{ts, session_id, event, skill, project_cwd}`. `event` values: `skill_invoke`, `skill_typed`. Verified 2026-06-04.
+- [Conjure `lib/prices.json`](lib/prices.json) — HIGH (internal). Confirmed schema: `models[].{model, display_name, pricing_date, input_per_mtok, output_per_mtok, band_pct}`, `default_model`. Ready for reuse by `conjure stats`. Verified 2026-06-04.
+- [Conjure `scripts/eval.sh`](scripts/eval.sh) — HIGH (internal). `PROMPTFOO_VERSION="0.121.14"` confirmed. `_eval_check_node()` confirmed — reusable POSIX semver check pattern. `_build_promptfooconfig()` is parameterizable. Verified 2026-06-04.
+- [Conjure `.claude/telemetry/skill-events.jsonl`](.claude/telemetry/skill-events.jsonl) — HIGH (internal). Live JSONL with 10 records; schema matches `skill-telemetry.mjs`. Confirmed parseable with `jq`. Verified 2026-06-04.
+- [Conjure `cli/conjure` — init/profiles patterns](cli/conjure) — HIGH (internal). `--profile=<name>` flag confirmed; profiles list from `ls profiles/` (9 profiles: data-science, go-gin, java-spring, monorepo, node-nest, polyglot, python-fastapi, rust-axum, ts-next). Wizard fills the gap. Verified 2026-06-04.
+- [Conjure `.planning/PROJECT.md`](.planning/PROJECT.md) — HIGH (internal). v0.8.0 goals, deferred debt items (git -C empty var, SCHM-STALE swap, live UAT items), POSIX constraints confirmed. Verified 2026-06-04.
+- [promptfoo GitHub releases](https://github.com/promptfoo/promptfoo/releases) — HIGH. v0.121.14 confirmed current as of 2026-06-02. NO version bump needed for v0.8.0. Verified 2026-06-04.
+- [promptfoo claude-agent-sdk provider docs](https://www.promptfoo.dev/docs/providers/claude-agent-sdk/) — HIGH. `skills` parameter requires SDK 0.2.120+; `@anthropic-ai/claude-agent-sdk` is an optional dep (not bundled); consistent with `dependencies: {}` constraint. Verified 2026-06-04.
+- POSIX.1-2017 (`comm`, `sort`, `find`, `awk`, `mv`) — HIGH. `comm` is POSIX; available on Linux, macOS, git-bash (ships with Git for Windows). `mv` atomic on same-filesystem is POSIX guarantee. All tools confirmed present on preflight-checked systems. HIGH confidence from POSIX spec.
+
+---
 *Stack research for: Conjure v0.3.0 Testing + telemetry tooling*
-*Updated: 2026-06-03 — v0.7.0 Plugin-native + Policy-grade additions appended*
+*Updated: 2026-06-04 — v0.8.0 Operability + DX additions appended*
+

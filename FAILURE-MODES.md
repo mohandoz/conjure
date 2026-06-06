@@ -284,6 +284,31 @@ or unsafe op is refused without mutating anything.
 type, the required fields, and a staging-relative `src`. The `restructure` skill
 generates these correctly; hand-authored manifests must match the same contract.
 
+## Test interrupted mid-swap corrupts production file
+
+**Symptom**: `lib/cc-schema.json` has a `generated` date older than the
+project's VERSION release date after running tests.
+
+**Cause**: A test that directly overwrites a production file (via `cp fixture
+prod_file`) was interrupted by SIGKILL between the fixture-copy and the
+restore-copy. bash `trap` does not fire on SIGKILL, so the fixture is left
+as the live file.
+
+**Fix** (after incident):
+```bash
+# Restore from git
+git checkout lib/cc-schema.json
+```
+
+**Prevention mandate**: Tests MUST NOT write directly to production kit files.
+Use an env override (`CONJURE_SCHEMA_FILE=<fixture-path>`) so the production
+file is never touched. If a write path must exist in production code, always
+use the atomic pattern:
+```bash
+jq ... > "$_tmp" && mv "$_tmp" "$target"  # POSIX mv is atomic same-fs
+```
+A direct `>` or `cp` to a live file is not kill-safe.
+
 ## Where to get help
 
 - `reference/ANTI-PATTERNS.md` — common mistakes and fixes.

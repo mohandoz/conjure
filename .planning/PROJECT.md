@@ -6,11 +6,14 @@ Conjure is the missing init kit for Claude Code — it scaffolds the four-layer
 harness Anthropic recommends (`CLAUDE.md` + lazy-loaded **Skills** + isolated
 **Subagents** + deterministic **Hooks**) in one command, for both new and
 existing repos. It ships safe migrations, 9 stack profiles, 4 compliance
-overlays, knowledge-graph integration, an auditable CLI, 3-way merge for
-keeping harnesses up-to-date, org overlay support, and is installable via
-Homebrew, Docker, and Claude Code Marketplace. An open-source developer tool
-aimed at teams doing high-stakes work where prompt-adherence and reproducibility
-matter.
+overlays that emit deployable security policy (sandbox + managed-settings +
+MDM), plugin/marketplace emission on Claude Code's native rail, a
+schema-version-aware audit with machine-readable output, a promptfoo-based
+prompt-adherence eval suite, multi-repo workspace orchestration with a
+SIGKILL-durable rollback saga, knowledge-graph integration, 3-way merge
+updates, org overlays, and is installable via Homebrew, Docker, and Claude
+Code Marketplace. An open-source developer tool aimed at teams doing
+high-stakes work where prompt-adherence and reproducibility matter.
 
 ## Core Value
 
@@ -19,23 +22,17 @@ harness with one trustworthy command — and keep it healthy over time. If
 everything else fails, `conjure init` + `conjure audit` must reliably produce
 and verify a correct, safe harness.
 
-## Current Milestone: v0.7.0 Plugin-native + Policy-grade
+## Current Milestone: v0.8.0 Operability + DX
 
-**Goal:** Make Conjure ride Claude Code's native plugin/marketplace rail and emit
-deployable security policy — so a scaffolded harness is installable, governable,
-and eval-gated across many repos, not just loose files in one.
+**Goal:** Close v0.7.0's deferred debt, give operators visibility (`doctor`, `stats`), deepen eval coverage, polish init UX, and ship user-facing docs that match what Conjure actually does.
 
 **Target features:**
-- **Plugin + marketplace emission** — `conjure` emits the harness as a versioned plugin + `marketplace.json`; wires `extraKnownMarketplaces`/`strictKnownMarketplaces` into project settings; wraps/extends `claude plugin init` rather than competing with it.
-- **Sandbox + managed-settings/MDM** — compliance overlays generate the `sandbox{}` block (allowWrite/denyRead + network allowlist) plus `managed-settings.json` and MDM artifacts (macOS plist, Windows registry, `/etc/claude-code/managed-settings.d/`) — compliance-as-deployable-policy.
-- **promptfoo eval + budget linter** — `conjure eval`: promptfoo-based prompt-adherence/regression suite + PR gate; per-turn context-budget linter (tokens/turn) added to `conjure audit`. Makes "eval-backed" defensible.
-- **Schema-version-aware audit/check** — `audit`/`check` validate current Claude Code settings keys, new hook events, `disallowed-tools`, and flag drift from supported schema versions.
-- **Cross-repo / workspace orchestration** — run the harness lifecycle (init/adopt/check/update) across many repos / a workspace from one invocation, with cross-repo rollback semantics.
-
-**Approach:** Ride the native rail (plugins/marketplaces, sandbox, managed-settings)
-rather than build a parallel system; keep Conjure's edge in safe migration, audit,
-compliance, and brownfield adoption. Large milestone (5 capability areas) — expect a
-long roadmap; sequence plugin+policy foundations before cross-repo orchestration.
+- Deferred debt — automate live-system UAT where possible (real `claude` binary smoke, live promptfoo run gated on key), document manual steps (MDM hardware); test-harness hardening (`git -C "$VAR"` empty-var guard, kill-safe SCHM-STALE swap)
+- `conjure doctor` — preflight diagnostics: `command -v` table + mirrored `.mjs` probe, OS-detected install hints
+- Telemetry insights (`conjure stats`) — read skill-firing JSONL, fire/never-fire report, dead-skill detection, chars/4 cost estimates
+- Eval suite expansion — per-profile adherence suites, regression baselines beyond scaffold
+- Init UX polish — wizard improvements, better profile selection, smarter defaults detection
+- README + docs refresh — rewrite README covering v0.3–v0.7 (quick start, command reference, feature tour); sync MIGRATION-GUIDE + FAILURE-MODES
 
 ## Requirements
 
@@ -68,50 +65,52 @@ long roadmap; sequence plugin+policy foundations before cross-repo orchestration
 - ✓ `conjure.ps1` native Windows entrypoint + windows-ps1-shim pwsh CI job (WIN-01–02) — v0.5.0
 - ✓ `mutate_rm` deletion primitive, publish-skill positional arg, ci-gate empty-check guard (INFRA-01, DEBT-01–02) — v0.5.0
 - ✓ Foundation libs — `lib/log.sh`/`snapshot.sh`/`inventory.sh`/`caps.sh` + `mutate_archive`, 6-bucket classifier, 500-file cap, finalized `adopt-manifest.json` schema (INV-01–04, SAFE-03, ADOPT-03) — v0.6.0
-- ✓ `conjure adopt` CLI — 5-step pipeline (preconditions→snapshot→inventory→scaffold→audit), `--dry-run` zero-writes, `--rollback` sha256 zero-diff, partial-run recovery, `--apply-step`/`--update-manifest` op-executor seam (ADOPT-01/02/04/05/06, SAFE-01/02/04/05/06/07) — v0.6.0
-- ✓ Human-gated `restructure` skill — `[Read, Bash]`-only, drives the adopt seam; pre-write invariant + `conjure audit` gates block invalid proposals before approval; per-class grouped approvals; archive-last + decision-vocabulary scan (RESTR-01–06) — v0.6.0
-- ✓ E2E verification — 500-file `_brownfield-argus` fixture + integration tests (dry-run perf <30s, rollback zero-diff, idempotent re-run, SIGKILL recovery, symlink-skip + @import-block); suite 449/0 — v0.6.0
+- ✓ `conjure adopt` CLI — 5-step pipeline, `--dry-run` zero-writes, `--rollback` sha256 zero-diff, partial-run recovery, op-executor seam (ADOPT-01/02/04/05/06, SAFE-01/02/04/05/06/07) — v0.6.0
+- ✓ Human-gated `restructure` skill — `[Read, Bash]`-only, pre-write invariant + audit gates (RESTR-01–06) — v0.6.0
+- ✓ E2E verification — 500-file `_brownfield-argus` fixture + integration tests; suite 449/0 — v0.6.0
+- ✓ `conjure publish-plugin` — plugin.json + marketplace.json emission, merge-preserve, greenfield name derivation, reserved-name guard, `--validate` gate, secret-scan, settings wiring (PLUG-01–05) — v0.7.0
+- ✓ `conjure emit-policy` — per-regime sandbox{} merged into settings.json with 1:1 `Read()` deny mirror, managed-settings.json (string `disableBypassPermissionsMode`), macOS plist + Windows PS1 MDM bundle, audit policy flags (POL-01–05) — v0.7.0
+- ✓ Schema-version-aware audit — bundled `lib/cc-schema.json` (30 hook events, 16 SKILL.md fields), frontmatter/type/hook-event validation, `check --schema` version report, `audit --json` machine output (SCHM-01–05) — v0.7.0
+- ✓ `conjure eval` — promptfoo scaffold (claude-agent-sdk provider, pinned 0.121.14), Node-gated run, PR-gate workflow emission, `audit --budget` context linter, eval-coverage gap report (EVAL-01–05) — v0.7.0
+- ✓ Workspace orchestration — `.conjure-workspace.json` manifest with traversal-guarded validation, `workspace init/check/audit` read-only aggregation, `workspace update/adopt/--rollback` snapshot-all-first saga with SIGKILL-durable state + per-repo sha256 zero-diff rollback (WS-01–07) — v0.7.0
 
 ### Active
 
 <!-- Requirements for the next milestone — defined fresh via /gsd-new-milestone. -->
 
-_v0.6.0 shipped 2026-05-29. Next milestone requirements TBD — define via `/gsd-new-milestone` (candidate: v0.7.0 cross-repo / workspace orchestration, per Out of Scope)._
+_v0.8.0 "Operability + DX" in definition — requirements being scoped via `/gsd-new-milestone`._
 
 ### Out of Scope
 
 <!-- Explicit boundaries with reasoning. -->
 
-- Full TUI conflict resolution (side-by-side diff viewer) — `conjure resolve` ships a guided line-by-line prompt; ncurses UI deferred to v0.7.0
+- Full TUI conflict resolution (side-by-side diff viewer) — `conjure resolve` ships a guided line-by-line prompt; ncurses UI deferred
 - `conjure update --pr` auto-merge on clean apply — never; conflicts always require human review
-- Workspace / cross-repo graph orchestration — v0.7.0; safe single-repo brownfield adoption first (v0.6.0)
 - IDE extensions, web dashboard, skill marketplace UI — backlog; not core to the one-command value
 - Making a project *actually* compliant — overlays reduce non-compliant output only; real compliance needs people + process + audit
-- Pure PowerShell port of `conjure.ps1` (no Git Bash/WSL) — v0.7.0; the shim covers native Windows for now
-- Fully autonomous (no-approval) restructure of an existing project — v0.6.0 `restructure` requires per-step human approval; unattended adoption is a non-goal (judgment + safety)
-- `conjure:full` Docker tag with optional Go/Rust tools — v0.4.x; baseline image is the priority
+- Pure PowerShell port of `conjure.ps1` (no Git Bash/WSL) — the shim covers native Windows for now
+- Fully autonomous (no-approval) restructure of an existing project — unattended adoption is a non-goal (judgment + safety)
+- Auto-deploy MDM artifacts via Jamf/Intune APIs — Conjure generates artifacts + documents deploy; never handles MDM credentials
+- Bundling promptfoo as a dependency — `dependencies: {}` stays empty; pinned `npx` shell-out only
+- Runtime-fetching the CC schema — zero-egress; `lib/cc-schema.json` bundled, updated per Conjure release
+- Parallel per-repo workspace apply — the saga stays serial by design (deterministic, stop-on-fail)
+- `conjure:full` Docker tag with optional Go/Rust tools — baseline image is the priority
 
 ## Current State
 
-**Shipped:** v0.6.0 — "Safe Brownfield Adoption" (2026-05-29)
+**Shipped:** v0.7.0 — "Plugin-native + Policy-grade" (2026-06-04)
 
-- 23/23 requirements satisfied across 4 phases (21–24), 12 plans, 25 tasks
-- `conjure adopt` turns an existing repo into the four-layer harness: full snapshot backup → inventory/classify → scaffold missing layers → size-cap audit → adoption report, all rollback-capable with crash-durable `.conjure-adopt-state` and partial-run recovery
-- Human-gated `restructure` skill (`[Read, Bash]`) condenses an oversized CLAUDE.md through pre-write safety gates (invariant verify + `conjure audit`) that block invalid proposals before any approval; all mutation routes through the audited `conjure adopt` chokepoint
-- E2E verified against a 500-file `_brownfield-argus` fixture; full suite 449/0; CI shellcheck-clean
-- Audit found + fixed 2 real issues at close: `conjure adopt` refused a clean git repo (log-before-gate ordering, 86ca62b) and snapshot copied `.git` causing rollback stderr noise (tar-exclude, a1ff4ca)
-- Deferred hardening (non-blocking): SAFE-05 snapshot-flush-window rollback race (refuse-closed, safe); nyquist VALIDATION frontmatter flags for 22/23/24 (coverage real, flags stale)
+- 27/27 requirements satisfied across 6 phases (25–30), 24 plans; milestone audit: 8/8 cross-phase integration wires verified, status tech_debt (no blockers)
+- Conjure now rides Claude Code's native rails end-to-end: harness → versioned plugin + marketplace (`publish-plugin`), compliance overlay → deployable policy (`emit-policy`: sandbox + managed-settings + MDM), audit → schema-version-aware with `--json` machine output, eval-backed via promptfoo (`conjure eval`), and multi-repo via `conjure workspace` (read-only aggregation + mutating saga with SIGKILL-proof rollback)
+- Suite 579/0 at close; shellcheck-clean; `dependencies: {}` still empty; CLAUDE.md 84/100 lines
+- Every phase ran a code-review→fix→re-review loop to clean — notable catches: exit-1 + missing-backup blockers (25), secret-scan exit-code regression (26), EXIT-trap clobbers (27), YAML-injection (28), path-traversal boundary off-by-one-level (29), pkill over-match + orphaned-subprocess SIGKILL root cause (30)
+- Deferred (tracked in v0.7.0-MILESTONE-AUDIT.md + STATE.md): 4 live-system HUMAN-UAT items (real `claude` binary, managed-settings deploy, MDM hardware, live promptfoo enforcement); test-harness hardening (guard `git -C "$VAR"` against empty vars after mktemp failure — proven sandbox-escape vector; kill-safe SCHM-STALE swap)
 
-**Previous:** v0.5.0 — "Auto-Update + Healthcheck" (2026-05-28)
+**Previous:** v0.6.0 — "Safe Brownfield Adoption" (2026-05-29)
 
-- 11/11 requirements satisfied across 5 phases, 10 plans
-- Harness lifecycle loop closed: `conjure check` (drift) → `conjure resolve` (conflicts) → `conjure update --pr/--cron` (automated PRs)
-- `conjure.ps1` native Windows entrypoint (Git Bash → WSL → exit 2) with exit-code propagation
-- `release.yml` ci-gate hardened: empty-check guard + API-propagation retry loop
-- 302 test assertions, all green; CI green on all 5 jobs (ubuntu + 4 Windows/audit jobs)
-- v0.5.0 tagged and released; Homebrew formula pinned to v0.5.0 tarball sha256
-- Post-close hardening: cross-platform test suite repaired (gh-isolation under usrmerge, Git Bash sandbox PATH, telemetry cwd via cygpath, pwsh exit propagation)
+- 23/23 requirements across 4 phases; `conjure adopt` + human-gated `restructure` skill; E2E against 500-file fixture; suite 449/0
 
+**Previous:** v0.5.0 — "Auto-Update + Healthcheck" (2026-05-28) — 5 phases, 10 plans
 **Previous:** v0.4.0 — "Distribution + Ecosystem" (2026-05-26) — 9 phases, 23 plans
 
 ## Constraints
@@ -128,28 +127,28 @@ _v0.6.0 shipped 2026-05-29. Next milestone requirements TBD — define via `/gsd
 |----------|-----------|---------|
 | Scope first GSD milestone to v0.3.0 (Testing + telemetry) | Quality/trust precede distribution | Shipped 2026-05-25 |
 | Defer distribution to v0.4.0 | "Production ready" depends on test fixtures + audit confidence | Shipped 2026-05-26 |
-| Adopt formal GSD `.planning/` alongside existing `planning/` docs | Real plan→execute→verify rigor | In use throughout v0.3.0/v0.4.0 |
 | All writes funnel through `lib/mutate.sh` | Dry-run enforced once, not per call site | Validated Phase 2 |
 | `node .mjs` hooks universally in settings template | No OS branching — cross-platform by design | Validated Phase 1 |
 | Telemetry: local-only, opt-in, PII-free, no-egress CI-enforced | Trust asset, not a liability | Validated Phase 7 |
 | Docker base: debian:bookworm-slim (not Alpine) | musl libc breaks optional Go/Rust tools | v0.4.0 Phase 14 |
-| Homebrew: separate `mohandoz/homebrew-conjure` tap repo | Standard tap pattern; formula pinned to tagged tarball SHA256 only | v0.4.0 Phase 13 |
-| release.yml: 4-job structure (ci-gate → release → docker + homebrew parallel) | Docker failure must not block Homebrew and vice versa | v0.4.0 Phase 15.1 |
-| `--to <org/repo>` for publish-skill uses TARGET_REPO env (fragile) | Positional arg refactor deferred; functional for v0.4.0 | ✓ Resolved — positional `$2`, TARGET_REPO deprecated (DEBT-02, v0.5.0) |
-| `conjure check`: sha256 3-way classifier, no `git merge-file` at detection time | Read-only drift detection must be cheap and side-effect-free | ✓ Good — DRIFT-01/02, v0.5.0 |
-| `conjure resolve`: guided line-by-line prompt, fd-3 stdin isolation, non-TTY → exit 2 | TUI deferred; exit-2 (not 1) matches hook convention for non-interactive | ✓ Good — RESOLVE-01/02, v0.5.0 |
-| `conjure update --pr`: deterministic branch (sha256 of kit version), idempotent via `gh pr list` | Re-runs must not open duplicate PRs | ✓ Good — AUTPR-01, v0.5.0 |
-| `conjure.ps1` is a shim (Git Bash → WSL → exit 2), not a PowerShell port | No subcommand logic duplicated; one source of truth | ✓ Good — WIN-01, v0.5.0 |
-| Test sandbox resets PATH but must resolve git/jq/python3 dirs dynamically | Hardcoded /usr/bin drops tools on Git Bash (usrmerge, /mingw64) | ⚠️ Revisit — fixed post-close; cross-platform test hygiene needs ongoing care |
-| Split responsibility: CLI owns ALL filesystem mutations; `restructure` skill owns ALL LLM judgment, restricted to `[Read, Bash]` | Determinism + auditability for file ops; human-gated judgment for content; the skill can never Write/Edit project files | ✓ Good — RESTR-02 chokepoint, v0.6.0 |
-| `snapshot_create` uses raw `cp`/`tar` (NOT `mutate_cp`) and excludes `.git`/`node_modules` | Snapshot is the safety primitive that precedes mutations (mutate_cp would suppress it under dry-run); excluding `.git` avoids rollback overwriting read-only objects | ✓ Good — SAFE-01/02, v0.6.0 (a1ff4ca) |
-| Pre-write safety gates (invariant verify + `conjure audit`) block BEFORE the user sees a proposal | Catch dropped invariants / `@import` / cap breaches before approval, not after a bad write | ✓ Good — RESTR-04/05, v0.6.0 |
-| `precondition_git` filters conjure's own artifacts from the dirty-tree check | A clean user repo must run the pipeline even after `log_init` writes RESTRUCTURE-LOG.md (found by milestone integration audit) | ✓ Good — ADOPT-03, v0.6.0 (86ca62b) |
-| Interactive `/dev/tty` prompts (recovery + approval) verified via PTY/`expect`, non-TTY path automated | TTY UX can't be driven by the plain harness; PTY UAT + non-TTY exit-2 automation covers both | ✓ Good — SAFE-05/RESTR-03, v0.6.0 |
+| `conjure check`: sha256 3-way classifier, no `git merge-file` at detection time | Read-only drift detection must be cheap and side-effect-free | ✓ Good — v0.5.0 |
+| `conjure.ps1` is a shim (Git Bash → WSL → exit 2), not a PowerShell port | One source of truth | ✓ Good — v0.5.0 |
+| Split responsibility: CLI owns ALL filesystem mutations; skills own LLM judgment (`[Read, Bash]`) | Determinism + auditability | ✓ Good — v0.6.0, reused by v0.7.0 |
+| `snapshot_create` raw `cp`/`tar`, excludes `.git`/`node_modules` | The safety primitive must precede dry-run suppression | ✓ Good — v0.6.0; extended with conjure-dir tar excludes v0.7.0 |
+| Audit advisory checks use `note()` (exit 0), real bugs use `err()` (exit 2) — never `warn()` for advisories | `warn()` increments WARN and flips audit exit 1, breaking CI on advisory items | ✓ Good — discovered Phase 25, enforced 26–30 |
+| `disableBypassPermissionsMode` emitted/validated as STRING `"disable"`, both JSON paths checked | Boolean form is silently ignored by Claude Code — a real security hole | ✓ Good — POL/SCHM, v0.7.0 |
+| jq array merges use `(a//[])+(b//[])\|unique`, never `.*` | `.*` replaces arrays — re-runs would delete operator-added deny entries | ✓ Good — Phase 26 |
+| One combined EXIT-trap cleanup function per script | bash has one EXIT slot; re-registering silently clobbers prior cleanup (leaked tempfiles) | ✓ Good — Phase 27 lesson, enforced 28–30 |
+| promptfoo provider: `anthropic:claude-agent-sdk` (not exec/`claude -p`) | Only the SDK provider supplies `metadata.skillCalls` for the built-in `skill-used` assertion | ✓ Good — Phase 28 research |
+| Per-repo subprocess flags passed as argv (`--json`, `--porcelain`), never env-only | Workers re-init flag vars from argv, silently overriding inherited env | ✓ Good — Phase 29 plan-checker catch |
+| Workspace path-boundary checked at validate-time AND execution-time (incl. rollback) | Validate-only guards let a crafted manifest execute against out-of-bounds dirs | ✓ Good — Phase 29 CR-02, applied to saga in 30 |
+| Workspace saga: snapshot ALL before applying ANY; `snapshotting→snapshotted` sentinel; atomic `jq>tmp+mv` state | SIGKILL at any point leaves a restorable, truthful state file | ✓ Good — Phase 30, SIGKILL zero-diff proof green |
+| Rollback kills orphaned adopt subprocesses (anchored pkill) + double deletion pass | SIGKILL of the orchestrator does NOT kill children; orphans kept writing during rollback (flake root cause) | ✓ Good — Phase 30 debug cycle |
+| Test sandboxes: `git -C "$VAR"` needs non-empty guard after mktemp | A failed mktemp leaves the var empty; `git -C ""` operates on the REAL repo (proven escape) | ⚠️ Revisit — hardening tracked in v0.7.0 audit tech debt |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-06-02 — started v0.7.0 "Plugin-native + Policy-grade" milestone (after v0.6.1 hardening patch; suite 467/0)*
+*Last updated: 2026-06-04 — v0.8.0 "Operability + DX" milestone started*

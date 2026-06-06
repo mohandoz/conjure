@@ -1,34 +1,38 @@
 # Architecture Research
 
-**Domain:** Open-source init kit for Claude Code — POSIX bash CLI + Node `.mjs` hooks (Conjure v0.7.0 "Plugin-native + Policy-grade")
-**Researched:** 2026-06-03
-**Confidence:** HIGH (live codebase read; official Claude Code docs fetched this session; all integration points derived from source)
+**Domain:** Open-source init kit for Claude Code — POSIX bash CLI + Node `.mjs` hooks (Conjure v0.8.0 "Operability + DX")
+**Researched:** 2026-06-04
+**Confidence:** HIGH (live codebase read; all integration points derived from source; no speculative claims)
 
-> **Scope note (subsequent milestone):** This file extends the v0.6.0 ARCHITECTURE.md in place.
-> The v0.6.0 architecture is taken as fixed and fully shipped (467 passing tests). Everything below
+> **Scope note (subsequent milestone):** This file extends the v0.7.0 ARCHITECTURE.md in place.
+> The v0.7.0 architecture is taken as fixed and fully shipped (579 passing tests). Everything below
 > is additive or a targeted modification to existing components. The core invariant holds:
 > **every filesystem write routes through `lib/mutate.sh`**. All new components must honor this
 > without exception. Hooks/scripts exit 2, never exit 1.
 
 ---
 
-## Existing Architecture Baseline (v0.6.0, fixed)
+## Existing Architecture Baseline (v0.7.0, fixed)
 
 ```
-cli/conjure               — dispatcher: parse flags, set env vars, delegate to scripts/
+cli/conjure               — dispatcher (623 lines): parse flags, set env vars, delegate to scripts/
   ├── cmd_init            — init|migrate; --profile; --overlay; --dry-run
   ├── cmd_migrate         — calls migrations/<source>/migrate.sh
-  ├── cmd_audit           — calls scripts/audit-setup.sh; --cost; --retire-list
+  ├── cmd_audit           — calls scripts/audit-setup.sh; --cost; --retire-list; --budget; --json
   ├── cmd_update          — --check / --apply / --pr / --cron
-  ├── cmd_check           — calls scripts/check.sh; --porcelain; exit 0/1
+  ├── cmd_check           — calls scripts/check.sh; --porcelain; --schema; exit 0/1
   ├── cmd_resolve         — calls scripts/resolve.sh; --dry-run
   ├── cmd_adopt           — calls scripts/adopt.sh; full brownfield pipeline
   ├── cmd_refresh_graph   — calls scripts/refresh-graph.sh
   ├── cmd_refresh_overlay — calls scripts/refresh-overlay.sh
   ├── cmd_install_mcp     — calls scripts/install-mcp-stack.sh
   ├── cmd_preflight       — calls scripts/preflight.sh
-  ├── cmd_publish         — calls scripts/publish-plugin.sh
-  └── cmd_publish_skill   — calls scripts/publish-skill.sh
+  ├── cmd_publish         — calls scripts/publish-plugin.sh (old path)
+  ├── cmd_publish_skill   — calls scripts/publish-skill.sh
+  ├── cmd_publish_plugin  — calls scripts/publish-plugin.sh
+  ├── cmd_emit_policy     — calls scripts/emit-policy.sh
+  ├── cmd_eval            — calls scripts/eval.sh; init|run|--emit-workflow
+  └── cmd_workspace       — calls scripts/workspace.sh; init|check|audit|update|adopt
 
 lib/mutate.sh             — write chokepoint (ALL filesystem mutations go here)
 lib/snapshot.sh           — snapshot_create / snapshot_rollback / snapshot_list
@@ -36,579 +40,493 @@ lib/inventory.sh          — inventory_scan / inventory_classify / inventory_em
 lib/log.sh                — log_init / log_step / log_fail → RESTRUCTURE-LOG.md
 lib/merge.sh              — 3-way merge; writes conflict sidecars
 lib/caps.sh               — CLAUDE_MD_CAP / SKILL_MD_CAP / AGENT_MD_CAP constants
+lib/workspace.sh          — workspace manifest helpers; state machine; rollback
+lib/plugin-helpers.sh     — jq transforms for plugin.json / marketplace.json
+lib/policy-helpers.sh     — emit sandbox{} block / managed-settings / MDM artifacts
+lib/cc-schema.json        — bundled CC schema table: hook events, settings keys, version gates
 lib/exact-count.mjs       — opt-in exact token counter (Node.js)
 lib/prices.json           — per-model price table
 
-scripts/adopt.sh          — 5-step brownfield adoption pipeline
-scripts/audit-setup.sh    — health-check; size caps; schema validation
+scripts/adopt.sh          — 5-step brownfield adoption pipeline (906 lines)
+scripts/audit-setup.sh    — health-check; size caps; schema validation; budget; retire-list (695 lines)
 scripts/check.sh          — drift detection; read-only; exit 0/1
 scripts/resolve.sh        — guided interactive sidecar walker
 scripts/init-project.sh   — scaffold .claude/ (idempotent)
+scripts/eval.sh           — promptfoo init/run/emit-workflow (384 lines)
+scripts/workspace.sh      — workspace orchestration: preflight → snapshot → ops → rollback (1237 lines)
+scripts/emit-policy.sh    — per-regime sandbox + managed-settings + MDM artifacts
+scripts/emit-plugin.sh    — generates .claude-plugin/ from harness scaffold
 scripts/publish-plugin.sh — marketplace.json update + submission snippet
 scripts/publish-skill.sh  — 4-gate skill validation + PR flow
-scripts/preflight.sh      — dependency verification
+scripts/preflight.sh      — dependency verification + OS-detected install hints (130 lines)
 
 templates/                — kit templates (CLAUDE.md.tmpl, skills/, agents/, hooks-nodejs/)
-profiles/                 — 9 stack profiles (apply.sh per profile)
-compliance/               — 4 compliance overlays (hipaa/ soc2/ gdpr/ pci/ — apply.sh + fragments)
+  hooks-nodejs/
+    skill-telemetry.mjs   — PreToolUse(Skill)+UserPromptExpansion → appends JSONL (opt-in)
+profiles/                 — 9 stack profiles (apply.sh per profile: ts-next, node-nest, go-gin, etc.)
+compliance/               — 4 compliance overlays (hipaa/ soc2/ gdpr/ pci/ — apply.sh)
 .claude-plugin/           — plugin manifest (marketplace.json, plugin.json, SCHEMAS/)
-tests/run.sh              — hand-rolled regression suite (467 assertions)
+tests/run.sh              — hand-rolled regression suite (579 assertions, ~6712 lines)
+tests/fixtures/           — underscore-prefixed fixtures excluded from generic audit loops
 ```
+
+**Telemetry data location (critical for stats):**
+- Hook: `templates/hooks-nodejs/skill-telemetry.mjs`
+- Write target: `$TARGET/.claude/telemetry/skill-events.jsonl` (appended per skill invocation)
+- Schema: `{ts, session_id, event: "skill_invoke"|"skill_typed", skill, project_cwd}`
+- Gate: `CONJURE_TELEMETRY=1` in `settings.json` env block (opt-in, silent no-op otherwise)
+- Already consumed by: `scripts/audit-setup.sh` `--retire-list` section (lines 632–676), which
+  reads the JSONL, counts fires per skill over 30 days, and cross-references installed skills.
 
 ---
 
-## v0.7.0 Design Overview: Five Capability Areas
+## v0.8.0 Design Overview: Six Capability Areas
 
-The five areas integrate as follows and must share the invariants above:
-
-1. **Plugin + marketplace emission** — `conjure emit-plugin` generates a well-formed plugin dir
-   from the scaffolded harness; updates marketplace.json for the harness-as-plugin distribution
-   channel; wires `extraKnownMarketplaces` into `.claude/settings.json`.
-
-2. **Sandbox + managed-settings/MDM** — compliance overlays gain a second emit target: in addition
-   to their current `apply.sh` (mutate CLAUDE.md + hooks), they emit a `sandbox{}` block into
-   settings.json and a `managed-settings.json` artifact + optional MDM fragments (plist, registry).
-
-3. **promptfoo eval + budget linter** — `conjure eval` runs promptfoo via `npx promptfoo` (no
-   install dep); test specs live in `templates/evals/`; eval gates a CI job. Budget linter added
-   to `conjure audit` as a new flag.
-
-4. **Schema-version-aware audit** — audit reads a bundled schema table (`lib/cc-schema.json`)
-   keyed by CC version ranges; validates known hook event names, settings keys, and disallowed
-   patterns against the installed CC version.
-
-5. **Cross-repo / workspace orchestration** — `conjure workspace` reads a `conjure-workspace.json`
-   manifest; iterates repos; reuses `lib/snapshot.sh` per-repo; introduces `lib/workspace.sh`
-   with aggregate rollback semantics.
+1. **`conjure doctor`** — standalone preflight diagnostics: full `command -v` table + `.mjs` probe + OS install hints
+2. **`conjure stats`** — read skill-firing JSONL, fire/never-fire report, dead-skill detection, chars/4 cost estimates
+3. **Eval suite expansion** — per-profile adherence suites, regression baselines beyond scaffold
+4. **Init UX polish** — smart profile detection heuristics, smarter `--profile` auto-suggestion
+5. **Live-UAT automation + test-harness hardening** — automate smoke tests, guard `git -C "$VAR"` for empty-var escape, document manual steps
+6. **README + docs refresh** — no new code components; pure content work targeting existing CLI surface
 
 ---
 
 ## New and Modified Components
 
-### Area 1: Plugin + Marketplace Emission
+### Area 1: `conjure doctor`
 
-#### `cmd_emit_plugin` in `cli/conjure` (NEW dispatcher entry)
+#### What the existing `preflight.sh` already does (v0.7.0)
+
+`scripts/preflight.sh` (130 lines) already has:
+- `_detect_os()` — macos / linux / wsl / windows-gitbash via `uname -s`
+- `_fixup()` — per-OS, per-dep install hints (brew / apt / winget)
+- Required deps: `node`, `git`
+- Optional deps: `jq`, `rg`, `shellcheck`
+- Power tools: `graphify`, `ast-grep` (advisory only)
+
+`cmd_preflight` in `cli/conjure` calls `scripts/preflight.sh` directly. It is already wired to
+`conjure init` as a pre-check (line 84: `cmd_preflight || return 1`).
+
+#### Gap between `preflight` and the `doctor` spec
+
+`conjure doctor` per the v0.8.0 spec adds:
+1. **`.mjs` probe** — verify `.claude/hooks/*.mjs` can be executed by `node`; `preflight.sh` only checks `command -v node`, not whether the hook files themselves run
+2. **Richer output format** — structured summary table (not just pass/fail lines) with version numbers
+3. **Separate subcommand entry** — `conjure doctor` vs `conjure preflight` (preflight is still the
+   silent pre-check used by other commands; `doctor` is the verbose, user-facing diagnostic)
+
+#### Integration decision: new `scripts/doctor.sh` worker + `cmd_doctor` entry
+
+Do NOT modify `preflight.sh`. It is a silent, re-entrant checker used by `init`, `audit`, and the
+workspace pipeline. Doctor is a separate UX concern: verbose, interactive, never called as a
+sub-check. Adding verbose behavior to `preflight.sh` would break callers that redirect its output.
+
+**New file:** `scripts/doctor.sh` — sources `scripts/preflight.sh` logic via shell functions
+(or re-implements the `command -v` table with versions added). Key additions:
 
 ```
-conjure emit-plugin [--plugin-dir <path>] [--marketplace-url <url>] [--dry-run] [target]
+scripts/doctor.sh
+  1. OS detection (reuse _detect_os logic — either source or inline)
+  2. Dep table with versions:
+     node $(node --version), git $(git --version | head -1), jq $(jq --version)
+     shellcheck $(shellcheck --version | head -2), rg $(rg --version | head -1)
+  3. .mjs probe:
+     for each .claude/hooks/*.mjs in target:
+       node --input-type=module < /dev/null → verify node can run ESM
+       (a more precise probe: node -e "import('$hook').catch(()=>{})" is a syntax check)
+  4. Claude Code version:
+     CC_VERSION=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+     compare against minimum_conjure_cc_version from lib/cc-schema.json
+  5. cc-schema.json freshness (reuse staleness logic from audit-setup.sh SCHM-STALE)
+  6. Exit 0 (all required found) / exit 2 (required missing)
 ```
 
-Thin wrapper: parse flags → env vars → `bash scripts/emit-plugin.sh`.
-
-#### `scripts/emit-plugin.sh` (NEW worker)
-
-**What it does:**
-- Reads the scaffolded harness at `$target/.claude/` (skills/, agents/, hooks/, settings.json)
-- Generates a self-contained plugin directory at `$target/.claude-plugin/` (if absent) or
-  updates the existing one (it already exists in Conjure itself — the same pattern applies
-  to harnesses emitted for other repos)
-- Writes/updates `plugin.json` with skills paths, agents paths, hooks config
-- Updates `marketplace.json` with current HEAD SHA and version (reuses publish-plugin.sh logic)
-- Injects `extraKnownMarketplaces` into `.claude/settings.json` (via `mutate_write`)
-- Optionally writes `strictKnownMarketplaces` into `.claude/settings.json` when `--strict` passed
-
-**Reuse decision:** Do NOT duplicate `scripts/publish-plugin.sh`. Instead:
-- `publish-plugin.sh` remains the Conjure-self publish path (updates Conjure's own marketplace.json)
-- `emit-plugin.sh` is the target-repo path: generates/updates the target repo's `.claude-plugin/`
-  from its scaffolded harness
-- Both share a `lib/plugin-helpers.sh` that houses the jq transforms for marketplace.json + plugin.json
-
-#### `lib/plugin-helpers.sh` (NEW shared lib)
-
-Functions extracted from `publish-plugin.sh` and reused by `emit-plugin.sh`:
-- `plugin_update_marketplace <marketplace_json> <version> <sha>` — jq transform
-- `plugin_update_plugin_json <plugin_json> <version>` — jq transform
-- `plugin_inject_extra_marketplace <settings_json> <marketplace_url>` — injects `extraKnownMarketplaces`
-- `plugin_inject_strict_marketplace <settings_json> <marketplaces_json>` — injects `strictKnownMarketplaces`
-
-All writes via `mutate_write`. Dry-run honored.
-
-**Template reuse rationale:** The existing `templates/skills/`, `templates/agents/`, `templates/hooks-nodejs/`
-are already referenced by `plugin.json` via relative paths (`"skills": "./templates/skills"` etc.).
-`emit-plugin.sh` reads those existing paths from the target's `.claude/` and writes them into the
-generated `plugin.json` without duplicating template content. The plugin dir is a view over the
-harness, not a copy.
-
-#### `marketplace.json` settings wiring
-
-Official CC settings keys (confirmed from docs):
-- `extraKnownMarketplaces`: array of marketplace source objects — registers marketplaces for the project
-- `strictKnownMarketplaces`: array — restricts what users can add (MDM/managed-settings only for enforcement)
-
-`emit-plugin.sh` writes `extraKnownMarketplaces` into `.claude/settings.json` via `mutate_write`
-so that team members who clone the repo automatically have the harness marketplace registered.
-
----
-
-### Area 2: Sandbox + Managed-Settings / MDM
-
-#### Modified: `compliance/<overlay>/apply.sh` (all 4 overlays — MODIFIED)
-
-Current overlays write:
-- CLAUDE.md fragment (appended)
-- A hook script
-- A CONTROLS.md doc
-
-**v0.7.0 addition:** Each overlay's `apply.sh` gains a `--emit-policy` flag path that writes:
-- A `sandbox{}` block into `.claude/settings.json` (per-overlay allowWrite/denyRead/network values)
-- A `managed-settings.json` artifact in a configurable output dir
-- MDM fragments (optional, behind `--mdm` flag)
-
-This is an additive flag, not a redesign. The existing `apply.sh` behavior (without `--emit-policy`)
-is unchanged.
-
-#### `lib/policy-helpers.sh` (NEW shared lib)
-
-Shared functions for all 4 compliance overlays:
-- `policy_emit_sandbox <settings_json> <sandbox_json_fragment>` — merges sandbox{} into settings.json via jq + mutate_write
-- `policy_emit_managed_settings <output_dir> <policy_json>` — writes managed-settings.json via mutate_write
-- `policy_emit_plist <output_dir> <policy_json>` — writes macOS plist (managed-settings MDM artifact)
-- `policy_emit_registry_hive <output_dir> <policy_json>` — writes Windows .reg fragment
-- `policy_emit_drop_in <output_dir> <filename> <fragment_json>` — writes managed-settings.d/ fragment
-
-All writes via `mutate_write`. Dry-run honored.
-
-#### Sandbox block structure (from official CC docs, HIGH confidence)
-
-```json
-{
-  "sandbox": {
-    "enabled": true,
-    "filesystem": {
-      "allowWrite": ["/tmp/build"],
-      "denyWrite": ["/etc", "/usr/local/bin"],
-      "denyRead": ["~/.aws/credentials"]
-    },
-    "network": {
-      "allowedDomains": ["*.internal.example.com"]
-    }
-  }
+**New dispatcher entry in `cli/conjure`:**
+```bash
+cmd_doctor() {
+  local target="$(pwd)"
+  # parse --target or positional arg
+  CONJURE_HOME="$CONJURE_HOME" bash "$CONJURE_HOME/scripts/doctor.sh" "$target"
 }
 ```
 
-Each overlay defines its own sandbox fragment in `compliance/<overlay>/sandbox.json.tmpl`
-(new template file, processed by `policy_emit_sandbox`).
+Case entry: `doctor) shift; cmd_doctor "$@" ;;`
 
-#### Managed-settings platform paths (from official CC docs, HIGH confidence)
+**`usage()` line to add:**
+`  conjure doctor [target]            — full dependency + hook diagnostic`
 
-| Platform | Path |
-|----------|------|
-| macOS | `/Library/Application Support/ClaudeCode/managed-settings.json` |
-| Linux/WSL | `/etc/claude-code/managed-settings.json` |
-| Windows | `C:\Program Files\ClaudeCode\managed-settings.json` |
-| Drop-in dir | same location + `managed-settings.d/` (alphabetically merged) |
-
-`conjure audit --policy-check` verifies that the target's `.claude/settings.json` sandbox block
-matches the overlay's expected policy fragment (drift detection for compliance policy).
-
-#### New template files per overlay
-
-Each of the 4 overlays gains:
-```
-compliance/<overlay>/
-  apply.sh              — MODIFIED: add --emit-policy flag path
-  sandbox.json.tmpl     — NEW: sandbox block for this overlay
-  managed-settings.json.tmpl — NEW: managed-settings artifact template
-  plist.tmpl            — NEW: macOS MDM plist (--mdm flag)
-```
+**Unchanged:** `scripts/preflight.sh` — kept as the silent sub-check.
 
 ---
 
-### Area 3: promptfoo Eval + Budget Linter
+### Area 2: `conjure stats`
 
-#### `cmd_eval` in `cli/conjure` (NEW dispatcher entry)
-
-```
-conjure eval [--suite <name>] [--gate] [--dry-run] [target]
-```
-
-Thin wrapper → `bash scripts/eval.sh`.
-
-#### `scripts/eval.sh` (NEW worker)
-
-**What it does:**
-- Checks for `npx` (already expected — Node.js is a runtime dep for hooks)
-- Runs `npx --yes promptfoo@latest eval -c <spec>` where `<spec>` is one of:
-  - A named suite from `templates/evals/<suite>/promptfooconfig.yaml`
-  - The target repo's `.claude/evals/promptfooconfig.yaml` (installed by `conjure init`)
-- `--gate` flag: exit 2 if any assertions fail (for CI use)
-- Results written to `.claude/evals/results/` (gitignored by convention)
-- All writes via `mutate_write` (results output dir creation)
-
-**No new runtime dep.** `npx --yes promptfoo` is invoked on demand; promptfoo is not added to
-`dependencies`. This matches the existing `npx --yes ctx7@latest` pattern used in documentation
-lookups and keeps `dependencies: {}` empty.
-
-#### `templates/evals/` (NEW directory)
+#### Telemetry data flow (confirmed from source)
 
 ```
-templates/evals/
-  promptfoo/             — core eval suite (installed to .claude/evals/ by conjure init)
-    promptfooconfig.yaml — base config: providers, prompts, assertions
-    tests/               — YAML test case files
-      skill-adherence.yaml     — tests skills fire correctly for trigger phrases
-      hook-blocking.yaml       — tests destructive-bash hook blocks known patterns
-      size-cap-adherence.yaml  — tests CLAUDE.md stays within cap after edits
-  hipaa/                 — compliance eval suite
-    promptfooconfig.yaml
-    tests/phi-no-leak.yaml
-  soc2/
-    promptfooconfig.yaml
-    tests/audit-log.yaml
+$TARGET/.claude/telemetry/skill-events.jsonl
+  ← written by: templates/hooks-nodejs/skill-telemetry.mjs
+     (PreToolUse/Skill + UserPromptExpansion events, opt-in via CONJURE_TELEMETRY=1)
+  ← schema: {ts: ISO8601, session_id: string, event: "skill_invoke"|"skill_typed",
+             skill: string, project_cwd: string}
+
+$TARGET/.claude/skills/
+  ← installed skill directories, each containing SKILL.md
+  ← enumerated by: find $TARGET/.claude/skills -name SKILL.md
+
+Already consumed by: scripts/audit-setup.sh --retire-list (lines 632–676)
+  - reads JSONL, counts fires per skill in last 30 days
+  - cross-references installed skill dirs
+  - prints fire count + "[active]" / "[retire?]" status
 ```
 
-`conjure init` installs `templates/evals/promptfoo/` into `$target/.claude/evals/`.
-`conjure eval --suite hipaa` runs the HIPAA-specific suite.
+#### Gap: `--retire-list` is embedded in `audit-setup.sh` under the `CONJURE_RETIRE` flag
 
-#### Budget linter added to `scripts/audit-setup.sh` (MODIFIED)
+The `--retire-list` section (lines 632–676 of `audit-setup.sh`) is the direct precursor to
+`conjure stats`. It reads the JSONL and does a 30-day fire count. It does NOT produce:
+- Total invocations across all time
+- Cost estimates from telemetry (chars/4 per skill)
+- Session counts (how many sessions touched each skill)
+- Dead-skill detection (installed but never fired in the log's full history)
+- JSON output mode
 
-New flag: `conjure audit --budget-check [--budget-tokens N]`
+#### Integration decision: new `scripts/stats.sh` worker + `cmd_stats` entry
 
-When `CONJURE_BUDGET_CHECK=1`:
-- Counts estimated tokens for CLAUDE.md + all skills (existing chars/4 heuristic)
-- Compares against per-turn budget threshold (default 20K tokens, configurable)
-- Warns if any skill exceeds 5K tokens (high single-skill load)
-- Outputs budget report section in audit output
+Do NOT expand `audit-setup.sh` further. It is already 695 lines and has a distinct audit
+concern (health check). Stats is a separate read-only reporting concern.
 
-No new lib; adds ~40 lines to `audit-setup.sh` in the existing audit loop, reusing the
-`$TOTAL_CHARS` and chars/4 estimation already present.
+`scripts/stats.sh` reads the JSONL and installed skills; produces a stand-alone report.
+It sources `lib/caps.sh` for the chars/4 heuristic constants.
 
-#### CI job structure
-
-Eval is designed as a CI job, not a pre-commit hook (too slow for per-commit). The
-`conjure update --cron` template (already written to `.github/workflows/conjure-update.yml`)
-gets a sibling `conjure eval --gate` step added to the generated workflow template.
-
-```yaml
-# Fragment added to templates/workflows/conjure-eval.yml.tmpl
-jobs:
-  conjure-eval:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run eval suite
-        run: CONJURE_HOME=conjure-src conjure-src/cli/conjure eval --gate
+```
+scripts/stats.sh
+  1. Read $TARGET/.claude/telemetry/skill-events.jsonl
+     - if absent: advise CONJURE_TELEMETRY=1 and exit 0
+  2. Build per-skill aggregate from full JSONL history:
+     - total fires (skill_invoke + skill_typed combined)
+     - distinct session_id count per skill
+     - last_fired timestamp per skill
+     - chars/4 cost: for each installed SKILL.md, compute chars, extrapolate to
+       (chars/4) * fires * price_per_token (reuse lib/prices.json)
+  3. Cross-reference installed skills (find .claude/skills -name SKILL.md):
+     - skills in JSONL but not installed → ghost fires (stale skill removed after data)
+     - skills installed but not in JSONL → never-fired (dead-skill candidates)
+  4. 30-day fire filter (same cutoff as --retire-list): surface "dormant" vs "never-fired"
+  5. Output:
+     human mode: ASCII table (skill, fires, sessions, last_fired, cost_est, status)
+     --json flag: {skills: [...], summary: {total_fires, total_cost_est, dead_count}}
+  6. Exit 0 always (read-only; no mutations; no failure conditions)
 ```
 
----
+**`lib/stats-helpers.sh` (NEW) or inline in `scripts/stats.sh`?**
 
-### Area 4: Schema-Version-Aware Audit
+The JSONL-parsing logic (per-skill aggregation via `jq`) is ~40-60 lines. At that size, keep it
+inline in `scripts/stats.sh` rather than creating a new lib. If a future feature (e.g., workspace
+stats aggregation) needs to reuse it, extract to `lib/stats-helpers.sh` at that point.
 
-#### `lib/cc-schema.json` (NEW bundled schema table)
-
-A JSON file maintained in the kit (not fetched at runtime) mapping CC version ranges to:
-- Known hook events
-- Known settings keys
-- Known `disallowed-tools` values
-- Minimum-version-required features
-
-```json
-{
-  "schema_version": "1",
-  "updated": "2026-06-03",
-  "known_hook_events": [
-    "PreToolUse", "PostToolUse", "Stop", "SessionStart",
-    "UserPromptExpansion", "ConfigChange", "Notification",
-    "SubagentStop", "PreCompact"
-  ],
-  "known_settings_keys": [
-    "permissions", "hooks", "env", "sandbox", "mcpServers",
-    "includeCoAuthoredBy", "cleanupPeriodDays", "disabledMcpjsonServers",
-    "deniedMcpServers", "policyHelper", "allowManagedHooksOnly",
-    "extraKnownMarketplaces", "strictKnownMarketplaces",
-    "skillOverrides", "enabledPlugins"
-  ],
-  "version_gates": {
-    "policyHelper": "2.1.136",
-    "skillOverrides": "2.1.129",
-    "displayName": "2.1.143",
-    "defaultEnabled": "2.1.154"
-  },
-  "minimum_conjure_cc_version": "2.1.117"
+**New dispatcher entry in `cli/conjure`:**
+```bash
+cmd_stats() {
+  local target="$(pwd)" do_json=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) do_json=1 ;;
+      *) target="$1" ;;
+    esac
+    shift
+  done
+  CONJURE_HOME="$CONJURE_HOME" CONJURE_JSON="$do_json" \
+    bash "$CONJURE_HOME/scripts/stats.sh" "$target"
 }
 ```
 
-**Why bundled, not fetched:** Runtime network fetches violate the zero-egress-in-CI constraint
-and the no-curl-sh safety rule. The schema table is small (~2KB), human-auditable, and versioned
-with the kit. It is updated at Conjure release time when new CC schema changes are detected.
+Case entry: `stats) shift; cmd_stats "$@" ;;`
 
-**Update path:** `conjure update` includes a check against a published schema manifest
-(same mechanism as kit updates) and emits a warning if `cc-schema.json` is older than 30 days.
-This is advisory only; the audit still runs.
+**`usage()` line to add:**
+`  conjure stats [--json] [target]    — skill-firing telemetry report`
 
-#### Modified: `scripts/audit-setup.sh` (MODIFIED)
+**CRITICAL: `scripts/stats.sh` does NOT call `lib/mutate.sh`.** It is purely read-only.
+No mutations — no source of mutate.sh needed. Exit 0 always.
 
-New section: schema-version-aware validation. Added when `CONJURE_SCHEMA_CHECK=1`
-(or default-on after a flag stabilization period):
+**`--retire-list` in `audit-setup.sh` — keep or remove?**
+
+Keep `--retire-list`. It serves a distinct audit context: the audit run gives a single-pass
+health + retire signal. `conjure stats` is the dedicated reporting tool. Both can coexist;
+they read the same JSONL but have different consumers (CI audit vs. developer telemetry review).
+
+---
+
+### Area 3: Eval Suite Expansion
+
+#### What `conjure eval` already does (v0.7.0, confirmed from source)
+
+- `eval.sh` has three subcommands: `init`, `run`, `--emit-workflow`
+- `eval init`: generates `.conjure/eval/promptfooconfig.yaml` from installed skills and
+  CLAUDE.md rule lines (skill-used + llm-rubric assertions per rule line)
+- `eval run`: `npx --yes promptfoo@0.121.14 eval -c .conjure/eval/promptfooconfig.yaml`
+- `--emit-workflow`: emits `.github/workflows/conjure-eval.yml` (promptfoo-action@v1, repeat:3, 80% threshold)
+- `audit --budget`: context budget linter in `audit-setup.sh` (EVAL-04)
+- `audit` EVAL-05: coverage gap report (diff installed skills vs skill-used assertions in yaml)
+
+#### Gap: per-profile adherence suites and regression baselines
+
+The `v0.8.0` spec adds:
+1. **Per-profile adherence suites** — e.g., a ts-next project generates assertions specific to
+   TypeScript + Next.js conventions, not just the generic CLAUDE.md rules
+2. **Regression baselines beyond scaffold** — ability to capture a baseline run result and detect
+   regressions in subsequent runs
+
+#### Integration decision: extend `eval.sh` and add profile suite templates
+
+**Per-profile suites approach:**
+
+The `eval init` command already generates CLAUDE.md rule lines as llm-rubric assertions. For
+per-profile suites, `eval init` needs to detect whether a profile was applied (check CLAUDE.md
+for `<!-- profile:ts-next -->` markers written by `profiles/ts-next/apply.sh`) and append
+profile-specific assertions from `profiles/<name>/eval-assertions.yaml.tmpl` if present.
+
+This is additive to `_build_promptfooconfig()` in `eval.sh`:
 
 ```bash
-# Schema-aware audit (sourced from lib/cc-schema.json via jq)
-# 1. Detect installed CC version: claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'
-# 2. Load cc-schema.json known_hook_events, known_settings_keys
-# 3. For each hook event in settings.json: warn if not in known_hook_events
-# 4. For each top-level settings key: warn if not in known_settings_keys
-# 5. For version-gated features: compare CC version vs version_gates[key]
-# 6. Check for disallowed-tools / disabledMcpjsonServers drift
+# After existing llm-rubric section:
+_detect_applied_profiles() {
+  local target_dir="$1"
+  # Each profile apply.sh appends <!-- profile:<name> --> marker to CLAUDE.md
+  grep -oE 'profile:[a-z0-9_-]+' "$target_dir/CLAUDE.md" 2>/dev/null | sed 's/profile://' | sort -u
+}
+
+# In _build_promptfooconfig, after llm-rubric block:
+while IFS= read -r profile_name; do
+  local profile_assertions="$CONJURE_HOME/profiles/$profile_name/eval-assertions.yaml.tmpl"
+  [ -f "$profile_assertions" ] && cat "$profile_assertions" >> "$outfile"
+done <<PROFILES_EOF
+$(_detect_applied_profiles "$target_dir")
+PROFILES_EOF
 ```
 
-CC version detection:
+**New template files per profile (NEW, additive):**
+`profiles/<name>/eval-assertions.yaml.tmpl` — additional YAML test blocks to append.
+Ships for: ts-next, node-nest, go-gin, python-fastapi (the most common profiles).
+Does not exist for data-science, polyglot, rust-axum, java-spring, monorepo — added on demand.
+
+**Regression baseline approach:**
+
+`conjure eval run --baseline` saves the promptfoo results JSON (written by promptfoo to stdout
+or `--output`) to `.conjure/eval/baseline.json`. A subsequent `eval run --compare` compares
+pass rate against the baseline and exits 2 if pass rate drops more than 5pp.
+
+This adds one flag to `cmd_eval_run()` in `eval.sh`. No new worker needed.
+
+**Files to modify:**
+- `scripts/eval.sh`: modify `_build_promptfooconfig()` to include per-profile blocks; add
+  `--baseline` / `--compare` to `cmd_eval_run()`
+- `cli/conjure`: update `cmd_eval` flag parsing to pass `--baseline` / `--compare` through
+- `profiles/ts-next/eval-assertions.yaml.tmpl` (NEW)
+- `profiles/node-nest/eval-assertions.yaml.tmpl` (NEW)
+- `profiles/go-gin/eval-assertions.yaml.tmpl` (NEW)
+- `profiles/python-fastapi/eval-assertions.yaml.tmpl` (NEW)
+
+---
+
+### Area 4: Init UX Polish
+
+#### What `conjure init` currently does (v0.7.0, confirmed from source)
+
+`cmd_init` in `cli/conjure` (lines 64–128):
+- Parses `--profile=<name>` flag — user must know the profile name in advance
+- Parses mode: `new` | `existing` | `migrate`
+- Calls `cmd_preflight`, then `init-project.sh`, then optionally `profiles/$profile/apply.sh`
+- No auto-detection of project type; `--profile` is purely manual
+
+`scripts/init-project.sh` (160 lines):
+- No profile auto-detection
+- No interactive wizard (all flags parsed by `cmd_init` before dispatch)
+- No detection of `package.json`, `go.mod`, `requirements.txt`, etc.
+
+#### Gap: smart profile detection heuristics
+
+The spec calls for "better profile selection, smarter defaults detection." The minimal approach:
+add a `_detect_profile()` function in `cli/conjure` or `scripts/init-project.sh` that probes
+for stack fingerprint files and suggests or auto-applies the matching profile.
+
+**Integration decision: `_detect_profile()` helper in `cli/conjure`, called from `cmd_init`**
+
+Keep logic in the dispatcher (not in `init-project.sh`) because:
+1. `init-project.sh` already has a clear role (scaffold files) — profile logic is pre-scaffold
+2. The dispatcher can read the profile flag and fill it in before calling `init-project.sh`
+
 ```bash
-CC_VERSION="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo 'unknown')"
-```
-
-If `claude` not on PATH (CI without CC installed), schema check is skipped with a warning,
-not a failure. This matches the existing `jq` skip pattern.
-
-#### `lib/cc-schema.json` update cadence
-
-`scripts/audit-setup.sh` compares the `updated` field in `lib/cc-schema.json` against
-`date +%Y-%m-%d` (90-day threshold). If stale, emits advisory: "cc-schema.json is >90 days
-old — run `conjure update` to refresh." This is a WARN (exit 1), not an ERR (exit 2).
-
----
-
-### Area 5: Cross-Repo / Workspace Orchestration
-
-This is the most complex area. The architecture must address:
-- Per-repo snapshot using existing `lib/snapshot.sh` primitives
-- Aggregate rollback semantics: partial failure in repo N must roll back repos 0..N-1
-- State durability: a SIGKILL mid-workspace-run must allow `--resume` recovery
-- Reporting: per-repo status + aggregate summary
-
-#### `conjure-workspace.json` (NEW per-workspace manifest)
-
-Not stored in any single repo — lives in a workspace root directory alongside all repo dirs:
-
-```json
-{
-  "schema_version": "1",
-  "name": "my-org-workspace",
-  "conjure_version": "0.7.0",
-  "repos": [
-    {
-      "name": "api",
-      "path": "./api",
-      "profile": "node",
-      "overlay": null,
-      "conjure_ops": ["init", "adopt", "audit"]
-    },
-    {
-      "name": "web",
-      "path": "./web",
-      "profile": "react",
-      "overlay": "soc2",
-      "conjure_ops": ["init", "audit"]
-    }
-  ],
-  "rollback_policy": "all-or-nothing",
-  "parallel": false
+_detect_profile() {
+  local target="$1"
+  # Probe in order: first match wins
+  [ -f "$target/next.config.js" ] || [ -f "$target/next.config.ts" ] && echo "ts-next" && return
+  [ -f "$target/package.json" ] && grep -q '"nest"' "$target/package.json" && echo "node-nest" && return
+  [ -f "$target/go.mod" ] && echo "go-gin" && return
+  [ -f "$target/Cargo.toml" ] && echo "rust-axum" && return
+  [ -f "$target/requirements.txt" ] || [ -f "$target/pyproject.toml" ] && echo "python-fastapi" && return
+  [ -f "$target/build.gradle" ] || [ -f "$target/pom.xml" ] && echo "java-spring" && return
+  echo ""  # no detection
 }
 ```
 
-`rollback_policy` values:
-- `all-or-nothing`: if any repo fails, roll back all previously-applied repos (the hard default)
-- `best-effort`: continue on failure, report failed repos, no rollback (for audit-only runs)
-
-`parallel: false` is the default and only supported value in v0.7.0. True parallel would require
-snapshot/rollback coordination across concurrent bash processes which introduces race conditions
-on shared `lib/mutate.sh` state. Parallel is `best-effort` mode only and deferred.
-
-#### `cmd_workspace` in `cli/conjure` (NEW dispatcher entry)
-
-```
-conjure workspace [--file <conjure-workspace.json>] [--dry-run] [--rollback] [--resume] [--porcelain]
+In `cmd_init`, before calling `init-project.sh`:
+```bash
+if [ -z "$profile" ] && [ -t 0 ]; then  # TTY guard (same pattern as resolve.sh)
+  detected="$(_detect_profile "$target")"
+  if [ -n "$detected" ]; then
+    echo "  ▸ Detected stack: $detected — apply profile? [Y/n]"
+    read -r _ans </dev/tty
+    case "${_ans:-Y}" in [Yy]*|"") profile="$detected" ;; esac
+  fi
+fi
 ```
 
-Thin wrapper → `bash scripts/workspace.sh`.
+**Non-TTY path:** no prompt; `detected` profile is logged but not auto-applied. This preserves
+the invariant: non-TTY exits 2 / never auto-mutates for interactive questions.
 
-#### `scripts/workspace.sh` (NEW worker)
+**Files to modify:**
+- `cli/conjure`: add `_detect_profile()` helper; modify `cmd_init` to call it when `--profile` absent
 
-**Pipeline:**
-
-```
-Step 0: Load + validate workspace manifest (jq schema check)
-  write .conjure-workspace-state.json (durable crash state)
-
-Step 1: Pre-flight all repos
-  for each repo in manifest:
-    verify path exists
-    cmd_preflight for repo
-  abort if any preflight fails (before any mutations)
-
-Step 2: Snapshot all repos
-  for each repo in manifest:
-    source lib/snapshot.sh
-    snapshot_create $repo_path $workspace_root/.conjure-workspace-backups/$repo_name/
-    record CONJURE_SNAPSHOT_PATH in .conjure-workspace-state.json
-    (failures here abort entire workspace run — no partial state)
-
-Step 3: Execute ops per repo (sequential)
-  for each repo in manifest:
-    for each op in repo.conjure_ops:
-      execute: CONJURE_HOME=$CONJURE_HOME DRY_RUN=$DRY_RUN \
-               bash $CONJURE_HOME/cli/conjure $op [flags] $repo_path
-      record result in .conjure-workspace-state.json
-      if op exits 2: trigger aggregate_rollback; exit 2
-
-Step 4: Aggregate report
-  print per-repo status table
-  print overall result: PASS / PARTIAL / FAIL
-  write workspace-report.json
-```
-
-**Aggregate rollback (the deferred hard part):**
-
-```
-aggregate_rollback() is called when Step 3 fails on repo N:
-  for each repo that has status=applied in .conjure-workspace-state.json (repos 0..N-1):
-    snapshot_rollback $recorded_snapshot_path $repo_path
-    record status=rolled-back in .conjure-workspace-state.json
-  repo N itself: snapshot_rollback if snapshot was taken; else skip (no mutations)
-  print: "Workspace rolled back. All repos restored to pre-workspace state."
-  exit 2
-```
-
-Key design: `snapshot_create` for each repo happens in Step 2 (before ANY op execution),
-so a failure in repo 3 can always roll back repos 0, 1, 2 from their pre-Step-2 snapshots.
-This is the same snapshot-before-mutate invariant as `scripts/adopt.sh` Step 1, applied
-at workspace scale.
-
-**Durable state file (crash recovery):**
-
-`.conjure-workspace-state.json` is written before each repo operation and updated after:
-
-```json
-{
-  "schema_version": "1",
-  "workspace": "my-org-workspace",
-  "started_at": "2026-06-03T10:00:00Z",
-  "phase": "ops",
-  "repos": [
-    {
-      "name": "api",
-      "snapshot_path": "/abs/.conjure-workspace-backups/api/conjure-adopt-20260603T100001Z",
-      "status": "applied",
-      "ops_applied": ["init", "adopt"],
-      "op_failed": null
-    },
-    {
-      "name": "web",
-      "snapshot_path": "/abs/.conjure-workspace-backups/web/conjure-adopt-20260603T100030Z",
-      "status": "running",
-      "ops_applied": ["init"],
-      "op_failed": null
-    }
-  ]
-}
-```
-
-`--resume` reads this file and skips repos with `status: applied`; re-runs from the first
-`status: running` or `status: failed` entry. `--rollback` reads all `snapshot_path` values
-and calls `snapshot_rollback` for each repo with `status: applied`.
-
-#### `lib/workspace.sh` (NEW shared lib)
-
-Functions sourced by `scripts/workspace.sh`:
-- `workspace_load <manifest_path>` — parse + validate conjure-workspace.json via jq
-- `workspace_state_init <workspace_root>` — write initial .conjure-workspace-state.json
-- `workspace_state_update <repo_name> <phase> <status>` — atomic append via mutate_write
-- `workspace_aggregate_rollback <state_file>` — iterate applied repos, call snapshot_rollback
-- `workspace_report <state_file>` — print per-repo table + aggregate result
-
-`lib/workspace.sh` sources `lib/snapshot.sh` (for snapshot_rollback) and `lib/log.sh`
-(for workspace-level log entries). All writes via `mutate_write`.
-
-#### Backup location for workspace snapshots
-
-`$workspace_root/.conjure-workspace-backups/<repo-name>/conjure-adopt-<ts>/`
-
-Separate from the per-repo `.conjure-adopt-backups/` to avoid confusion when a repo is also
-managed individually. `.conjure-workspace-backups/` is added to the workspace root's `.gitignore`.
+**Unchanged:** `scripts/init-project.sh` — profile application happens in `cmd_init` after
+`init-project.sh` returns, reusing the existing `bash "$CONJURE_HOME/profiles/$profile/apply.sh"` call.
 
 ---
 
-## Component Interaction Map (v0.7.0 complete)
+### Area 5: Live-UAT Automation + Test-Harness Hardening
+
+#### Deferred debt from v0.7.0 (confirmed from PROJECT.md)
+
+Four categories:
+1. **`git -C "$VAR"` empty-var guard** — proven sandbox-escape: `mktemp` failure → empty var →
+   `git -C ""` operates on the real repo. All test sandboxes that call `git -C "$VAR"` need a
+   non-empty guard. Affects `tests/run.sh` (confirmed: 857–870, 946–959, 997–1010 use the pattern).
+2. **Kill-safe SCHM-STALE swap** — `audit-setup.sh` SCHM-STALE already uses `workspace_state_write`
+   pattern (line 484–497), but the workspace state writes use `jq > tmp && mv` atomic swap.
+   Confirm whether SCHM-STALE's schema staleness write path is similarly protected or goes direct.
+3. **Live `claude` binary smoke** — requires real Claude Code installed. Automate where possible
+   (stub the binary in CI); document manual steps for true live runs.
+4. **Live promptfoo run gated on key** — `eval run` already skips gracefully when
+   `ANTHROPIC_API_KEY` is unset. Make CI skip advisory rather than fail-hard.
+
+#### Integration: `tests/run.sh` hardening (MODIFIED)
+
+**`git -C "$VAR"` guard pattern:**
+
+Add a `_safe_git_C()` helper near the top of `tests/run.sh`:
+```bash
+_safe_git_C() {
+  local _dir="$1"; shift
+  [ -z "$_dir" ] && { echo "FATAL: _safe_git_C called with empty dir" >&2; exit 2; }
+  git -C "$_dir" "$@"
+}
+```
+
+Then replace `git -C "$MKTPL_DIR"`, `git -C "$SUBMIT_DIR"`, `git -C "$SKILL_DIR"` with
+`_safe_git_C "$MKTPL_DIR"` etc. This surfaces the bug at the call site rather than silently
+operating on the real repo.
+
+Alternatively (simpler): add a `[ -n "$MKTPL_DIR" ] || { fail "mktemp failed"; skip; }` guard
+immediately after each `mktemp` call. This is the POSIX pattern and doesn't require helper extraction.
+
+**Kill-safe SCHM-STALE:**
+
+Confirm `audit-setup.sh` SCHM-STALE (lines 484–497) emits only advisory `warn()` and `json_check`
+calls — no file writes. If so, no atomic swap needed (read-only staleness check). The SCHM-STALE
+flag in PROJECT.md likely refers to a future `conjure update` path that would update `cc-schema.json`
+in-place — that write needs the `jq > tmp && mv` atomic pattern when implemented. Document the
+constraint; no code change needed in v0.8.0 unless the update path is added.
+
+**Live smoke automation:**
+
+Add a CI job stub in `.github/workflows/ci.yml` (or a new `smoke.yml`) that:
+- Runs `conjure preflight` (passes in CI since node+git+jq+shellcheck are present)
+- Runs `conjure doctor` (new — validates full dep table + .mjs probe)
+- Skips `eval run` if `ANTHROPIC_API_KEY` is absent (already the eval.sh behavior)
+- Documents remaining manual steps in `tests/MANUAL-UAT.md` (new file, not a code component)
+
+**Files to modify:**
+- `tests/run.sh`: add `mktemp` empty-var guards after each `mktemp` call that feeds `git -C`
+- `.github/workflows/ci.yml` (if exists) or new `smoke.yml`: add `conjure doctor` job
+- `tests/MANUAL-UAT.md` (NEW): document live-binary smoke and MDM hardware steps
+
+---
+
+### Area 6: README + Docs Refresh
+
+Pure content work. No new code components. Targets:
+- `README.md` — rewrite covering v0.3–v0.7 (quick start, command reference, feature tour)
+- `MIGRATION-GUIDE.md` — sync to current command surface
+- `FAILURE-MODES.md` — add v0.7.0 failure modes (workspace rollback, emit-policy MDM, eval gate)
+
+No architecture implications.
+
+---
+
+## Component Interaction Map (v0.8.0 additions)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │  ENTRYPOINTS                                                                            │
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│  │  cli/conjure  (bash dispatcher)                         [existing + MODIFIED]    │   │
-│  │   ... all v0.6.0 subcommands unchanged ...                                     │   │
-│  │   emit-plugin [--plugin-dir] [--strict] [--dry-run]     [NEW — v0.7.0]        │   │
-│  │   eval [--suite] [--gate] [--dry-run]                   [NEW — v0.7.0]        │   │
-│  │   workspace [--file] [--dry-run] [--rollback] [--resume][NEW — v0.7.0]        │   │
+│  │  cli/conjure  (bash dispatcher)                        [existing + MODIFIED]     │   │
+│  │   ... all v0.7.0 subcommands unchanged ...                                     │   │
+│  │   doctor [target]                                      [NEW — v0.8.0]          │   │
+│  │   stats [--json] [target]                              [NEW — v0.8.0]          │   │
+│  │   eval init|run|--emit-workflow     ─── MODIFIED to pass --baseline/--compare  │   │
+│  │   init [new|existing|migrate] ...   ─── MODIFIED to add _detect_profile()      │   │
 │  └─────────────────────────────────────────────────────────────────────────────────┘   │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │  WORKER SCRIPTS (subprocess via bash scripts/*.sh)                                      │
-│  ┌──────────────────────────────────┐  ┌──────────────────────────────────────────┐   │
-│  │  v0.6.0 workers (unchanged)       │  │  emit-plugin.sh            [NEW]         │   │
-│  │  adopt.sh                        │  │   reads .claude/ → writes .claude-plugin/ │   │
-│  │  audit-setup.sh ── MODIFIED ──┐  │  │   lib/plugin-helpers.sh sourced           │   │
-│  │  check.sh                     │  │  │   mutate_write for all outputs            │   │
-│  │  resolve.sh                   │  │  ├──────────────────────────────────────────┤   │
-│  │  publish-plugin.sh ─extract→  │  │  │  eval.sh                   [NEW]         │   │
-│  │  publish-skill.sh              │  │  │   npx promptfoo eval -c <spec>           │   │
-│  │  init-project.sh               │  │  │   --gate flag: exit 2 on fail            │   │
-│  │  preflight.sh                  │  │  │   writes results/ via mutate_write       │   │
-│  └──────────────────────────────────┘  ├──────────────────────────────────────────┤   │
-│                                         │  workspace.sh              [NEW]         │   │
-│    audit-setup.sh adds:                 │   Step 0: load manifest + init state     │   │
-│    - schema-version check               │   Step 1: preflight all repos            │   │
-│    - budget-linter section              │   Step 2: snapshot all repos             │   │
-│                                         │   Step 3: execute ops sequentially       │   │
-│    compliance/*/apply.sh adds:          │   Step 4: aggregate report               │   │
-│    - --emit-policy flag path            │   aggregate_rollback() on any failure    │   │
-│    - sandbox.json.tmpl processing       │   lib/workspace.sh sourced              │   │
-│    - managed-settings.json emit         │   lib/snapshot.sh sourced (reused)      │   │
-│    - MDM plist/registry (--mdm)         └──────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│  │  scripts/doctor.sh               [NEW — v0.8.0]                                  │  │
+│  │   dep table with versions + .mjs probe + CC version check + schema freshness    │  │
+│  │   reads: lib/cc-schema.json (freshness); no lib/mutate.sh needed (read-only)    │  │
+│  │   exit 0 (all ok) / exit 2 (required dep missing) — NEVER exit 1                │  │
+│  ├──────────────────────────────────────────────────────────────────────────────────┤  │
+│  │  scripts/stats.sh                [NEW — v0.8.0]                                  │  │
+│  │   reads $TARGET/.claude/telemetry/skill-events.jsonl (opt-in JSONL)             │  │
+│  │   reads $TARGET/.claude/skills/**/SKILL.md (installed skills)                   │  │
+│  │   reads lib/prices.json (cost estimation)                                       │  │
+│  │   jq aggregate: fires, sessions, last_fired, cost_est per skill                │  │
+│  │   NEVER sources lib/mutate.sh — purely read-only; exit 0 always                │  │
+│  │   --json flag: structured JSON output to stdout                                 │  │
+│  ├──────────────────────────────────────────────────────────────────────────────────┤  │
+│  │  scripts/eval.sh                 [MODIFIED — v0.8.0]                             │  │
+│  │   _build_promptfooconfig(): +_detect_applied_profiles() → per-profile blocks    │  │
+│  │   cmd_eval_run(): +--baseline (save results) / +--compare (regression check)   │  │
+│  ├──────────────────────────────────────────────────────────────────────────────────┤  │
+│  │  cli/conjure cmd_init            [MODIFIED — v0.8.0]                             │  │
+│  │   +_detect_profile() helper: fingerprint heuristics → TTY-gated profile prompt  │  │
+│  ├──────────────────────────────────────────────────────────────────────────────────┤  │
+│  │  tests/run.sh                    [MODIFIED — v0.8.0]                             │  │
+│  │   +mktemp empty-var guards after each mktemp that feeds git -C                  │  │
+│  │   +doctor subcommand tests                                                       │  │
+│  │   +stats subcommand tests                                                        │  │
+│  └──────────────────────────────────────────────────────────────────────────────────┘  │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │  SHARED LIB (sourced, not dispatched)                                                   │
 │  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
 │  │ lib/mutate.sh   [existing — UNCHANGED]                                           │  │
-│  │  THE write chokepoint — ALL mutations route here — invariant preserved           │  │
+│  │  THE write chokepoint — invariant preserved; stats.sh and doctor.sh do NOT use  │  │
 │  └──────────────────────────────────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/snapshot.sh  [existing — UNCHANGED; REUSED by workspace.sh]                  │  │
-│  │  snapshot_create / snapshot_rollback / snapshot_list                            │  │
+│  │ lib/prices.json [existing — UNCHANGED; REUSED by stats.sh for cost estimates]    │  │
 │  └──────────────────────────────────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/plugin-helpers.sh  [NEW — v0.7.0]                                            │  │
-│  │  plugin_update_marketplace / plugin_update_plugin_json                          │  │
-│  │  plugin_inject_extra_marketplace / plugin_inject_strict_marketplace             │  │
-│  │  sourced by: emit-plugin.sh + publish-plugin.sh (refactored)                    │  │
+│  │ lib/cc-schema.json [existing — UNCHANGED; READ by doctor.sh for CC version gate] │  │
 │  └──────────────────────────────────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/policy-helpers.sh  [NEW — v0.7.0]                                            │  │
-│  │  policy_emit_sandbox / policy_emit_managed_settings                             │  │
-│  │  policy_emit_plist / policy_emit_registry_hive / policy_emit_drop_in           │  │
-│  │  sourced by: all 4 compliance/*/apply.sh                                        │  │
-│  └──────────────────────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/workspace.sh  [NEW — v0.7.0]                                                 │  │
-│  │  workspace_load / workspace_state_init / workspace_state_update                │  │
-│  │  workspace_aggregate_rollback / workspace_report                               │  │
-│  │  sources: lib/snapshot.sh + lib/log.sh                                         │  │
-│  └──────────────────────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/cc-schema.json  [NEW — v0.7.0]                                               │  │
-│  │  bundled schema table: known_hook_events / known_settings_keys / version_gates  │  │
-│  │  read by: scripts/audit-setup.sh (schema-version-aware check section)           │  │
-│  └──────────────────────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ lib/inventory.sh / lib/log.sh / lib/merge.sh / lib/caps.sh [existing — unchanged]│  │
+│  │ All other v0.7.0 libs: snapshot.sh, workspace.sh, plugin-helpers.sh,            │  │
+│  │ policy-helpers.sh, inventory.sh, log.sh, merge.sh, caps.sh — UNCHANGED          │  │
 │  └──────────────────────────────────────────────────────────────────────────────────┘  │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│  TEMPLATES + COMPLIANCE (new files)                                                     │
+│  TEMPLATES + PROFILES (new files)                                                       │
 │  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ templates/evals/          [NEW — v0.7.0]                                         │  │
-│  │   promptfoo/promptfooconfig.yaml + tests/                                        │  │
-│  │   hipaa/ soc2/ gdpr/ pci/ (compliance eval suites)                              │  │
-│  └──────────────────────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ compliance/<overlay>/sandbox.json.tmpl     [NEW per overlay — v0.7.0]            │  │
-│  │ compliance/<overlay>/managed-settings.json.tmpl  [NEW per overlay — v0.7.0]     │  │
-│  │ compliance/<overlay>/plist.tmpl            [NEW per overlay, optional]           │  │
+│  │ profiles/ts-next/eval-assertions.yaml.tmpl       [NEW — v0.8.0]                  │  │
+│  │ profiles/node-nest/eval-assertions.yaml.tmpl     [NEW — v0.8.0]                  │  │
+│  │ profiles/go-gin/eval-assertions.yaml.tmpl        [NEW — v0.8.0]                  │  │
+│  │ profiles/python-fastapi/eval-assertions.yaml.tmpl [NEW — v0.8.0]                 │  │
+│  │  appended to .conjure/eval/promptfooconfig.yaml by eval init when profile active │  │
 │  └──────────────────────────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -621,249 +539,199 @@ managed individually. `.conjure-workspace-backups/` is added to the workspace ro
 
 | File | Type | Purpose |
 |------|------|---------|
-| `lib/plugin-helpers.sh` | library | jq transforms for plugin.json / marketplace.json; shared by emit-plugin.sh + publish-plugin.sh |
-| `lib/policy-helpers.sh` | library | emit sandbox{} block, managed-settings.json, MDM artifacts; shared by all 4 compliance overlays |
-| `lib/workspace.sh` | library | workspace load/state/rollback/report; sources snapshot.sh + log.sh |
-| `lib/cc-schema.json` | data | bundled CC schema table: hook events, settings keys, version gates |
-| `scripts/emit-plugin.sh` | worker | generates .claude-plugin/ from harness scaffold; wires extraKnownMarketplaces |
-| `scripts/eval.sh` | worker | runs promptfoo via npx; --gate exits 2 on failure; writes results/ |
-| `scripts/workspace.sh` | worker | workspace orchestration: preflight → snapshot → ops → aggregate rollback |
-| `templates/evals/` | templates | promptfoo eval suites installed by conjure init; 1 base + 4 compliance |
-| `compliance/*/sandbox.json.tmpl` | data | sandbox block template per overlay (4 files) |
-| `compliance/*/managed-settings.json.tmpl` | data | managed-settings template per overlay (4 files) |
-| `compliance/*/plist.tmpl` | data | macOS MDM plist template per overlay (4 files, optional) |
+| `scripts/doctor.sh` | worker | dep table + versions + .mjs probe + CC version check + schema freshness; verbose user-facing diagnostic |
+| `scripts/stats.sh` | worker | read skill-events.jsonl; per-skill fires/sessions/cost aggregate; dead-skill detection; --json output |
+| `profiles/ts-next/eval-assertions.yaml.tmpl` | template | profile-specific llm-rubric assertions appended by eval init |
+| `profiles/node-nest/eval-assertions.yaml.tmpl` | template | same for NestJS |
+| `profiles/go-gin/eval-assertions.yaml.tmpl` | template | same for Go/Gin |
+| `profiles/python-fastapi/eval-assertions.yaml.tmpl` | template | same for FastAPI |
+| `tests/MANUAL-UAT.md` | doc | documents live-binary + MDM hardware manual steps |
 
 ### MODIFIED FILES
 
 | File | Change | Why |
 |------|--------|-----|
-| `cli/conjure` | add `cmd_emit_plugin`, `cmd_eval`, `cmd_workspace` + dispatch entries + usage() | 3 new subcommands |
-| `scripts/audit-setup.sh` | add schema-version check section + budget-linter section | areas 3 + 4 |
-| `scripts/publish-plugin.sh` | refactor jq transforms into lib/plugin-helpers.sh; source that lib | deduplicate with emit-plugin.sh |
-| `compliance/hipaa/apply.sh` | add --emit-policy flag path; source lib/policy-helpers.sh | area 2 |
-| `compliance/soc2/apply.sh` | same | area 2 |
-| `compliance/gdpr/apply.sh` | same | area 2 |
-| `compliance/pci/apply.sh` | same | area 2 |
+| `cli/conjure` | add `cmd_doctor`, `cmd_stats` + dispatch entries + usage() lines; add `_detect_profile()` helper; modify `cmd_init` to call it; modify `cmd_eval` to pass `--baseline`/`--compare` | 2 new subcommands + init UX + eval flags |
+| `scripts/eval.sh` | add `_detect_applied_profiles()`; modify `_build_promptfooconfig()` to append profile blocks; add `--baseline`/`--compare` to `cmd_eval_run()` | per-profile suites + regression baselines |
+| `tests/run.sh` | add empty-var guards after each `mktemp` that feeds `git -C`; add doctor + stats test blocks | harness hardening + new subcommand coverage |
+| `.github/workflows/ci.yml` (or new `smoke.yml`) | add `conjure doctor` CI step | live dep check in CI |
 
 ### UNCHANGED FILES (confirmed)
 
 | File | Reason |
 |------|--------|
-| `lib/mutate.sh` | API complete; invariant preserved by all new components |
-| `lib/snapshot.sh` | reused by workspace.sh without modification |
-| `lib/log.sh` | reused by workspace.sh without modification |
-| `lib/inventory.sh` | not involved in v0.7.0 features |
-| `lib/merge.sh` | not involved |
-| `lib/caps.sh` | not modified; budget linter in audit-setup.sh uses CLAUDE_MD_CAP directly |
-| `scripts/adopt.sh` | not modified; called by workspace.sh as a subprocess |
-| `scripts/check.sh` | not modified; available as workspace op |
-| `scripts/init-project.sh` | not modified; called by workspace.sh as subprocess |
+| `scripts/preflight.sh` | kept as silent sub-check; doctor.sh is a separate verbose surface |
+| `scripts/audit-setup.sh` | retire-list stays; no new sections needed in v0.8.0 |
+| `lib/mutate.sh` | API complete; invariant preserved; stats.sh and doctor.sh do not write |
+| `lib/snapshot.sh` | not involved in v0.8.0 features |
+| `lib/workspace.sh` | not involved |
+| `lib/prices.json` | reused read-only by stats.sh |
+| `lib/cc-schema.json` | reused read-only by doctor.sh |
+| `scripts/workspace.sh` | not involved |
+| `scripts/adopt.sh` | not involved |
 
 ---
 
 ## Data Flow: End-to-End for Each Area
 
-### Plugin Emission Flow
+### `conjure doctor` Flow
 
 ```
-USER: conjure emit-plugin [--strict] [target]
+USER: conjure doctor [target]
   │
   ▼
-cli/conjure cmd_emit_plugin → scripts/emit-plugin.sh $target
+cli/conjure cmd_doctor → scripts/doctor.sh $target
   │
-  ├─ read $target/.claude/skills/ → enumerate skills paths
-  ├─ read $target/.claude/agents/ → enumerate agent paths
-  ├─ read $target/.claude/hooks/  → enumerate hook files
-  ├─ read $target/.claude/settings.json → current hooks block
+  ├─ _detect_os() → OS classification
+  ├─ for each dep in [node git jq rg shellcheck]:
+  │    command -v + version flag → pass/fail + fixup hint per OS
+  ├─ .mjs probe:
+  │    for .claude/hooks/*.mjs in $target:
+  │      node --check $hook_file → syntax validate
+  │      (node --input-type=module --check is unavailable; use node -e "require('module')
+  │       .createRequire(import.meta.url)" or simply `node --check` for syntax-only)
+  ├─ CC version check:
+  │    claude --version → extract semver
+  │    compare vs minimum_conjure_cc_version from lib/cc-schema.json
+  ├─ Schema freshness:
+  │    read lib/cc-schema.json .updated → compare to today (>90 days = advisory)
   │
-  ├─ source lib/plugin-helpers.sh
-  ├─ plugin_update_plugin_json → writes $target/.claude-plugin/plugin.json
-  ├─ plugin_update_marketplace  → writes $target/.claude-plugin/marketplace.json
-  ├─ plugin_inject_extra_marketplace → writes extraKnownMarketplaces into settings.json
-  │   (all via mutate_write)
-  │
-  └─ mutate_summary; exit 0
+  └─ print summary table; exit 0 (all ok) / exit 2 (required missing)
 ```
 
-### Managed-Settings / Policy Emission Flow
+### `conjure stats` Flow
 
 ```
-USER: conjure init --overlay=hipaa [target]  OR  conjure refresh-overlay [target]
+USER: conjure stats [--json] [target]
   │
   ▼
-compliance/hipaa/apply.sh --emit-policy $target
+cli/conjure cmd_stats → scripts/stats.sh $target
   │
-  ├─ source lib/policy-helpers.sh
-  ├─ source lib/mutate.sh
-  │
-  ├─ (existing) append CLAUDE.md.fragment → CLAUDE.md
-  ├─ (existing) copy pre-commit-phi-scan.sh → .claude/hooks/
-  ├─ (existing) copy CONTROLS.md → docs/compliance/
-  │
-  ├─ (NEW) policy_emit_sandbox $target/.claude/settings.json compliance/hipaa/sandbox.json.tmpl
-  │     jq merge sandbox{} into settings.json → mutate_write
-  │
-  ├─ (NEW --mdm) policy_emit_managed_settings $output_dir compliance/hipaa/managed-settings.json.tmpl
-  │     jq render → mutate_write managed-settings.json
-  │
-  └─ (NEW --mdm) policy_emit_plist $output_dir compliance/hipaa/plist.tmpl
-        render → mutate_write managed-settings.d/10-hipaa.json + plist artifact
+  ├─ check jq available (required for JSONL processing)
+  ├─ LOG="$target/.claude/telemetry/skill-events.jsonl"
+  │    if absent: advise CONJURE_TELEMETRY=1; exit 0
+  ├─ Installed skills: find $target/.claude/skills -name SKILL.md → list of names
+  ├─ jq aggregate from full JSONL history:
+  │    per skill: total_fires, distinct_sessions, last_fired
+  │    jq reads skill-events.jsonl, groups by .skill field
+  ├─ 30-day filter: same cutoff as audit --retire-list (date -v-30d / date -d '30 days ago')
+  ├─ Cost estimate: per skill, read SKILL.md char count → /4 → tokens → * price_per_mtok
+  │    price from lib/prices.json (reused, no modification)
+  ├─ Dead-skill detection:
+  │    installed but never in JSONL at all → "never-fired"
+  │    installed, in JSONL, but zero fires in 30 days → "dormant"
+  │    ghost: in JSONL but not installed → advisory note only
+  ├─ Output:
+  │    human mode: ASCII table (skill, fires_total, fires_30d, sessions, last_fired, cost_est, status)
+  │    --json mode: JSON object to stdout
+  └─ exit 0 (always — read-only; no failure conditions)
 ```
 
-### Workspace Orchestration Flow (the hard path)
+### `eval init` with Per-Profile Blocks Flow
 
 ```
-USER: conjure workspace --file ./conjure-workspace.json [--dry-run]
+USER: conjure eval init [target]
   │
   ▼
-scripts/workspace.sh
+scripts/eval.sh cmd_eval_init $target
   │
-  ├─ Step 0: workspace_load → validate manifest (jq schema)
-  │    workspace_state_init → write .conjure-workspace-state.json
-  │
-  ├─ Step 1: preflight_all
-  │    for each repo:
-  │      bash $CONJURE_HOME/cli/conjure preflight $repo_path
-  │      record result → state update
-  │    any failure → exit 2 (no mutations yet)
-  │
-  ├─ Step 2: snapshot_all
-  │    for each repo:
-  │      snapshot_create $repo_path $workspace_root/.conjure-workspace-backups/$name/
-  │      workspace_state_update $name snapshot $snapshot_path
-  │    any failure → exit 2 (partial snapshots logged; warn user to check)
-  │
-  ├─ Step 3: execute_ops (sequential)
-  │    for each repo (in manifest order):
-  │      for each op in repo.conjure_ops:
-  │        DRY_RUN=$DRY_RUN bash $CONJURE_HOME/cli/conjure $op $repo_path
-  │        rc=$?
-  │        workspace_state_update $name op_applied $op
-  │        if rc == 2:
-  │          workspace_aggregate_rollback .conjure-workspace-state.json
-  │          exit 2
-  │
-  └─ Step 4: workspace_report → print table + write workspace-report.json
-       exit 0
-
-aggregate_rollback() called on Step 3 failure:
-  for each repo with status=applied in state file (newest-first for safety):
-    snapshot_rollback $recorded_snapshot_path $repo_path
-    workspace_state_update $name status rolled-back
-  print: "All applied repos rolled back."
-  exit 2
+  ├─ (existing) list installed skills → skill-used assertions
+  ├─ (existing) extract CLAUDE.md rule lines → llm-rubric assertions
+  ├─ (NEW) _detect_applied_profiles $target:
+  │    grep -oE 'profile:[a-z0-9_-]+' $target/CLAUDE.md → profile name list
+  │    for each profile_name:
+  │      if $CONJURE_HOME/profiles/$profile_name/eval-assertions.yaml.tmpl exists:
+  │        cat template → append to promptfooconfig.yaml tempfile
+  └─ mutate_write_file .conjure/eval/promptfooconfig.yaml $tmpfile
 ```
 
-### Schema-Aware Audit Flow
+### `cmd_init` with Profile Detection Flow
 
 ```
-USER: conjure audit [target]
+USER: conjure init [new|existing] [target]  (no --profile flag)
   │
   ▼
-scripts/audit-setup.sh $target
+cli/conjure cmd_init
   │
-  ├─ (existing audit checks: size caps, frontmatter, hooks JSON, etc.)
-  │
-  └─ (NEW) schema-version-aware section:
-       CC_VERSION=$(claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-       if [ -z "$CC_VERSION" ]: warn "CC not found — schema check skipped"
-       else:
-         SCHEMA=$(jq . $CONJURE_HOME/lib/cc-schema.json)
-         known_events=$(echo $SCHEMA | jq -r '.known_hook_events[]')
-         for event in $(jq -r '.hooks | keys[]' .claude/settings.json):
-           if not in known_events: warn "Unknown hook event: $event (CC $CC_VERSION)"
-         for key in $(jq -r 'keys[]' .claude/settings.json):
-           if not in known_settings_keys: warn "Unknown settings key: $key"
-         for feature, min_ver in version_gates:
-           if feature present in settings.json AND CC_VERSION < min_ver:
-             warn "Feature $feature requires CC $min_ver (installed: $CC_VERSION)"
-         check schema freshness: if updated > 90 days ago: warn "cc-schema.json stale"
+  ├─ cmd_preflight || return 1
+  ├─ bash init-project.sh $mode $target
+  ├─ (NEW) if --profile absent AND tty:
+  │    _detect_profile $target → detected profile name or ""
+  │    if non-empty: prompt user via /dev/tty [Y/n]
+  │    if confirmed: profile="$detected"
+  │    if non-tty: log detected profile but do not apply (no auto-mutate)
+  ├─ if profile non-empty:
+  │    bash $CONJURE_HOME/profiles/$profile/apply.sh $target  (existing path)
+  └─ exit 0
 ```
 
 ---
 
 ## Dependency-Ordered Build Sequence
 
-Dependencies between the 5 areas determine build order. The key constraint: workspace
-orchestration calls `conjure init`, `conjure adopt`, `conjure audit`, `conjure check`
-as subprocesses — so those commands must be stable before workspace.sh is written.
-Plugin helpers must be extracted before emit-plugin.sh is written.
+### Step 1 — `scripts/doctor.sh` + `cmd_doctor` in `cli/conjure`
 
-### Step 1 — `lib/plugin-helpers.sh` + refactor `publish-plugin.sh`
+**Why first:** Self-contained, no new lib deps, no code deps on any other v0.8.0 work.
+Delivers visible user value immediately. Validates that the dep-table pattern works before
+building `stats.sh` which has more JSONL complexity.
 
-**Why first:** Shared jq transforms needed by both `emit-plugin.sh` (new) and
-`publish-plugin.sh` (existing, refactored). Extracting the lib first gives a stable
-interface before emit-plugin.sh is written. This is a small, low-risk refactor.
-
-Requires: `lib/mutate.sh` (shipped)
-Unblocks: Step 2 (emit-plugin.sh)
+Requires: `lib/cc-schema.json` (shipped v0.7.0 — read-only), `scripts/preflight.sh` (reference only)
+Unblocks: Step 3 (CI smoke step uses `conjure doctor`)
 
 ---
 
-### Step 2 — `scripts/emit-plugin.sh` + `cmd_emit_plugin` in `cli/conjure`
+### Step 2 — `scripts/stats.sh` + `cmd_stats` in `cli/conjure`
 
-**Why second:** Plugin emission is the foundation for the marketplace registration that
-workspace orchestration may rely on (repos emitting their own plugins). Plugin emission
-is also the simplest new command — good to ship and stabilize early.
+**Why second:** Purely read-only; no new lib deps; `lib/prices.json` already ships. The JSONL
+schema is confirmed from the source read of `skill-telemetry.mjs`. Build it before eval expansion
+because stats gives the operator visibility that motivates which profiles to add evals for.
 
-Requires: Step 1 (lib/plugin-helpers.sh)
-Unblocks: Step 7 (workspace can call emit-plugin as an op)
-
----
-
-### Step 3 — `lib/cc-schema.json` + schema-version section in `audit-setup.sh`
-
-**Why third:** Audit changes are targeted and isolated (additive section in
-audit-setup.sh). Schema table is a data file with no code dependencies. Building this
-before policy-helpers keeps the compliance area modular.
-
-Requires: `scripts/audit-setup.sh` (shipped); `jq` (preflight dep)
-Unblocks: Step 5 (compliance policy may include schema-version check)
+Requires: `lib/prices.json` (shipped); telemetry JSONL exists at runtime (opt-in, not a build dep)
+Unblocks: Step 4 (eval expansion uses dead-skill data to inform which profiles need assertions)
 
 ---
 
-### Step 4 — `lib/policy-helpers.sh` + compliance overlay extensions
+### Step 3 — Test-harness hardening + CI smoke step
 
-**Why fourth:** Policy helpers depend only on `lib/mutate.sh` (shipped). The 4 overlay
-`apply.sh` modifications are parallel within this step (no inter-overlay dependencies).
-Build hipaa first (most complex: PHI rules) to validate the pattern, then soc2/gdpr/pci.
+**Why third:** The empty-var `git -C` guard is a safety fix. It should land before new tests
+for `doctor` and `stats` are written, so the new tests inherit the safe pattern from the start.
+The CI smoke step for `conjure doctor` (Step 1) lands here.
 
-Requires: `lib/mutate.sh` (shipped), compliance templates (sandbox.json.tmpl etc.)
-Unblocks: Step 7 (workspace can call --emit-policy as a workspace op)
-
----
-
-### Step 5 — `templates/evals/` + `scripts/eval.sh` + `cmd_eval` + budget linter
-
-**Why fifth:** eval.sh has no dependencies on the new libs — only on `npx`. The budget
-linter in audit-setup.sh is additive. These are independent of workspace and plugin.
-Placing eval here (before workspace) allows workspace to include `eval` as a supported op.
-
-Requires: `scripts/audit-setup.sh` (for budget linter section); `npx` (runtime)
-Unblocks: Step 6 (workspace can run eval as an op); CI integration
+Requires: Step 1 (`conjure doctor` must exist before it can be exercised in CI)
+Unblocks: Step 5 (init polish tests use the hardened harness)
 
 ---
 
-### Step 6 — `lib/workspace.sh` + `scripts/workspace.sh` + `cmd_workspace` in `cli/conjure`
+### Step 4 — Eval suite expansion (per-profile blocks + baseline/compare)
 
-**Why last among new features:** workspace.sh calls every other conjure command as a
-subprocess. All per-repo conjure ops must be stable before the workspace layer can be
-written. The aggregate rollback design (the hardest part) requires `lib/snapshot.sh`
-(shipped v0.6.0 — confirmed stable with 467 passing tests) and the durable state file.
+**Why fourth:** Depends on the profile name list (existing), `eval.sh` (existing), and profile
+template files (new). The `_detect_applied_profiles()` function is simple; the template files
+for 4 profiles are the main deliverable. Build this before init polish so that a newly
+profile-detected init immediately has corresponding eval assertions available.
 
-Requires: Steps 1–5 stable; `lib/snapshot.sh` (shipped); `lib/log.sh` (shipped)
-Unblocks: end-to-end workspace user story
+Requires: `scripts/eval.sh` (shipped); `profiles/*/apply.sh` marker convention (confirmed existing)
+Unblocks: Step 5 (init UX polish — `eval init` after a profile-detected init is the end-to-end flow)
 
 ---
 
-### Step 7 — Integration tests for all 5 areas
+### Step 5 — Init UX polish (`_detect_profile()` + TTY-gated prompt)
 
-Per-area test fixtures added to `tests/run.sh` (graceful-red blocks before each feature).
-Workspace fixture: `tests/fixtures/_workspace-trio/` (3 small repos to orchestrate).
-Eval fixture: mock promptfoo invocation (stub npx script for CI speed).
+**Why fifth:** Depends on profiles existing (confirmed) and on the pattern being stable. Place
+after eval expansion so that the test for "init detects ts-next, user confirms, then eval init
+generates ts-next assertions" can be written as a single integrated test case.
 
-Requires: Steps 1–6
-Unblocks: CI coverage of all v0.7.0 capabilities
+Requires: profile directories (shipped); TTY guard pattern (established in `resolve.sh`)
+Unblocks: Step 6 (documentation refresh depends on knowing the final UX surface)
+
+---
+
+### Step 6 — README + docs refresh
+
+**Why last:** Pure content. Depends on all v0.8.0 features being in a stable state so the
+documentation accurately reflects the shipped surface.
+
+Requires: Steps 1–5 stable
+Unblocks: release
 
 ---
 
@@ -871,13 +739,12 @@ Unblocks: CI coverage of all v0.7.0 capabilities
 
 | Step | Work item | New / Modified files | Key dependency | Unblocks |
 |------|-----------|----------------------|----------------|----------|
-| 1 | lib/plugin-helpers.sh + publish-plugin.sh refactor | `lib/plugin-helpers.sh` (N), `scripts/publish-plugin.sh` (M) | lib/mutate.sh (shipped) | Step 2 |
-| 2 | emit-plugin.sh + cmd_emit_plugin | `scripts/emit-plugin.sh` (N), `cli/conjure` (M) | Step 1 | Step 6 workspace ops |
-| 3 | lib/cc-schema.json + audit schema-version section | `lib/cc-schema.json` (N), `scripts/audit-setup.sh` (M) | audit-setup.sh (shipped) | Step 5 audit budget |
-| 4 | lib/policy-helpers.sh + 4 overlay extensions + templates | `lib/policy-helpers.sh` (N), `compliance/*/apply.sh` (M×4), `compliance/*/sandbox.json.tmpl` (N×4), `compliance/*/managed-settings.json.tmpl` (N×4) | lib/mutate.sh (shipped) | Step 6 workspace ops |
-| 5 | templates/evals/ + eval.sh + cmd_eval + budget linter | `templates/evals/` (N), `scripts/eval.sh` (N), `cli/conjure` (M), `scripts/audit-setup.sh` (M) | audit-setup.sh (shipped), npx | Step 6 workspace ops |
-| 6 | lib/workspace.sh + workspace.sh + cmd_workspace | `lib/workspace.sh` (N), `scripts/workspace.sh` (N), `cli/conjure` (M) | Steps 1–5; lib/snapshot.sh (shipped) | Full workspace UX |
-| 7 | Integration tests for all areas | `tests/run.sh` (M), `tests/fixtures/_workspace-trio/` (N), eval stubs (N) | Steps 1–6 | CI coverage |
+| 1 | scripts/doctor.sh + cmd_doctor | `scripts/doctor.sh` (N), `cli/conjure` (M) | lib/cc-schema.json (shipped) | Step 3 CI smoke |
+| 2 | scripts/stats.sh + cmd_stats | `scripts/stats.sh` (N), `cli/conjure` (M) | lib/prices.json (shipped); telemetry JSONL (runtime) | Step 4 eval visibility |
+| 3 | Test harness hardening + CI smoke | `tests/run.sh` (M), CI workflow (M or N) | Step 1 doctor | Step 5 hardened tests |
+| 4 | Eval expansion (per-profile + baseline) | `scripts/eval.sh` (M), `cli/conjure` (M), `profiles/*/eval-assertions.yaml.tmpl` (N×4) | eval.sh (shipped); profile markers (confirmed) | Step 5 end-to-end flow |
+| 5 | Init UX polish (_detect_profile) | `cli/conjure` (M) | profiles/ (shipped); TTY guard pattern | Step 6 docs |
+| 6 | README + docs refresh | `README.md`, `MIGRATION-GUIDE.md`, `FAILURE-MODES.md` (M), `tests/MANUAL-UAT.md` (N) | Steps 1–5 stable | Release |
 
 N = New file, M = Modified file
 
@@ -885,127 +752,115 @@ N = New file, M = Modified file
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Duplicating template content into the plugin dir
+### Anti-Pattern 1: Adding verbose doctor output to `preflight.sh`
 
-**What people do:** `cp -r templates/skills/ .claude-plugin/skills/` — copies skill templates
-into the plugin directory, creating a second source of truth.
-**Why it's wrong:** When skill templates are updated in Conjure, the plugin dir copy diverges.
-The `conjure update` 3-way merge only handles the target repo's `.claude/skills/`, not
-the plugin copy. Size drift becomes unmaintainable.
-**Do this instead:** `plugin.json` references skill paths as relative paths pointing to
-the existing `.claude/skills/` in the harness. The plugin dir is a view, not a copy.
-`emit-plugin.sh` writes path references only.
-
----
-
-### Anti-Pattern 2: Fetching the CC schema at runtime
-
-**What people do:** `curl https://json.schemastore.org/claude-code-settings.json` in
-`audit-setup.sh` to get the current schema.
-**Why it's wrong:** Violates the no-egress-in-CI constraint; fails in air-gapped envs;
-introduces non-determinism (schema can change between runs); `curl | parse` is a
-foot-gun pattern.
-**Do this instead:** Bundle `lib/cc-schema.json` in the kit. Update it at Conjure release
-time when schema changes are detected. Emit a staleness warning (>90 days) to prompt
-users to run `conjure update`.
+**What people do:** Modify `preflight.sh` to emit richer output when called as `conjure doctor`.
+**Why it's wrong:** `preflight.sh` is called as a silent sub-check by `cmd_init`, `cmd_audit`, and
+the workspace pipeline. These callers redirect or suppress its output. Adding verbose behavior
+breaks the sub-check contract and forces all callers to adapt.
+**Do this instead:** Keep `preflight.sh` as the silent sub-check. `scripts/doctor.sh` is the
+separate verbose surface. Doctor can source `preflight.sh` functions if needed, or inline
+equivalent logic.
 
 ---
 
-### Anti-Pattern 3: Parallel workspace execution without aggregate rollback support
+### Anti-Pattern 2: Having `stats.sh` source `lib/mutate.sh`
 
-**What people do:** Run workspace ops in parallel (background subshells per repo) for speed.
-**Why it's wrong:** Parallel execution means multiple repos are "in-flight" simultaneously.
-If repo 4 fails while repos 2, 3 are still running, you cannot cleanly roll back all of
-them — some may be partially applied. The aggregate rollback design (snapshot-all-then-execute)
-only works sequentially: repo N's snapshot is taken before repo N's ops begin.
-**Do this instead:** Default to `parallel: false`. Support `parallel: true` only with
-`rollback_policy: best-effort` (no rollback, just report failures). Never offer
-all-or-nothing rollback with parallel execution — the invariant cannot be maintained.
-
----
-
-### Anti-Pattern 4: Emitting managed-settings to the repo's .claude/settings.json and calling it MDM
-
-**What people do:** Write the sandbox{} block and managed-settings.json into `.claude/settings.json`
-and tell teams "this is your MDM policy."
-**Why it's wrong:** `.claude/settings.json` is a project-level file overridable by users.
-MDM requires system-level paths (`/Library/Application Support/ClaudeCode/managed-settings.json`)
-to be enforceable. Writing to project-level only creates a false sense of enforcement.
-**Do this instead:** `--emit-policy` writes sandbox{} to `.claude/settings.json` (project
-enforcement). `--mdm` writes to a separate output dir for admin deployment. The audit warns
-when `sandbox{}` is absent from project settings even though an overlay was applied.
+**What people do:** Source `lib/mutate.sh` at the top of every script for consistency.
+**Why it's wrong:** `mutate.sh` sets `DRY_RUN` guards and tracks write state. Sourcing it in a
+read-only script adds needless complexity, and any accidental call to a `mutate_*` function
+would trigger the dry-run gate rather than failing with "command not found."
+**Do this instead:** `stats.sh` is explicitly read-only (no file writes). Do not source
+`lib/mutate.sh`. If the script ever needs a write operation, that is a design error to be
+questioned, not a reason to add `mutate.sh`.
 
 ---
 
-### Anti-Pattern 5: Workspace state file only in memory (no crash durability)
+### Anti-Pattern 3: Auto-applying a detected profile without TTY confirmation
 
-**What people do:** Track per-repo snapshot paths in shell variables during workspace execution.
-**Why it's wrong:** If the process is killed mid-run (SIGKILL, OOM, network loss on remote),
-the snapshot paths are lost. On `--resume`, no rollback is possible for applied repos.
-**Do this instead:** Write `.conjure-workspace-state.json` before each repo operation and
-update it after. Every snapshot path is persisted to disk. `--rollback` reads this file
-and can restore any repo that has a recorded snapshot path, even after a crash.
+**What people do:** When `_detect_profile()` returns a match in `cmd_init`, auto-apply the
+profile silently (no prompt).
+**Why it's wrong:** A detected `go.mod` might be a Go project that is NOT using Gin. The
+profile appends CLAUDE.md content and runs `apply.sh` — these are mutations the user must
+approve. Silent auto-apply violates the backup-before-mutate + human-gated mutation invariant.
+**Do this instead:** TTY-gate the prompt (`[ -t 0 ]` check). Non-TTY → log the detection but
+do not apply. TTY → prompt once, require explicit confirmation.
+
+---
+
+### Anti-Pattern 4: Embedding stats aggregation logic inside `audit-setup.sh`
+
+**What people do:** Extend `audit-setup.sh` with a new `--stats` flag that exposes full telemetry
+reporting alongside the health check.
+**Why it's wrong:** `audit-setup.sh` is already 695 lines. It has a clear single concern:
+health-check the `.claude/` setup. Stats is a separate concern (telemetry reporting). Mixing
+them creates a god-script that is harder to test and harder to maintain.
+**Do this instead:** `audit --retire-list` covers the dead-skill advisory in the audit context.
+`conjure stats` is the dedicated telemetry reporting surface. Both read the same JSONL; they
+serve different consumers.
+
+---
+
+### Anti-Pattern 5: `doctor.sh` exiting 1 (instead of 2) on required dep failure
+
+**What people do:** Use `exit 1` for "required dep missing" since that is what `preflight.sh`
+currently uses (confirmed: line 109 `exit 1` in `preflight.sh`).
+**Why it's wrong:** `preflight.sh` exits 1 (non-zero, non-2) because it predates the project-wide
+`exit 2` convention. The convention is: all hooks/CLI/scripts exit 2 on error, never exit 1.
+`doctor.sh` is new code — it must follow the v0.8.0 convention (exit 2) even though
+`preflight.sh` uses exit 1. Note: `preflight.sh` itself should be audited and its exit 1 changed
+to exit 2 as a separate debt item.
+**Do this instead:** `doctor.sh` exits 2 on required dep missing. Exit 0 on all-ok.
 
 ---
 
 ## Integration Points
 
-### lib/snapshot.sh → workspace.sh (direct reuse, zero modification)
+### `lib/cc-schema.json` → `doctor.sh` (read-only reuse)
 
-`workspace.sh` sources `lib/snapshot.sh` and calls `snapshot_create` / `snapshot_rollback`
-with workspace-scoped backup root. The snapshot functions are parameterized (backup_root
-is a caller argument), so they work identically for workspace backups as for adopt backups.
-No changes to `lib/snapshot.sh` required.
+`doctor.sh` reads `lib/cc-schema.json` to get `minimum_conjure_cc_version` and `updated` fields.
+No modification to the schema file needed. Same read pattern as `audit-setup.sh` (jq one-liner).
 
-### scripts/publish-plugin.sh → lib/plugin-helpers.sh (refactor, not replacement)
+### `lib/prices.json` → `stats.sh` (read-only reuse)
 
-`publish-plugin.sh` is refactored to source `lib/plugin-helpers.sh` for the jq transforms.
-All existing behavior is preserved; the refactor only extracts 2-3 jq expressions into
-named functions. This is a mechanical refactor with no behavior change, testable by
-running the existing `publish-plugin.sh` tests before and after.
+`stats.sh` reads `lib/prices.json` for the default model and `input_per_mtok`. Same read pattern
+as `audit-setup.sh` cost section (lines 564–628). No modification to `prices.json` needed.
 
-### compliance/apply.sh → lib/policy-helpers.sh (additive sourcing)
+### `skill-events.jsonl` → `stats.sh` (new primary consumer)
 
-Each overlay's `apply.sh` gains `source "$CONJURE_HOME/lib/policy-helpers.sh"` and a
-`--emit-policy` code path. The existing code path (without `--emit-policy`) runs exactly
-as before. No behavior change for existing users.
+The existing `audit --retire-list` section in `audit-setup.sh` is a secondary reader of the
+JSONL (read-only, 30-day window, simple fire count). `stats.sh` becomes the primary, dedicated
+reader with full history aggregation. Both can coexist since the JSONL is append-only and
+neither writer holds an exclusive lock.
 
-### workspace.sh → cli/conjure (subprocess call-back)
+### `profiles/*/eval-assertions.yaml.tmpl` → `eval.sh` `_build_promptfooconfig()`
 
-`workspace.sh` calls other conjure subcommands as subprocesses:
-```bash
-bash "$CONJURE_HOME/cli/conjure" $op [flags] "$repo_path"
-```
-This is the same pattern as `adopt.sh` calling `audit-setup.sh`. The CLI is the
-stable interface; workspace never sources scripts directly (to avoid environment
-variable leakage between repos).
+The template files are optional (`[ -f ... ]` guard before reading). Profiles without a
+template file silently skip the per-profile block. This means the feature degrades gracefully:
+a user on a profile without eval-assertions.yaml.tmpl gets the same eval init output as v0.7.0.
 
-### eval.sh → npx promptfoo (runtime, no install dep)
+### `_detect_profile()` in `cli/conjure` → `profiles/*/apply.sh` (existing path)
 
-`eval.sh` uses `npx --yes promptfoo@latest eval`. The `--yes` flag installs promptfoo
-on first use (npx cache), requiring no pre-install step. This is consistent with the
-existing `npx --yes ctx7@latest` pattern in the development tooling.
+`_detect_profile()` just returns a profile name string. The actual application uses the
+already-tested `bash "$CONJURE_HOME/profiles/$profile/apply.sh" "$target"` path (line 95–96
+in `cmd_init`). No changes to any profile's `apply.sh` needed.
 
 ---
 
 ## Sources
 
-- `cli/conjure` (full content read this session) — HIGH confidence
-- `lib/mutate.sh` (full content read this session) — HIGH confidence
-- `lib/snapshot.sh` (full content read this session) — HIGH confidence
-- `lib/caps.sh` (full content read this session) — HIGH confidence
-- `scripts/audit-setup.sh` (full content read this session) — HIGH confidence
-- `scripts/publish-plugin.sh` (full content read this session) — HIGH confidence
-- `compliance/hipaa/apply.sh` (read this session) — HIGH confidence
-- `.claude-plugin/marketplace.json` + `plugin.json` (read this session) — HIGH confidence
-- `.planning/PROJECT.md` v0.7.0 milestone context (read this session) — HIGH confidence
-- `.planning/research/ARCHITECTURE.md` v0.6.0 (read this session; carried forward) — HIGH confidence
-- Official CC docs: settings (sandbox, managed-settings, hook events, schema keys) — HIGH confidence ([source](https://code.claude.com/docs/en/settings))
-- Official CC docs: plugin marketplaces (marketplace.json schema, extraKnownMarketplaces, strictKnownMarketplaces) — HIGH confidence ([source](https://code.claude.com/docs/en/plugin-marketplaces))
-- Official CC docs: hooks guide (hook events list including ConfigChange, Notification) — HIGH confidence ([source](https://code.claude.com/docs/en/hooks-guide))
-- promptfoo CI/CD integration docs (npx eval, GitHub Action, YAML spec format) — MEDIUM confidence ([source](https://www.promptfoo.dev/docs/integrations/ci-cd/))
-- CC settings gist (April 2026, v2.1.104 reference) — MEDIUM confidence ([source](https://gist.github.com/mculp/c082bd1e5a439410158974de90c89db7))
+- `cli/conjure` (full content read this session; line counts confirmed) — HIGH confidence
+- `scripts/preflight.sh` (full content read this session) — HIGH confidence
+- `scripts/audit-setup.sh` (lines 620–695 + 503–556 + 246–310 read this session) — HIGH confidence
+- `scripts/eval.sh` (full content read this session) — HIGH confidence
+- `templates/hooks-nodejs/skill-telemetry.mjs` (full content read this session) — HIGH confidence
+- `lib/workspace.sh` (lines 1–80 read; atomic state pattern confirmed) — HIGH confidence
+- `scripts/init-project.sh` (full content read this session) — HIGH confidence
+- `profiles/ts-next/apply.sh` (read this session; profile marker convention confirmed) — HIGH confidence
+- `.planning/PROJECT.md` v0.8.0 milestone context (read this session) — HIGH confidence
+- `.planning/research/ARCHITECTURE.md` v0.7.0 (carried forward, full content read) — HIGH confidence
+- `tests/run.sh` (grep patterns read; line counts confirmed; ~6712 lines / 579 assertions) — HIGH confidence
 
 ---
-*Architecture research for: Conjure v0.7.0 Plugin-native + Policy-grade integration*
-*Researched: 2026-06-03*
+*Architecture research for: Conjure v0.8.0 Operability + DX integration*
+*Researched: 2026-06-04*

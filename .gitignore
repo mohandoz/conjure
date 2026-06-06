@@ -22,3 +22,4 @@ build/
 .claude/settings.json
 .claude/telemetry/
 .claude/worktrees/
+.local/

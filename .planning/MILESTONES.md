@@ -1,5 +1,22 @@
 # Milestones
 
+## v0.7.0 Plugin-native + Policy-grade (Shipped: 2026-06-04)
+
+**Phases completed:** 6 phases, 24 plans, 22 tasks
+
+**Key accomplishments:**
+
+- conjure audit --json emits a stable {schema_version,status,checks,summary} JSON contract to stdout via JSONL tempfile accumulator and human() stderr routing — Phase 29 workspace aggregation ready
+- One-liner:
+- Per-repo check aggregation (WS-03) and audit aggregation (WS-04) using fail-tolerant exit semantics, argv-flag subprocess invocation, and a single script-level EXIT trap for TMPJSON cleanup.
+- 3-repo _workspace-trio fixture with tags and adoptable .claude/ content + SIGKILL/WS-05/06/07 graceful-red block in tests/run.sh (8 failing, 566 passing)
+- SIGKILL-durable atomic state primitives (workspace_state_write/read/validate) appended to lib/workspace.sh using the adopt.sh state_record pattern
+- ws_do_update appended to scripts/workspace.sh: serial per-repo conjure update with CR-02 traversal re-check, stop-on-first-error default, --continue-on-error, conflict sidecar surfacing, and aggregate report
+- Two-phase snapshot-all-before-apply saga: PHASE A snapshots ALL repos before PHASE B applies any, with atomic state writes before+after each op using snapshotting/snapshotted sentinel pattern
+- Per-repo independent rollback with created-files deletion, sha256 zero-diff verify loop, D-03 .snapshot-meta.json cleanup, and CR-02 traversal re-check — SIGKILL saga proof passes (PASS: 574 FAIL: 0)
+
+---
+
 ## v0.6.0 Safe Brownfield Adoption (Shipped: 2026-05-29)
 
 **Phases completed:** 4 phases, 12 plans, 25 tasks

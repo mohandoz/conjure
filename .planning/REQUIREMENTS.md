@@ -1,149 +1,134 @@
-# Requirements: Conjure — v0.7.0 Plugin-native + Policy-grade
+# Requirements: Conjure v0.8.0 — Operability + DX
 
-**Defined:** 2026-06-03
+**Defined:** 2026-06-04
 **Core Value:** A developer can turn any repo into a production-grade, eval-backed Claude Code harness with one trustworthy command — and keep it healthy over time.
 
-> **Cross-cutting invariant (from PITFALLS.md — the v0.6.1 lesson):** every artifact
-> Conjure *emits* (plugin/marketplace, sandbox/managed-settings, MDM, eval config,
-> schema table) MUST ship with a testable verification command. An emitted config that
-> silently does nothing is the milestone's primary failure class. Each `*-emit`/`publish`
-> requirement is paired with an `audit`/`--validate` check that proves it is live.
+## v0.8.0 Requirements
 
-## v1 Requirements
+Requirements for this milestone. Each maps to roadmap phases.
 
-Build order (research consensus): **A plugin → B policy → C eval → D schema-audit → E workspace (last)**.
-`conjure audit --json` (SCHM-05) ships early — it unblocks EVAL coverage + WS aggregation.
+### Deferred Debt + Test Harness (DEBT)
 
-### Plugin + Marketplace Emission (PLUG)
+- [ ] **DEBT-03**: Test sandboxes guard `git -C "$VAR"` with a non-empty check after every `mktemp` (closes proven sandbox-escape vector)
+- [ ] **DEBT-04**: `preflight.sh` exits 2 (never 1), with caller audit confirming no `$? -eq 1` equality checks break
+- [ ] **DEBT-05**: `tests/run.sh` supports a `skip()` counter — PASS/FAIL/SKIP reporting for gated tests
+- [ ] **DEBT-06**: SCHM-STALE swap verified kill-safe; atomic `jq > tmp && mv` applied where a write path exists, documented otherwise
 
-- [x] **PLUG-01**: `conjure publish-plugin` emits `.claude-plugin/plugin.json` from the scaffolded harness (correct `skills`/`agents`/`hooks`/`mcpServers` paths; `version` from `.conjure-version`)
-- [x] **PLUG-02**: `conjure publish-plugin --marketplace` generates `.claude-plugin/marketplace.json` (kebab-case `name`, `owner`, `plugins[]` with `source`); reserved-name guard
-- [x] **PLUG-03**: wires `extraKnownMarketplaces` (object form) + `enabledPlugins` into `.claude/settings.json` via idempotent `mutate_write` merge
-- [x] **PLUG-04**: `conjure publish-plugin --validate` runs `claude plugin validate` + JSON-schema check at emit time (no-silent-no-op gate); refuses on invalid manifest
-- [x] **PLUG-05**: version fallback — when `version` absent in `plugin.json`/marketplace entry, emit current git SHA as the version
+### Live-System UAT (UAT)
 
-### Policy: Sandbox + Managed-Settings / MDM (POL)
+- [ ] **UAT-01**: User can run a gated live `claude`-binary smoke test (`CONJURE_LIVE_TEST=1` + `command -v claude`); skipped cleanly otherwise
+- [ ] **UAT-02**: User can run a gated live promptfoo eval (requires `ANTHROPIC_API_KEY`); skipped cleanly otherwise
+- [ ] **UAT-03**: `tests/MANUAL-UAT.md` documents manual-only verification steps (MDM hardware, managed-settings deploy) with checklists
 
-- [x] **POL-01**: each compliance overlay emits a regime-specific `sandbox{}` block (`denyRead`/`denyWrite`/`network.allowedDomains`) merged into `.claude/settings.json` via `jq` + `mutate_write`
-- [x] **POL-02**: every `sandbox.filesystem.denyRead` path is mirrored into `permissions.deny` as `Read(<path>)` (closes the Read-tool enforcement gap #32226)
-- [x] **POL-03**: each overlay emits `managed-settings.json` with `disableBypassPermissionsMode:"disable"` (string, not boolean), `allowManagedPermissionRulesOnly`, `forceLoginOrgUUID` placeholder, and the sandbox block
-- [x] **POL-04**: MDM artifact generation — macOS plist (`com.anthropic.claudecode`) + Windows PowerShell/registry (`Set-ClaudeCodePolicy.ps1` → `HKLM\SOFTWARE\Policies\ClaudeCode`) written to a caller-specified output dir (never auto-placed at system paths)
-- [x] **POL-05**: `conjure audit` flags (a) overlay active but missing/`enabled:false` sandbox, (b) `denyRead` path with no mirrored `Read(...)` deny, (c) `disableBypassPermissionsMode` wrong type
+### conjure doctor (DOCT)
 
-### Eval: promptfoo + Context-Budget Linter (EVAL)
+- [ ] **DOCT-01**: User can run `conjure doctor` for a dependency/version table with OS-detected install hints
+- [ ] **DOCT-02**: Doctor probes Node `.mjs` ESM execution (mirrored probe, mktemp-based)
+- [ ] **DOCT-03**: Doctor gates Claude Code version against minimum (≥2.1.117) and the `.conjure-version` pin
+- [ ] **DOCT-04**: User can get machine-readable diagnostics via `conjure doctor --json`
+- [ ] **DOCT-05**: Doctor validates installed harness structure (hooks wired, skills present, settings sane)
+- [ ] **DOCT-06**: User can auto-remediate safe findings via `conjure doctor --fix` (all writes through `lib/mutate.sh`, backup-before-mutate)
 
-- [x] **EVAL-01**: `conjure eval init` scaffolds `.conjure/eval/promptfooconfig.yaml` — one `skill-used` assertion per installed skill + `llm-rubric` per CLAUDE.md rule line
-- [x] **EVAL-02**: `conjure eval run` shells out to pinned `npx --yes promptfoo@<pinned>` (preflight: Node ≥20.20), passes through exit code; never bundled, never invoked from `audit`/`check`
-- [x] **EVAL-03**: `conjure eval --emit-workflow` generates a `pull_request` PR-gate workflow (`promptfoo/promptfoo-action`, `fail-on-threshold`, path-triggered on `.claude/**`,`CLAUDE.md`)
-- [x] **EVAL-04**: `conjure audit --budget` — static context linter (chars/4 on CLAUDE.md + always-loaded skills; flag over threshold; list top contributors; `--porcelain`)
-- [x] **EVAL-05**: `conjure audit` reports installed skills with no `skill-used` coverage in the eval config
+### conjure stats (STAT)
 
-### Schema-Version-Aware Audit / Check (SCHM)
+- [ ] **STAT-01**: User can see per-skill fire counts from telemetry JSONL via `conjure stats`
+- [ ] **STAT-02**: User can see dead skills (installed but never fired)
+- [ ] **STAT-03**: User can see cost estimates (chars/4 heuristic × `lib/prices.json`)
+- [ ] **STAT-04**: User can filter by `--window <days>` and emit `--json`
+- [ ] **STAT-05**: User can see a per-session summary (session count, skills per session)
+- [ ] **STAT-06**: User can export stats via `--export-csv`
+- [ ] **STAT-07**: All JSONL reads use a per-line `try fromjson` guard; `audit --retire-list` migrated to the same pattern
 
-- [x] **SCHM-01**: `conjure audit` validates SKILL.md frontmatter against the current documented field set (incl. `disallowed-tools` as array/space-string); Conjure-maintained schema (not the stale VS Code one)
-- [x] **SCHM-02**: `conjure audit` flags `disableBypassPermissionsMode` set to boolean instead of string `"disable"`
-- [x] **SCHM-03**: `conjure check` flags unknown/renamed hook event names against a bundled event table (e.g. `SessionStop` → `SessionEnd`)
-- [x] **SCHM-04**: `conjure check --schema` reports the CC version each settings key was introduced in, vs the pinned `.conjure-version`, using a **bundled** `lib/cc-schema.json` (no runtime fetch — zero-egress)
-- [x] **SCHM-05**: `conjure audit --json` machine-readable output (consumed by EVAL coverage + WS aggregation)
+### Eval Expansion (EVAL — continues v0.7.0 numbering)
 
-### Cross-Repo / Workspace Orchestration (WS)
+- [ ] **EVAL-06**: User gets per-profile eval assertion templates for all 9 profiles, appended when profile markers are detected
+- [ ] **EVAL-07**: User can snapshot a baseline and compare regressions (`eval snapshot` / `eval compare`)
+- [ ] **EVAL-08**: Emitted eval workflow guards fork PRs and caps cost (`repeat: 1` for structural assertions)
+- [ ] **EVAL-09**: User can assert tool trajectory from `allowed-tools` frontmatter via `metadata.skillCalls`
 
-- [x] **WS-01**: `.conjure-workspace.json` manifest (schema + validation + parent-dir discovery, same pattern as `.conjure-version`)
-- [x] **WS-02**: `conjure workspace init` discovers sibling repos containing `.claude/` (TTY prompt; non-TTY requires `--yes`); writes manifest via `mutate_write`
-- [x] **WS-03**: `conjure workspace check` runs `conjure check --porcelain` per repo → aggregated per-repo status table
-- [x] **WS-04**: `conjure workspace audit` runs `conjure audit --json` per repo → aggregated pass/fail + global summary
-- [x] **WS-05**: `conjure workspace update` runs `conjure update` per repo serially, reports per-repo merge/conflict status, `--continue-on-error` (default stop-on-first-error)
-- [x] **WS-06**: `conjure workspace adopt` across repos (optional tag filter), serial, **all snapshots taken before any apply** (saga); per-repo `.conjure-workspace-state.json` crash durability; stop-on-fail
-- [x] **WS-07**: `conjure workspace adopt --rollback` rolls back each repo independently from its pre-run snapshot; SIGKILL-mid-batch → rollback yields per-repo sha256 zero-diff (CI fixture test)
+### Init Wizard (WIZ)
 
-## v2 / Future Requirements
+- [ ] **WIZ-01**: Init auto-detects profile from project fingerprints (package.json, go.mod, Cargo.toml, pyproject.toml, pom.xml, monorepo markers)
+- [ ] **WIZ-02**: TTY-gated confirm picker (`read -r </dev/tty`); non-TTY logs detection, never auto-applies
+- [ ] **WIZ-03**: User can accept detected defaults non-interactively via `--yes`
+- [ ] **WIZ-04**: Wizard offers compliance overlay selection during init
 
-Acknowledged, deferred — not in this roadmap.
+### Docs Refresh (DOCS)
 
-### Plugin (PLUG)
-- **PLUG-F1**: `--pin-sha` resolves all marketplace sources to exact commit SHAs
-- **PLUG-F2**: auto-wire `allowCrossMarketplaceDependenciesOn` when multi-source plugins detected
+- [ ] **DOCS-01**: README rewritten — doctor→init→audit quick start, feature tour covering v0.3–v0.8
+- [ ] **DOCS-02**: Command reference covers every `usage()` subcommand; CI grep gate enforces README coverage
+- [ ] **DOCS-03**: MIGRATION-GUIDE.md + FAILURE-MODES.md synced to current behavior
 
-### Policy (POL)
-- **POL-F1**: `managed-settings.d/` numbered drop-in fragments (composable layered policy)
-- **POL-F2**: `_conjure_source` provenance annotations in emitted managed-settings
-- **POL-F3**: `policyHelper` script generation for dynamic org policy
+## Future Requirements
 
-### Eval (EVAL)
-- **EVAL-F1**: `conjure eval snapshot` local pass/fail baseline for before/after comparison
-- **EVAL-F2**: per-skill trajectory assertion stubs from `allowed-tools` frontmatter
+Deferred to a later release. Tracked but not in current roadmap.
 
-### Schema (SCHM)
-- **SCHM-F1**: `conjure audit --strict` cross-validates `allowed-tools` vs hook `matcher` patterns
-- **SCHM-F2**: schema-table self-update notice from `claude --version` in connected envs
+### Operability
 
-### Workspace (WS)
-- **WS-F1**: `conjure workspace report` — single-pane markdown/JSON health (version/drift/overlay/eval coverage)
-- **WS-F2**: `conjure workspace emit-managed` — union managed-settings across mixed-compliance repos
-- **WS-F3**: `conjure workspace import-mani` — convert a mani/ttal manifest to `.conjure-workspace.json`
-- **WS-F4**: `--jobs N` parallel execution for read-only workspace commands (check/audit/report) only
+- **DOCT-F1**: `conjure doctor --watch` continuous mode
+- **STAT-F1**: Stats trend graphs over time
+
+### Docs
+
+- **DOCS-F1**: Asciicast demo in README
+- **DOCS-F2**: Dedicated docs website
 
 ## Out of Scope
 
-Explicitly excluded (anti-features from research). Documented to prevent scope creep.
+Explicitly excluded. Documented to prevent scope creep.
 
 | Feature | Reason |
 |---------|--------|
-| Merge/replace `conjure publish` + `publish-skill` into one command | Breaking change; conflates skill-PR flow with plugin-manifest generation. Add `publish-plugin` alongside. |
-| Auto-install the plugin after generation | `claude plugin install` needs interactive trust/TTY; out of a non-CC context. Print the command. |
-| `npm publish` as primary distribution | Adds release-pipeline scope. Support npm `source` in marketplace.json; don't run publish. |
-| Auto-deploy MDM artifacts via Jamf/Intune APIs | Requires MDM credentials/tenant IDs Conjure must not handle. Generate artifacts + document deploy. |
-| Claim overlays make a project "compliant" | Compliance needs people/process/BAA. Keep the "reduces non-compliant output" disclaimer. |
-| Auto-detect credential paths by scanning the repo | False-positive + runtime cost. Ship standard per-regime deny patterns; document additions. |
-| Bundle promptfoo as a dependency | Breaks `dependencies:{}`. Shell out to pinned `npx promptfoo`. |
-| Run `conjure eval` on every `audit`/`check` | Real API cost ($0.50–$5/run) would blow CI budgets. Eval is an explicit opt-in subcommand. |
-| Auto-fix schema violations (rewrite settings.json) | Mutation with semantic risk. Emit the correct key/value; user applies. |
-| Refuse to audit on CC version mismatch | Would break CI for most teams. Warn, never hard-fail, on newer-than-known schema. |
-| Runtime-fetch the CC schema table | Violates zero-egress-in-CI. Bundle `lib/cc-schema.json`; update via Conjure release. |
-| Parallel execution of *mutating* workspace commands | Masks partial failures → inconsistent workspace. Serial for mutations; parallel read-only only (WS-F4). |
-| Cross-repo atomic (all-or-nothing) rollback | Distributed-transaction complexity Conjure lacks state for. Per-repo snapshot rollback is the model. |
-| Auto-clone missing repos from manifest git URLs | Credentials/SSH/network out of scope. `workspace init` discovers already-cloned repos. |
-| Native integration with mani/ttal/other repo managers | None has dominant adoption. Accept `--workspace <path>`; offer a one-shot importer (WS-F3). |
+| Network probes in doctor | Zero-egress principle — doctor checks local state only |
+| Central telemetry / egress | Telemetry stays local-only, opt-in, PII-free — trust asset |
+| Auto-install of missing binaries | Doctor hints, never mutates the system — no `curl \| sh` foot-guns |
+| ncurses TUI for any command | Out of envelope; guided line prompts suffice |
+| Remote profile fetching | Profiles ship with the kit; no runtime downloads |
+| Bundling promptfoo | `dependencies: {}` stays empty; pinned `npx` shell-out only |
 
 ## Traceability
 
-Which phases cover which requirements. Populated during roadmap creation.
+Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PLUG-01 | Phase 25 | Complete |
-| PLUG-02 | Phase 25 | Complete |
-| PLUG-03 | Phase 25 | Complete |
-| PLUG-04 | Phase 25 | Complete |
-| PLUG-05 | Phase 25 | Complete |
-| POL-01 | Phase 26 | Complete |
-| POL-02 | Phase 26 | Complete |
-| POL-03 | Phase 26 | Complete |
-| POL-04 | Phase 26 | Complete |
-| POL-05 | Phase 26 | Complete |
-| SCHM-01 | Phase 27 | Complete |
-| SCHM-02 | Phase 27 | Complete |
-| SCHM-03 | Phase 27 | Complete |
-| SCHM-04 | Phase 27 | Complete |
-| SCHM-05 | Phase 27 | Complete |
-| EVAL-01 | Phase 28 | Complete |
-| EVAL-02 | Phase 28 | Complete |
-| EVAL-03 | Phase 28 | Complete |
-| EVAL-04 | Phase 28 | Complete |
-| EVAL-05 | Phase 28 | Complete |
-| WS-01 | Phase 29 | Complete |
-| WS-02 | Phase 29 | Complete |
-| WS-03 | Phase 29 | Complete |
-| WS-04 | Phase 29 | Complete |
-| WS-05 | Phase 30 | Complete |
-| WS-06 | Phase 30 | Complete |
-| WS-07 | Phase 30 | Complete |
+| DEBT-03 | Phase 31 | Pending |
+| DEBT-04 | Phase 31 | Pending |
+| DEBT-05 | Phase 31 | Pending |
+| DEBT-06 | Phase 31 | Pending |
+| UAT-01 | Phase 31 | Pending |
+| UAT-02 | Phase 31 | Pending |
+| UAT-03 | Phase 31 | Pending |
+| DOCT-01 | Phase 32 | Pending |
+| DOCT-02 | Phase 32 | Pending |
+| DOCT-03 | Phase 32 | Pending |
+| DOCT-04 | Phase 32 | Pending |
+| DOCT-05 | Phase 32 | Pending |
+| DOCT-06 | Phase 32 | Pending |
+| STAT-01 | Phase 33 | Pending |
+| STAT-02 | Phase 33 | Pending |
+| STAT-03 | Phase 33 | Pending |
+| STAT-04 | Phase 33 | Pending |
+| STAT-05 | Phase 33 | Pending |
+| STAT-06 | Phase 33 | Pending |
+| STAT-07 | Phase 33 | Pending |
+| EVAL-06 | Phase 34 | Pending |
+| EVAL-07 | Phase 34 | Pending |
+| EVAL-08 | Phase 34 | Pending |
+| EVAL-09 | Phase 34 | Pending |
+| WIZ-01 | Phase 35 | Pending |
+| WIZ-02 | Phase 35 | Pending |
+| WIZ-03 | Phase 35 | Pending |
+| WIZ-04 | Phase 35 | Pending |
+| DOCS-01 | Phase 36 | Pending |
+| DOCS-02 | Phase 36 | Pending |
+| DOCS-03 | Phase 36 | Pending |
 
 **Coverage:**
-- v1 requirements: 27 total (PLUG 5, POL 5, EVAL 5, SCHM 5, WS 7)
-- Mapped to phases: 27 (100%)
-- Unmapped: 0
+- v0.8.0 requirements: 31 total
+- Mapped to phases: 31
+- Unmapped: 0 ✓
 
 ---
-*Requirements defined: 2026-06-03*
-*Last updated: 2026-06-03 — traceability table filled during roadmap creation (Phases 25–30)*
+*Requirements defined: 2026-06-04*
+*Last updated: 2026-06-04 — traceability populated after roadmap creation*
