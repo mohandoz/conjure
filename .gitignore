@@ -17,3 +17,8 @@ build/
 
 # Logs
 *.log
+
+# Claude Code local state — never commit (test-fixture escape guard)
+.claude/settings.json
+.claude/telemetry/
+.claude/worktrees/
