@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.8.0
 milestone_name: Operability + DX
-status: executing
-last_updated: "2026-06-04T16:57:55.156Z"
-last_activity: 2026-06-04 -- Phase 31 execution started
+status: verifying
+last_updated: "2026-06-06T02:06:16.772Z"
+last_activity: 2026-06-06 - Merged phase 31 into main; CI fixes (GNU grep, fixture-escape cleanup)
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 0
-  percent: 0
+  completed_plans: 4
+  percent: 17
 ---
 
 # Project State
@@ -99,6 +99,6 @@ Items carried from v0.7.0 close (2026-06-04):
 
 ## Session Continuity
 
-Last session: 2026-06-04T16:05:44.628Z
+Last session: 2026-06-06T02:06:16.767Z
 Stopped at: Phase 31 context gathered
-Resume file: .planning/phases/31-deferred-debt-test-harness-hardening/31-CONTEXT.md
+Resume file: None
