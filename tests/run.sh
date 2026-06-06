@@ -5254,7 +5254,8 @@ if [ "$P28_EVAL_OK" -eq 1 ]; then
   CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" init "$P28_SKI_DIR" >/dev/null 2>&1 || true
   P28_SKI_COUNT=0
   [ -f "$P28_SKI_DIR/.conjure/eval/promptfooconfig.yaml" ] && \
-    P28_SKI_COUNT="$(grep -c "type: skill-used" "$P28_SKI_DIR/.conjure/eval/promptfooconfig.yaml" 2>/dev/null || printf '0')"
+    P28_SKI_COUNT="$(grep -c "type: skill-used" "$P28_SKI_DIR/.conjure/eval/promptfooconfig.yaml" 2>/dev/null || true)"
+  [ -n "$P28_SKI_COUNT" ] || P28_SKI_COUNT=0
   if [ "$P28_SKI_COUNT" -eq 2 ]; then
     pass "eval init: one skill-used assertion per installed skill (EVAL-01-skills)"
   else
@@ -5279,7 +5280,8 @@ if [ "$P28_EVAL_OK" -eq 1 ]; then
   CONJURE_HOME="$CONJURE_HOME" bash "$P28_EVAL_SH" init "$P28_RUB_DIR" >/dev/null 2>&1 || true
   P28_RUB_COUNT=0
   [ -f "$P28_RUB_DIR/.conjure/eval/promptfooconfig.yaml" ] && \
-    P28_RUB_COUNT="$(grep -c "type: llm-rubric" "$P28_RUB_DIR/.conjure/eval/promptfooconfig.yaml" 2>/dev/null || printf '0')"
+    P28_RUB_COUNT="$(grep -c "type: llm-rubric" "$P28_RUB_DIR/.conjure/eval/promptfooconfig.yaml" 2>/dev/null || true)"
+  [ -n "$P28_RUB_COUNT" ] || P28_RUB_COUNT=0
   if [ "$P28_RUB_COUNT" -ge 1 ]; then
     pass "eval init: llm-rubric assertions present for CLAUDE.md rule lines (EVAL-01-rubrics)"
   else

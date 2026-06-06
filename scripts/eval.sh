@@ -76,11 +76,16 @@ _eval_check_node() {
 # ──────────────────────────────────────────────────────────────────────────────
 _extract_rule_lines() {
   local claude_md="$1"
+  # NOTE (CI fix): the code-fence pattern below must keep its backticks
+  # UNESCAPED. GNU grep parses \` as the buffer-start anchor (the pattern then
+  # matches every line and -v filters ALL output — rubric generation silently
+  # empties, a Linux-CI-only failure); BSD/macOS grep treats \` as a literal
+  # backtick, which masked the bug locally. A plain ``` is portable everywhere.
   grep -v '^[[:space:]]*#' "$claude_md" \
     | grep -v '^[[:space:]]*|' \
     | grep -v '^[[:space:]]*---' \
     | grep -v '^[[:space:]]*===' \
-    | grep -v '^[[:space:]]*\`\`\`' \
+    | grep -v '^[[:space:]]*```' \
     | grep -v '^[[:space:]]*>' \
     | grep -v '^[[:space:]]*$' \
     | grep -v '^[[:space:]]*@' \

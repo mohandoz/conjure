@@ -235,7 +235,9 @@ fi
 
 # Total token estimate
 if [ -d .claude ]; then
-  TOTAL_CHARS=$(find .claude -type f \( -name '*.md' -o -name '*.json' \) -exec cat {} + 2>/dev/null | wc -c | tr -d ' ')
+  # Exclude pristine template snapshots (.conjure-templates-*) — kept only as the
+  # 3-way merge base for `conjure update`; never loaded into Claude's context.
+  TOTAL_CHARS=$(find .claude -name '.conjure-templates-*' -prune -o -type f \( -name '*.md' -o -name '*.json' \) -exec cat {} + 2>/dev/null | wc -c | tr -d ' ')
   EST_TOKENS=$((TOTAL_CHARS / 4))
   if [ "$EST_TOKENS" -lt 15000 ]; then ok ".claude/ token estimate: ~$EST_TOKENS (well-tuned)"
   elif [ "$EST_TOKENS" -lt 25000 ]; then warn ".claude/ token estimate: ~$EST_TOKENS (acceptable, watch for growth)"
